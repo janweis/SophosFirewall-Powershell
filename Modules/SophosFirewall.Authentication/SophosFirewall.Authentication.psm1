@@ -4473,7 +4473,7 @@ function Remove-SfosUser {
         Live-verified (Task Group-B): group membership in this API is NOT stored on
         <UserGroup>/<GroupMembers> - that block is a dead write path. Setting a user's own
         <Group> field and re-reading <UserGroup> afterwards shows <GroupMembers> unchanged; the
-        only entry ever returned is <GroupName>api-user</GroupName><UserName>api-user</UserName>,
+        only entry ever returned names the account the API session itself authenticates as,
         regardless of what was written. Membership actually lives on the User object's own
         <Group> field. The UserList property here is therefore populated by fetching every User
         (one extra API call) and selecting those whose Group equals this group's Name, not by
@@ -5199,8 +5199,8 @@ function Remove-SfosUserGroup {
         does not work. A <Set operation="update"> carrying
         <GroupMembers><GroupName>X</GroupName><UserName>Y</UserName></GroupMembers> answers
         <Status code="200"> but a subsequent <Get><UserGroup></Get> shows no change - the only
-        <GroupMembers> entry ever returned is <GroupName>api-user</GroupName>
-        <UserName>api-user</UserName>, regardless of what was written. Membership actually
+        <GroupMembers> entry ever returned names the account the API session itself
+        authenticates as, regardless of what was written. Membership actually
         lives on the User object's own <Group> field (confirmed the other way too: setting a
         user's <Group> and reading the user back shows the change, and the group's member list
         derived from scanning users - see Get-SfosUserGroup - picks it up immediately).

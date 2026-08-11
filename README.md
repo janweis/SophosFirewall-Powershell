@@ -30,7 +30,7 @@ New-SfosIPHost -Name "Server1" -HostType IP -IPAddress "10.0.0.5"
 | **SophosFirewall.Firewall** | 21 | Firewall rules and rule groups, NAT rules, SSL/TLS inspection |
 | **SophosFirewall.Network** | 100 | Interfaces, VLANs, zones, gateways, DNS, DHCP, ARP, tunnels |
 | **SophosFirewall.Authentication** | 97 | Authentication servers, users and groups, guest and clientless users, one-time passwords, firewall/admin/VPN/web authentication, captive portal, Azure AD SSO, STAS, live users |
-| **SophosFirewall.Routing** | 31 | Gateways and health checks, SD-WAN profiles and policy routes, unicast and multicast routing, PIM |
+| **SophosFirewall.Routing** | 31 | Gateways and health checks, SD-WAN profiles and policy routes, static (unicast) and multicast routes, PIM |
 
 361 cmdlets in total. Every one of them was called against a live SFOS 22.0 appliance, not
 only against mocks — the firmware behaviour that differs from the vendor documentation is
@@ -44,7 +44,7 @@ recorded in the `.NOTES` of the affected function and summarised in each module 
 - [SophosFirewall.Firewall README](Modules/SophosFirewall.Firewall/README.md) - Firewall, NAT and TLS inspection rules; read the safety notes before using the write cmdlets
 - [SophosFirewall.Network README](Modules/SophosFirewall.Network/README.md) - Interfaces, zones, gateways, DNS and DHCP; a wrong write here can cut off the API path used to fix it
 - [SophosFirewall.Authentication README](Modules/SophosFirewall.Authentication/README.md) - Who may log in and how; read the known limitations before using the write cmdlets
-- [SophosFirewall.Routing README](Modules/SophosFirewall.Routing/README.md) - Gateways, SD-WAN and routes; a wrong route can cut off the management path
+- [SophosFirewall.Routing README](Modules/SophosFirewall.Routing/README.md) - Gateways, SD-WAN and static routes (the API calls them UnicastRoute); a wrong route can cut off the management path
 
 ## Key Features
 

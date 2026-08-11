@@ -1,6 +1,6 @@
 @{
     RootModule           = 'SophosFirewall.Authentication.psm1'
-    ModuleVersion        = '1.0.0'
+    ModuleVersion        = '1.0.1'
     GUID                 = '3c25abfe-0eba-4bc1-831a-d35445a2fd9f'
     Author               = 'Jan Weis'
     Description          = 'PowerShell module for managing authentication servers, users, groups, guest users, one-time passwords, captive portal and SSO on Sophos XGS / SFOS 22.0 firewalls via API.'
@@ -123,7 +123,7 @@
             Tags         = @('Sophos', 'Firewall', 'API', 'XGS', 'SFOS', 'Authentication', 'LDAP', 'RADIUS', 'OTP', 'SSO')
             LicenseUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/blob/main/Modules/SophosFirewall.Authentication/LICENSE.txt'
             ProjectUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/tree/main/Modules/SophosFirewall.Authentication'
-            ReleaseNotes = 'Initial release of the Authentication module for Sophos Firewall API management.'
+            ReleaseNotes = 'Documentation only.'
         }
     }
 }

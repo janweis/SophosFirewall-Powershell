@@ -616,7 +616,7 @@ Describe 'New-SfosWebFilterPolicyRule -InputObject' {
     # Without -InputObject every omitted parameter takes its default, so rebuilding a rule to
     # change one field also resets Schedule and the enabled flags. Editing an existing rule
     # has to leave everything else alone - same reasoning as the NetworkPolicy subtree in
-    # SophosFirewall.Firewall (CLAUDE.md section 5).
+    # SophosFirewall.Firewall (the project build rules, section 5).
 
     BeforeAll {
         $script:baseRule = [PSCustomObject]@{

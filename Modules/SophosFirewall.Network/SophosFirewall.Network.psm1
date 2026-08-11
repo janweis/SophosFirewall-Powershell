@@ -120,10 +120,10 @@
 # sibling elements next to it, not children of it [live]. The New-SfosInterfaceIPv4Configuration
 # / New-SfosInterfaceIPv6Configuration / New-SfosInterfaceMSSConfiguration builders below group
 # these fields into one PowerShell object purely for ergonomics and for the InputObject-merge
-# pattern CLAUDE.md section 5 requires; ConvertTo-SfosInterfaceXml flattens that object
+# pattern the project build rules, section 5 requires; ConvertTo-SfosInterfaceXml flattens that object
 # back into sibling XML elements to match the wire format.
 #
-# Update replaces the whole entity (CLAUDE.md section 5) - this is
+# Update replaces the whole entity (the project build rules, section 5) - this is
 # the single most dangerous property of this entity, because the fields it can silently clear
 # are the ones that keep the session connected. Set-SfosInterface therefore always reads the
 # current interface first (Get-SfosInterface -HardwareLike, exact-matched) and, for every field
@@ -137,7 +137,7 @@
 # FEC off") [live], explicitly marked read-only in the vendor sample XML ("this tag is only read
 # purpose"). It is returned by Get-SfosInterface but never sent by Set-SfosInterface.
 # <InterfaceStatus> (ON/OFF, [live]) is the separate, writable admin up/down field - this is the
-# CLAUDE.md section 5 Status/InterfaceStatus distinction, and Core's status parsing does
+# the project build rules, section 5 Status/InterfaceStatus distinction, and Core's status parsing does
 # not confuse either with an API status because neither carries a code attribute and both sit
 # under a node that has a <Name>.
 #
@@ -162,7 +162,7 @@
     Get-SfosInterface) as a base; only parameters the caller explicitly passes override the
     base, every other field is copied from -InputObject unchanged - the same InputObject-merge
     pattern as New-SfosFirewallRuleNetworkPolicy in SophosFirewall.Firewall, required here by
-    CLAUDE.md section 5 because a default-filled object handed to Set-SfosInterface would
+    the project build rules, section 5 because a default-filled object handed to Set-SfosInterface would
     silently reset every field a caller did not think to repeat.
 
 .PARAMETER InputObject
@@ -251,7 +251,7 @@ function New-SfosInterfaceIPv4Configuration {
     # PSAvoidUsingUsernameAndPasswordParams is suppressed on purpose: -Username/-Password here
     # are the PPPoE credential fields the Interface entity's own XML schema defines [doc], not
     # this module's API authentication (that pair is Firewall/Port/Username/Password further
-    # down and is typed SecureString for Password, per CLAUDE.md section 4). Renaming these two
+    # down and is typed SecureString for Password, per the project build rules, section 4). Renaming these two
     # to avoid the analyzer would break the 1:1 mapping to the wire element names.
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingUsernameAndPasswordParams', '')]
     [CmdletBinding()]
@@ -630,7 +630,7 @@ function ConvertTo-SfosInterfaceXml {
 
 .PARAMETER HardwareLike
     Optional Hardware (port name) filter, substring match, sent as the server-side pre-filter
-    and re-applied client-side (CLAUDE.md section 6).
+    and re-applied client-side (the project build rules, section 6).
 
 .PARAMETER NameLike
     Optional descriptive Name filter, substring match, applied client-side only.
@@ -810,7 +810,7 @@ function Get-SfosInterface {
     Updates a physical Interface using the Sophos Firewall XML API. There is no create or
     delete for this entity - physical ports are fixed hardware. Reads the current interface
     first and resends every field, overriding only what the caller explicitly passed
-    (read-modify-write, CLAUDE.md section 5) - IPv4Configuration,
+    (read-modify-write, the project build rules, section 5) - IPv4Configuration,
     IPv6Configuration and MSS are resent as complete objects when not explicitly overridden, so
     a single-field change (for example -MTU only) cannot drop the interface's IP assignment.
     Supports ShouldProcess; use -WhatIf to preview.
@@ -1041,7 +1041,7 @@ function Set-SfosInterface {
 #    answer Code 501 "Configuration parameters validation failed." with
 #    <InvalidParams><Params>/VLAN/IPv6Assignment</Params></InvalidParams> [live, reproduced twice].
 #    New-/Set-SfosVLAN therefore always substitute 'Static' when the value to send would otherwise be
-#    empty - a case CLAUDE.md section 5's read-modify-write pattern does not by itself cover, because
+#    empty - a case the project build rules, section 5's read-modify-write pattern does not by itself cover, because
 #    here what Get returns is not valid to send back unchanged.
 #
 # A third, non-fatal finding: <IPv4Configuration> defaults to 'Disable' when omitted even if
@@ -1058,7 +1058,7 @@ function Set-SfosInterface {
 
 .DESCRIPTION
     Centralizes the VLAN XML shape so New- and Set-SfosVLAN send an identical, complete entity
-    body. SFOS replaces the whole entity on <Set operation="update"> (CLAUDE.md section 5); the
+    body. SFOS replaces the whole entity on <Set operation="update"> (the project build rules, section 5); the
     caller merges in every field to keep before calling this function.
 
 .PARAMETER Operation
@@ -1152,11 +1152,11 @@ function ConvertTo-SfosVLANXml {
 .DESCRIPTION
     Queries the Sophos Firewall XML API for VLAN sub-interface objects. By default returns
     PowerShell-friendly objects; use -AsXml for the raw XML nodes. Tolerates an empty result
-    ("No. of records Zero.", CLAUDE.md section 5) and returns an empty array.
+    ("No. of records Zero.", the project build rules, section 5) and returns an empty array.
 
 .PARAMETER NameLike
     Optional Name filter, substring match, sent as the server-side pre-filter and re-applied
-    client-side (CLAUDE.md section 6).
+    client-side (the project build rules, section 6).
 
 .PARAMETER InterfaceLike
     Optional carrier-Interface filter, substring match, applied client-side only.
@@ -1462,7 +1462,7 @@ function New-SfosVLAN {
 .DESCRIPTION
     Updates a VLAN using the Sophos Firewall XML API. Reads the current VLAN first and resends
     every field, overriding only what the caller explicitly passed (read-modify-write,
-    CLAUDE.md section 5). Supports ShouldProcess; use -WhatIf to preview.
+    the project build rules, section 5). Supports ShouldProcess; use -WhatIf to preview.
 
 .PARAMETER Interface
     Physical carrier port identifying the VLAN together with -VLANID, for example 'Port1'.
@@ -1656,7 +1656,7 @@ function Set-SfosVLAN {
     zznetA-VLAN-Test4/Port1.996: two separate remove-by-Name and remove-by-Interface+VLANID
     calls, each a false-success, then a remove-by-Hardware call that actually deleted the
     object and turned the next Get into "No. of records Zero."]. This is a worse case than the
-    known Remove-Sfos* defect class in CLAUDE.md's "Still open" table (removing a
+    known Remove-Sfos* defect class in the project build rules' "Still open" table (removing a
     non-existent object there at least reports a firewall error) - here the wrong key
     silently reports success and does nothing. Because of that, this cmdlet resolves Hardware
     via Get-SfosVLAN first and, after the remove call, re-reads the object and throws if it is
@@ -1808,7 +1808,7 @@ function Remove-SfosVLAN {
 #    IPv6Assignment-must-not-be-empty defect, the same class of surprise is plausible here too,
 #    but nothing below is marked [live] as a result - there was no approved way to check it.
 #    A caller relying on Set-/Remove-SfosLAG should re-verify against a real LAG before trusting
-#    it, exactly as CLAUDE.md section 10 asks: a mocked/unverified suite proves what the module
+#    it, exactly as the project build rules, section 10 asks: a mocked/unverified suite proves what the module
 #    sends, never what the firewall does.
 #
 # <Hardware> here IS a client-supplied field (unlike VLAN, where the firewall computes it) -
@@ -1880,7 +1880,7 @@ function New-SfosLAGMSSConfiguration {
 
 .DESCRIPTION
     Centralizes the LAG XML shape so New- and Set-SfosLAG send an identical, complete entity
-    body (CLAUDE.md section 5 read-modify-write). Never executed against a live firewall - see
+    body (the project build rules, section 5 read-modify-write). Never executed against a live firewall - see
     the region header comment.
 
 .PARAMETER Operation
@@ -1959,7 +1959,7 @@ function ConvertTo-SfosLAGXml {
 .DESCRIPTION
     Queries the Sophos Firewall XML API for LAG (Link Aggregation Group) objects. By default
     returns PowerShell-friendly objects; use -AsXml for the raw XML nodes. Tolerates an empty
-    result (CLAUDE.md section 5).
+    result (the project build rules, section 5).
 
     RISK: RED IN PRACTICE. Not run against the live firewall for this module - see the region
     header comment; net-live-LAG.xml already recorded "No. of records Zero." before this
@@ -1967,7 +1967,7 @@ function ConvertTo-SfosLAGXml {
 
 .PARAMETER NameLike
     Optional Name filter, substring match, sent as the server-side pre-filter and re-applied
-    client-side (CLAUDE.md section 6).
+    client-side (the project build rules, section 6).
 
 .PARAMETER HardwareLike
     Optional Hardware (LAG interface name) filter, substring match, applied client-side only.
@@ -2282,7 +2282,7 @@ function New-SfosLAG {
 .DESCRIPTION
     Updates a LAG using the Sophos Firewall XML API. Reads the current LAG first and resends
     every field, overriding only what the caller explicitly passed (read-modify-write,
-    CLAUDE.md section 5). Supports ShouldProcess; use -WhatIf to preview.
+    the project build rules, section 5). Supports ShouldProcess; use -WhatIf to preview.
 
     RISK: RED IN PRACTICE. Never executed against the live firewall. XML verified only.
 
@@ -2572,7 +2572,7 @@ function Remove-SfosLAG {
 # <MSS><Override>.../><MSSValue>...</MSS> - "Override", NOT "OverrideMSS" as on
 # Interface/VLAN/LAG. This module trusts the doc sample's literal spelling for BridgePair and
 # does not assume the two entities share a field name just because they share a concept - the
-# same caution CLAUDE.md's <CountryHostGroup> story is about. New-SfosBridgePairMSSConfiguration
+# same caution the project build rules' <CountryHostGroup> story is about. New-SfosBridgePairMSSConfiguration
 # below is therefore a distinct function/object shape from New-SfosInterfaceMSSConfiguration
 # and New-SfosLAGMSSConfiguration, not a shared one.
 
@@ -2641,7 +2641,7 @@ function New-SfosBridgePairMSSConfiguration {
 
 .DESCRIPTION
     Centralizes the BridgePair XML shape so New- and Set-SfosBridgePair send an identical,
-    complete entity body (CLAUDE.md section 5 read-modify-write). Never executed against a
+    complete entity body (the project build rules, section 5 read-modify-write). Never executed against a
     live firewall - see the region header comment.
 
 .PARAMETER Operation
@@ -2752,14 +2752,14 @@ function ConvertTo-SfosBridgePairXml {
 .DESCRIPTION
     Queries the Sophos Firewall XML API for BridgePair objects. By default returns
     PowerShell-friendly objects; use -AsXml for the raw XML nodes. Tolerates an empty result
-    (CLAUDE.md section 5).
+    (the project build rules, section 5).
 
     RISK: RED IN PRACTICE. Not run against the live firewall for this module - see the region
     header comment; net-live-BridgePair.xml already recorded "No. of records Zero.".
 
 .PARAMETER NameLike
     Optional Name filter, substring match, sent as the server-side pre-filter and re-applied
-    client-side (CLAUDE.md section 6).
+    client-side (the project build rules, section 6).
 
 .PARAMETER HardwareLike
     Optional Hardware (bridge interface name) filter, substring match, applied client-side only.
@@ -3056,7 +3056,7 @@ function New-SfosBridgePair {
 .DESCRIPTION
     Updates a BridgePair using the Sophos Firewall XML API. Reads the current object first and
     resends every field, overriding only what the caller explicitly passed (read-modify-write,
-    CLAUDE.md section 5). Supports ShouldProcess; use -WhatIf to preview.
+    the project build rules, section 5). Supports ShouldProcess; use -WhatIf to preview.
 
     RISK: RED IN PRACTICE. Never executed against the live firewall. XML verified only.
 
@@ -3340,11 +3340,11 @@ function Remove-SfosBridgePair {
 #    correctly showed "No. of records Zero." afterward.
 #
 #    <Interface> is NOT a usable server-side filter key, though - <Get> with
-#    <key name="Interface" criteria="like"> does not return "every object" the way CLAUDE.md
+#    <key name="Interface" criteria="like"> does not return "every object" the way the project build rules
 #    section 6 describes for merely-ignored unsupported keys; it answers
 #    <Status>Transaction fail</Status> instead, a harder failure than an ignored filter. Because
 #    Get-SfosAlias's Assert-SfosApiReturnSuccess call would otherwise throw on that status (a
-#    code-less status is not "No. of records Zero.", so CLAUDE.md's own empty-result exception
+#    code-less status is not "No. of records Zero.", so the project build rules' own empty-result exception
 #    does not apply), the server-side pre-filter here uses "Name", not "Interface", and
 #    -InterfaceLike is client-side only.
 #
@@ -3357,7 +3357,7 @@ function Remove-SfosBridgePair {
 
 .DESCRIPTION
     Centralizes the Alias XML shape so New- and Set-SfosAlias send an identical, complete
-    entity body (CLAUDE.md section 5 read-modify-write).
+    entity body (the project build rules, section 5 read-modify-write).
 
 .PARAMETER Operation
     'add' or 'update', passed straight to <Set operation="...">.
@@ -3408,11 +3408,11 @@ function ConvertTo-SfosAliasXml {
 .DESCRIPTION
     Queries the Sophos Firewall XML API for interface Alias objects (secondary IP addresses on
     a physical port). By default returns PowerShell-friendly objects; use -AsXml for the raw
-    XML nodes. Tolerates an empty result (CLAUDE.md section 5).
+    XML nodes. Tolerates an empty result (the project build rules, section 5).
 
 .PARAMETER NameLike
     Optional Name filter, substring match, sent as the server-side pre-filter and re-applied
-    client-side (CLAUDE.md section 6). Name is the firewall-computed "<Interface>:<Index>"
+    client-side (the project build rules, section 6). Name is the firewall-computed "<Interface>:<Index>"
     identifier (region header comment), so filtering by a port name like 'Port1' matches every
     alias on that port.
 
@@ -3659,7 +3659,7 @@ function New-SfosAlias {
     Updates an interface Alias using the Sophos Firewall XML API. Reads the current Alias
     first (identified by -Name, the firewall-computed "<Interface>:<Index>" identifier - region
     header comment) and resends every field, overriding only what the caller explicitly passed
-    (read-modify-write, CLAUDE.md section 5). Supports ShouldProcess; use -WhatIf to preview.
+    (read-modify-write, the project build rules, section 5). Supports ShouldProcess; use -WhatIf to preview.
 
 .PARAMETER Name
     The Alias's Name, for example 'Port1:0', as returned by Get-SfosAlias. Mandatory; accepts
@@ -3896,7 +3896,7 @@ function Remove-SfosAlias {
 #
 # Doc folder WWAN, wire element <CellularWAN> [live] - confirmed via a live Get, which answers
 # with real data (Action, DisconnectOnSystemDown) rather than a 529, unlike a <WWAN> root which
-# would trip CLAUDE.md's "wrong root element" trap.
+# would trip the project build rules' "wrong root element" trap.
 #
 # Singleton, live-confirmed: a Get returns exactly one <CellularWAN> node with no <Name>, the
 # same shape as SSLTLSInspectionSettings in SophosFirewall.Firewall. There is no create or
@@ -4021,7 +4021,7 @@ function Get-SfosCellularWAN {
 .DESCRIPTION
     Updates the CellularWAN singleton using the Sophos Firewall XML API. This cmdlet reads
     the current settings first and resends every field, overriding only what the caller
-    explicitly passes (read-modify-write - CLAUDE.md section 5: an update replaces the whole
+    explicitly passes (read-modify-write - the project build rules, section 5: an update replaces the whole
     entity, and every field this cmdlet does not send would be reset). This cmdlet supports
     ShouldProcess; use -WhatIf to preview the change.
 
@@ -4792,7 +4792,7 @@ function Remove-SfosIPTunnel {
 .PARAMETER NameLike
     Optional name filter (matched against TunnelName). In Sophos SFOS, 'like' behaves as a
     substring match. Sent to the firewall as the server-side filter, then re-applied
-    client-side (CLAUDE.md section 6: only the first key of the first filter is evaluated
+    client-side (the project build rules, section 6: only the first key of the first filter is evaluated
     server-side, and this module never relies on that alone).
 
 .PARAMETER Firewall
@@ -5337,8 +5337,8 @@ function Remove-SfosGreTunnel {
 #
 # The vendor's own operation page documents this entity's <Set operation="..."> attribute as
 # taking 'add' or 'del' [doc] - not this module's usual 'add'/'update' convention, and 'del'
-# rather than the <Remove> tag CLAUDE.md documents as the norm elsewhere. This is the same
-# class of exception CLAUDE.md already calls out for operation="edit" - the wire behaviour, not
+# rather than the <Remove> tag the project build rules documents as the norm elsewhere. This is the same
+# class of exception the project build rules already calls out for operation="edit" - the wire behaviour, not
 # the module-wide convention, wins when the two disagree. Remove-SfosGreRoute therefore uses
 # <Set operation="del"> rather than <Remove>. No 'update' operation is documented for this
 # entity at all (route entries are conceptually add-or-remove, not edit-in-place), so
@@ -5356,7 +5356,7 @@ function Remove-SfosGreTunnel {
 
 .PARAMETER TunnelNameLike
     Optional tunnel name filter. In Sophos SFOS, 'like' behaves as a substring match. Sent to
-    the firewall as the server-side filter, then re-applied client-side (CLAUDE.md section 6:
+    the firewall as the server-side filter, then re-applied client-side (the project build rules, section 6:
     only the first key of the first filter is evaluated server-side, and this module never
     relies on that alone).
 
@@ -5823,7 +5823,7 @@ function Remove-SfosGreRoute {
 # touching Port1/2/3: <Set operation="add"><TAP><Hardware>zznetB-fake</Hardware>...</TAP></Set>
 # answered <Status code="200">Configuration applied successfully.</Status>, but a follow-up Get
 # still showed "No. of records Zero." [live] - the firewall reports success while doing
-# nothing for a Hardware value it cannot resolve. This is the same class of defect CLAUDE.md
+# nothing for a Hardware value it cannot resolve. This is the same class of defect the project build rules
 # already documents elsewhere (a write reporting success while the firewall did nothing) and is
 # called out again here because it means a 200 from this specific Add/Set call is not
 # sufficient evidence of a real change - a caller should always re-Get to confirm.
@@ -5849,7 +5849,7 @@ function Remove-SfosGreRoute {
 .PARAMETER HardwareLike
     Optional hardware interface name filter. In Sophos SFOS, 'like' behaves as a substring
     match. Sent to the firewall as the server-side filter, then re-applied client-side
-    (CLAUDE.md section 6: only the first key of the first filter is evaluated server-side, and
+    (the project build rules, section 6: only the first key of the first filter is evaluated server-side, and
     this module never relies on that alone).
 
 .PARAMETER Firewall
@@ -6335,7 +6335,7 @@ function Remove-SfosTAP {
 # leaves UserPolicy/HTTPBasedPolicy unimplemented rather than guessing at their shape):
 # Certificate (Cert/Key/CA), SwitchSettings/LANPortSettings (RED50-specific port config), and
 # NetworkSetting's StandardSplit/TransparentSplit network and domain lists. Get-SfosREDDevice
-# would need to expose all of these for a Set-* to preserve them safely (CLAUDE.md section 5),
+# would need to expose all of these for a Set-* to preserve them safely (the project build rules, section 5),
 # so leaving them unimplemented is safer than a partial, unverified read-modify-write over
 # nested lists this task could not observe populated even once.
 
@@ -6350,7 +6350,7 @@ function Remove-SfosTAP {
 
 .PARAMETER BranchNameLike
     Optional branch name filter. In Sophos SFOS, 'like' behaves as a substring match. Sent to
-    the firewall as the server-side filter, then re-applied client-side (CLAUDE.md section 6:
+    the firewall as the server-side filter, then re-applied client-side (the project build rules, section 6:
     only the first key of the first filter is evaluated server-side, and this module never
     relies on that alone).
 
@@ -7107,7 +7107,7 @@ function Remove-SfosREDDevice {
 
 .PARAMETER NameLike
     Optional name filter. In Sophos SFOS, 'like' behaves as a substring match. Sent to the
-    firewall as the server-side filter, then re-applied client-side (CLAUDE.md section 6: only
+    firewall as the server-side filter, then re-applied client-side (the project build rules, section 6: only
     the first key of the first filter is evaluated server-side, and this module never relies
     on that alone).
 
@@ -7603,7 +7603,7 @@ function Remove-SfosWiFi6Interface {
 # a server-side Filter with key name="Name" criteria="like" was measured to return a correct
 # substring match [live]; a Filter with key name="Type" was measured to return ZERO records
 # instead of the full table [live] - a different failure mode than the "unsupported key
-# returns everything" behaviour documented in CLAUDE.md section 6 for other entities. Because
+# returns everything" behaviour documented in the project build rules, section 6 for other entities. Because
 # of that, -TypeLike below is applied client-side only and is never sent to the firewall.
 
 <#
@@ -7705,8 +7705,7 @@ function ConvertTo-SfosZoneApplianceAccessXml {
 
 .PARAMETER NameLike
     Optional name filter, substring match. Sent to the firewall as the server-side filter
-    (measured to work correctly for Zone [live]), then re-applied client-side per CLAUDE.md
-    section 6.
+    (measured to work correctly for Zone [live]), then re-applied client-side per the project build rules, section 6.
 
 .PARAMETER TypeLike
     Optional Type filter, substring match, applied client-side only. A server-side Filter
@@ -8010,7 +8009,7 @@ function New-SfosZone {
 
 .DESCRIPTION
     Updates a Zone object using the Sophos Firewall XML API. SFOS replaces the whole entity
-    on <Set operation="update"> (CLAUDE.md section 5): this cmdlet reads the current zone
+    on <Set operation="update"> (the project build rules, section 5): this cmdlet reads the current zone
     first and resends every field, overriding only what the caller explicitly passed
     (ContainsKey, not a truthiness test) so fields the caller did not touch survive the
     update unchanged - this matters most for ApplianceAccess, whose five sub-groups would
@@ -8252,7 +8251,7 @@ function Remove-SfosZone {
 # firewall. Get-SfosGatewayConfiguration was run live and read the container correctly.
 #
 # Root element is <GatewayConfiguration>, not <Gateway> - the folder/element name mismatch
-# documented in CLAUDE.md and the element-name table in CLAUDE.md. The list entries inside it are named
+# documented in the project build rules and the element-name table in the project build rules. The list entries inside it are named
 # <Gateway> [live] (net-live-GatewayConfiguration.xml).
 #
 # The vendor operations page for this entity documents only "Update Gateway" - there is no
@@ -8268,7 +8267,7 @@ function Remove-SfosZone {
 # (SophosFirewall.Firewall's SSLTLSInspectionSettings).
 #
 # GatewayConfiguration is a container, not a plain singleton: besides GatewayFailoverTimeout it
-# holds a whole Gateway list, and SFOS replaces the ENTIRE container on update (CLAUDE.md
+# holds a whole Gateway list, and SFOS replaces the ENTIRE container on update (the project build rules
 # section 5) - an update that resends GatewayFailoverTimeout but omits the Gateway list, or
 # sends an incomplete Gateway entry missing Weight/Type/FailOverRules, would delete the
 # default route. Set-SfosGatewayConfiguration therefore always reads the current
@@ -8404,7 +8403,7 @@ function Get-SfosGatewayConfiguration {
 .DESCRIPTION
     Same precedence rule as SophosFirewall.Firewall's
     Resolve-SfosNetworkPolicyFieldValue, reimplemented locally because domain modules do not
-    share private helpers with each other (CLAUDE.md section 1: a domain module has no
+    share private helpers with each other (the project build rules, section 1: a domain module has no
     dependency on anything but Core): an explicitly bound parameter always wins; otherwise,
     when a base object is available (-InputObject), that base's value is kept; otherwise the
     parameter's own (default) value is used.
@@ -8596,7 +8595,7 @@ function New-SfosGatewayConfigurationGateway {
     and the full Gateway list (same shape Get-SfosGatewayConfiguration/
     New-SfosGatewayConfigurationGateway use) and emits a complete <GatewayConfiguration>
     body, including every gateway's Weight/Type/FailOverRules - SFOS replaces the whole
-    container on update (CLAUDE.md section 5), so the caller is responsible for having
+    container on update (the project build rules, section 5), so the caller is responsible for having
     already merged in every gateway entry it wants preserved.
 
 .PARAMETER GatewayFailoverTimeout
@@ -8676,7 +8675,7 @@ function ConvertTo-SfosGatewayConfigurationXml {
     Updates the GatewayConfiguration container using the Sophos Firewall XML API. This
     cmdlet reads the current configuration first and resends the complete Gateway list -
     every field of every entry, including Weight, Type and the nested FailOverRules -
-    overriding only what the caller explicitly passed (read-modify-write, CLAUDE.md section
+    overriding only what the caller explicitly passed (read-modify-write, the project build rules, section
     5). GatewayFailoverTimeout and the Gateway list are independent: passing one does not
     require passing the other.
 
@@ -8784,14 +8783,14 @@ function Set-SfosGatewayConfiguration {
 # ARPConfiguration per firewall, with no Name and no create/delete operation [doc/live],
 # the same shape as SophosFirewall.Firewall's SSLTLSInspectionSettings.
 #
-# Root element is <ARPConfiguration>, matching the element-name table in CLAUDE.md (folder ARPNeighbour,
+# Root element is <ARPConfiguration>, matching the element-name table in the project build rules (folder ARPNeighbour,
 # element ARPConfiguration). Fully live-verified: baseline read
 # (ARPCacheEntryTimeOut=10, LogPossibleARPPoisoningAttempts=Disable), a full round trip
 # (change ARPCacheEntryTimeOut to 15, verify, restore to 10, verify - both restored to the
 # exact original values), and a read-modify-write necessity check (set
 # LogPossibleARPPoisoningAttempts=Enable, then send an update carrying only
 # ARPCacheEntryTimeOut with no Log element at all - the omitted field silently reset to
-# 'Disable', confirming CLAUDE.md section 5's whole-entity-replace rule applies even to this
+# 'Disable', confirming the project build rules, section 5's whole-entity-replace rule applies even to this
 # two-field singleton). State was restored to the original baseline and reverified after
 # each test.
 
@@ -9015,7 +9014,7 @@ function Set-SfosARPConfiguration {
 #     InvalidParams=/StaticARP/Interface [live].
 #   - A 'Name'/'neighname' element is accepted without complaint but never appears in the Get
 #     response - entries created with no Name-like element at all succeed identically [live].
-#     Per CLAUDE.md section 5 ("a field a Get-* does not expose is impossible to preserve"),
+#     Per the project build rules, section 5 ("a field a Get-* does not expose is impossible to preserve"),
 #     no Name parameter is exposed by this module: the live wire shape is
 #     IPFamily/IPAddress/MACAddress/Interface/AddAsATrustedMACAddress only.
 #   - AddAsATrustedMACAddress is documented "Only 'Enable' allowed", but a live Get after
@@ -9040,8 +9039,7 @@ function Set-SfosARPConfiguration {
 
 .PARAMETER IPAddressLike
     Optional IPAddress filter, substring match. Sent to the firewall as the server-side
-    filter (measured to work correctly [live]), then re-applied client-side per CLAUDE.md
-    section 6.
+    filter (measured to work correctly [live]), then re-applied client-side per the project build rules, section 6.
 
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
@@ -9929,7 +9927,7 @@ function New-SfosRouterAdvertisement {
 
 .DESCRIPTION
     Updates the Router Advertisement configuration for an interface. SFOS replaces the whole
-    entity on <Set operation="update"> (CLAUDE.md section 5): this cmdlet reads the current
+    entity on <Set operation="update"> (the project build rules, section 5): this cmdlet reads the current
     configuration first and resends every field, overriding only what the caller explicitly
     passed (ContainsKey, not a truthiness test) - in particular the whole PrefixList, which
     a partial update would otherwise silently drop.
@@ -10212,8 +10210,8 @@ function Remove-SfosRouterAdvertisement {
 # The entity has three independent subtrees (IPv4Settings, IPv6Settings, DNSQueryConfiguration).
 # SFOS replaces the whole entity on <Set operation="update">, so Set-SfosDNS reads the current
 # object first and always re-sends all three subtrees complete - never a partial IPv4Settings or
-# IPv6Settings, because a partial subtree would clear whatever field it omits (CLAUDE.md
-# section 5, CLAUDE.md section 5). Two small builders (New-SfosDNSIPv4Settings,
+# IPv6Settings, because a partial subtree would clear whatever field it omits (the project build rules
+# section 5, the project build rules, section 5). Two small builders (New-SfosDNSIPv4Settings,
 # New-SfosDNSIPv6Settings) exist for the same reason ConvertTo-SfosFirewallRuleNetworkPolicyXml's
 # sibling builder exists in SophosFirewall.Firewall: a subtree has several fields, an
 # -InputObject plus ValueFromPipeline lets a caller change one field of an existing subtree
@@ -10293,7 +10291,7 @@ function New-SfosDNSIPv4Settings {
     # PSUseSingularNouns is suppressed on purpose. 'IPv4Settings' is not a plural container
     # here but the name of the wire subtree itself (<IPv4Settings> under <DNS>) - the same
     # reasoning Get-SfosSSLTLSInspectionSettings uses in SophosFirewall.Firewall for
-    # 'SSLTLSInspectionSettings'. CLAUDE.md section 3 puts the Sophos spelling above
+    # 'SSLTLSInspectionSettings'. the project build rules, section 3 puts the Sophos spelling above
     # PowerShell habit.
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '')]
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '')]
@@ -11039,7 +11037,7 @@ function ConvertTo-SfosDNSHostEntryXml {
     This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user
     input. Server-side filtering on the key "HostName" was tested live [live] - see the
     fragment report for whether it actually narrowed the result set. Every filter is re-applied
-    client-side regardless (CLAUDE.md section 6), so the result is correct either way.
+    client-side regardless (the project build rules, section 6), so the result is correct either way.
 
 .LINK
     https://docs.sophos.com/nsg/sophos-firewall/22.0/api/CONFIGURE/Network/DNSHostEntry/DNSHostEntry.html
@@ -11233,8 +11231,7 @@ function New-SfosDNSHostEntry {
 
 .DESCRIPTION
     Updates a DNSHostEntry using the Sophos Firewall XML API. Reads the current object first
-    and resends every field, overriding only what the caller explicitly passes (CLAUDE.md
-    section 5: SFOS replaces the whole entity on update).
+    and resends every field, overriding only what the caller explicitly passes (the project build rules, section 5: SFOS replaces the whole entity on update).
 
 .PARAMETER HostName
     Host name identifying the entry to update.
@@ -11428,7 +11425,7 @@ function Remove-SfosDNSHostEntry {
 
 .DESCRIPTION
     Adds one or more Address entries to the AddressList of a DNSHostEntry, preserving the
-    entries already present (SFOS replaces the whole list on update - CLAUDE.md section 5).
+    entries already present (SFOS replaces the whole list on update - the project build rules, section 5).
     Throws if the resulting list would exceed the documented maximum of 8 addresses.
 
 .PARAMETER HostName
@@ -11785,7 +11782,7 @@ function ConvertTo-SfosDNSRequestRouteXml {
     This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user
     input. Server-side filtering on the key "DomainName" was tested live [live] - see the
     fragment report for whether it actually narrowed the result set. Every filter is re-applied
-    client-side regardless (CLAUDE.md section 6), so the result is correct either way.
+    client-side regardless (the project build rules, section 6), so the result is correct either way.
 
     [live, measured] Each TargetServers entry is the name of an existing IPHost object, not a
     raw IP address - the Sophos documentation's "You can also add IP Address from this page"
@@ -11957,7 +11954,7 @@ function New-SfosDNSRequestRoute {
 .DESCRIPTION
     Updates a DNSRequestRoute using the Sophos Firewall XML API. Reads the current object
     first and resends every field, overriding only what the caller explicitly passes
-    (CLAUDE.md section 5).
+    (the project build rules, section 5).
 
 .PARAMETER DomainName
     Domain name identifying the route to update.
@@ -12144,7 +12141,7 @@ function Remove-SfosDNSRequestRoute {
 
 .DESCRIPTION
     Adds one or more target servers to the TargetServers list of a DNSRequestRoute, preserving
-    the entries already present (SFOS replaces the whole list on update - CLAUDE.md section 5).
+    the entries already present (SFOS replaces the whole list on update - the project build rules, section 5).
     Throws if the resulting list would exceed the documented maximum of 8 servers.
 
 .PARAMETER DomainName
@@ -12571,7 +12568,7 @@ function Get-SfosDynamicDNS {
 
 .PARAMETER DDNSPassword
     DDNS account password, up to 120 characters [doc]. Passed as plain text into the request
-    body like every other field in this API (CLAUDE.md section 5) - there is no separate
+    body like every other field in this API (the project build rules, section 5) - there is no separate
     credential channel for this operation.
 
 .PARAMETER Firewall
@@ -12612,11 +12609,11 @@ function New-SfosDynamicDNS {
     # PSAvoidUsingUsernameAndPasswordParams and PSAvoidUsingPlainTextForPassword are
     # suppressed on purpose. -DDNSPassword is not this module's own authentication - it is the
     # DDNS provider account password the Sophos API documents as a plain <Password> element
-    # inside the request body (CLAUDE.md section 5: everything in this API travels as XML
+    # inside the request body (the project build rules, section 5: everything in this API travels as XML
     # field text, there is no separate secure-credential channel for this operation). It is
     # deliberately named DDNSPassword, not Password, so it can never be confused with - or
     # collide with - this module's connection -Password parameter, which stays SecureString
-    # exactly as CLAUDE.md section 4 requires.
+    # exactly as the project build rules, section 4 requires.
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingUsernameAndPasswordParams', '')]
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingPlainTextForPassword', '')]
     [CmdletBinding(SupportsShouldProcess)]
@@ -12692,7 +12689,7 @@ function New-SfosDynamicDNS {
 .DESCRIPTION
     Updates a DynamicDNS binding using the Sophos Firewall XML API. Reads the current object
     first and resends every field, overriding only what the caller explicitly passes
-    (CLAUDE.md section 5). This contacts the external DDNS provider - see the region header for
+    (the project build rules, section 5). This contacts the external DDNS provider - see the region header for
     why this cmdlet was never executed against the lab firewall.
 
 .PARAMETER HostName
@@ -12947,7 +12944,7 @@ function Remove-SfosDynamicDNS {
 # see Set-SfosDHCPServerStatus below. New-/Set-SfosDHCPServer therefore do not expose -Status.
 #
 # [live vs doc] UseApplianceDNSSettings is documented as accepting only 'Enable', but the live
-# the productive scope scope has it set to 'Disable' - the live value wins (CLAUDE.md section 5:
+# the productive scope scope has it set to 'Disable' - the live value wins (the project build rules, section 5:
 # "[measured] rules ... a working assumption, not a guarantee - when the docs later contradict
 # it, the docs win" - here it is the other way around, live contradicts doc, and live is what
 # the appliance actually accepted, so it is trusted over the doc's incomplete enum).
@@ -13452,7 +13449,7 @@ function New-SfosDHCPServer {
 .DESCRIPTION
     Updates an IPv4 DHCP server scope using the Sophos Firewall XML API. Reads the current
     object first and resends every field, overriding only what the caller explicitly passes
-    (CLAUDE.md section 5). See the region header: this cmdlet was never executed against the
+    (the project build rules, section 5). See the region header: this cmdlet was never executed against the
     lab firewall.
 
 .PARAMETER Name
@@ -13766,10 +13763,10 @@ function Remove-SfosDHCPServer {
 # circumstances without explicit, separate authorisation - doing so risks disabling DHCP for
 # every client on that segment.
 #
-# Function name: Set-SfosDHCPServerStatus, following CLAUDE.md section 3's Verb-Sfos<Entity>
+# Function name: Set-SfosDHCPServerStatus, following the project build rules, section 3's Verb-Sfos<Entity>
 # pattern with the entity token taken verbatim from the Sophos documentation folder name
 # (DHCPServerStatus) - not a purpose-derived name like "Enable-SfosDHCPServer", because this
-# entity is a status toggle rather than a lifecycle verb pair, and CLAUDE.md section 3 asks for
+# entity is a status toggle rather than a lifecycle verb pair, and the project build rules, section 3 asks for
 # the Sophos entity name, not an invented one.
 #
 # Wire shape [doc, unverified live - never executed]:
@@ -13781,14 +13778,14 @@ function Remove-SfosDHCPServer {
 # the attribute/parameter table (which lists the parameter as "DHCPServerNamedhcpname", not
 # "Name") agree on this spelling. It looks like the vendor's own documentation generator
 # concatenated a placeholder ("DHCPServerName") into the element name ("dhcpname") by mistake,
-# the same class of error CLAUDE.md warns about for <CountryHostGroup> - except here there is no
+# the same class of error the project build rules warns about for <CountryHostGroup> - except here there is no
 # live object to test the alternative against, and inventing a "corrected" element name
-# (<Name> or <DHCPServerName>) is exactly what CLAUDE.md says not to do: guess a name that
+# (<Name> or <DHCPServerName>) is exactly what the project build rules says not to do: guess a name that
 # looks right. This module sends the literal documented element name and flags it clearly here
 # and in the cmdlet's own .NOTES, so a future maintainer with a lab firewall (and a DHCP scope
 # they are willing to risk) can verify or correct it in one measured change.
 #
-# Read-Modify-Write (CLAUDE.md section 5) does not apply here: there is no Get to read from.
+# Read-Modify-Write (the project build rules, section 5) does not apply here: there is no Get to read from.
 # This is a deliberate, API-enforced exception, not an oversight - documented in .NOTES below.
 
 <#
@@ -13844,7 +13841,7 @@ function Remove-SfosDHCPServer {
 
     No read-modify-write: this entity has no <Get>, so unlike every other Set-* cmdlet in this
     module, the current state cannot be read back before writing. This is an API limitation,
-    not a deviation from CLAUDE.md section 5 - there is nothing to modify-write against.
+    not a deviation from the project build rules, section 5 - there is nothing to modify-write against.
 
 .LINK
     https://docs.sophos.com/nsg/sophos-firewall/22.0/api/CONFIGURE/Network/DHCPServerStatus/operations/DHCPServerstatuschange.html
@@ -14007,8 +14004,8 @@ function Set-SfosDHCPServerStatus {
 #
 # Doc folder is 'DHCPIPV6Server', wire element is 'DHCPServerIpv6' [task table, matches the element-name table
 # section 2's list of the 8 folders whose element name differs]. A <DHCPIPV6Server> root would
-# answer 529 'Input request module is Invalid', the same failure class CLAUDE.md documents for
-# <CountryHostGroup>. Cmdlet nouns follow the wire element, per CLAUDE.md section 3 ("the
+# answer 529 'Input request module is Invalid', the same failure class the project build rules documents for
+# <CountryHostGroup>. Cmdlet nouns follow the wire element, per the project build rules, section 3 ("the
 # Sophos spelling wins").
 #
 # RISK: red (task classification). 0 live objects. Get-SfosDHCPServerIpv6 was executed live
@@ -14439,7 +14436,7 @@ function New-SfosDHCPServerIpv6 {
 .DESCRIPTION
     Updates an IPv6 DHCP server scope using the Sophos Firewall XML API. Reads the current
     object first and resends every field, overriding only what the caller explicitly passes
-    (CLAUDE.md section 5). See the region header: this cmdlet was never executed against the
+    (the project build rules, section 5). See the region header: this cmdlet was never executed against the
     lab firewall.
 
 .PARAMETER Name
@@ -15002,7 +14999,7 @@ function New-SfosDHCPRelay {
 .DESCRIPTION
     Updates a DHCP relay agent configuration using the Sophos Firewall XML API. Reads the
     current object first and resends every field, overriding only what the caller explicitly
-    passes (CLAUDE.md section 5). See the region header: this cmdlet was never executed against
+    passes (the project build rules, section 5). See the region header: this cmdlet was never executed against
     the lab firewall.
 
 .PARAMETER Name

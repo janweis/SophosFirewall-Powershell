@@ -148,7 +148,7 @@
 #
 # Two connection-parameter names collide with fields these entities also define on the wire:
 # every entity has its own <Port>, and ActiveDirectory/LDAPServer/EDirectory each have their
-# own <Password>. Per CLAUDE.md section 4 the connection parameters -Port and -Password are
+# own <Password>. Per the project build rules, section 4 the connection parameters -Port and -Password are
 # fixed by name and type and cannot be renamed, so the entity-level fields are exposed here as
 # -ServerPort and -BindPassword. Neither carries a parameter alias back to 'Port'/'Password':
 # PowerShell rejects a parameter alias that matches another parameter's own name on the same
@@ -168,7 +168,7 @@
 #     EMPTY <Password></Password> is accepted (code 200) and the stored password is left
 #     unchanged - confirmed by reading it back and seeing the same hash. This is the one field
 #     in this API observed to violate the usual "the update replaces the whole entity" rule
-#     from CLAUDE.md section 5; every Set-* here relies on that measured exception and sends
+#     from the project build rules, section 5; every Set-* here relies on that measured exception and sends
 #     an empty element when -BindPassword is not supplied, without warning the caller.
 #     Resending the same hash text together with its hashform attribute is independently
 #     accepted too, but is unnecessary here since the empty-element path already works.
@@ -234,7 +234,7 @@
 
         .NOTES
         Minimum supported PowerShell version: 5.1
-        The cmdlet noun is 'ActiveDirectoryServer' for consistency with the other four authentication server cmdlets, but the wire element is <ActiveDirectory> - without "Server" - confirmed against a live firewall response (see the region header). This is a deliberate deviation from CLAUDE.md section 3.
+        The cmdlet noun is 'ActiveDirectoryServer' for consistency with the other four authentication server cmdlets, but the wire element is <ActiveDirectory> - without "Server" - confirmed against a live firewall response (see the region header). This is a deliberate deviation from the project build rules, section 3.
         The stored bind password is never exposed here: the firewall does not return it on <Get>.
 
         .LINK
@@ -330,7 +330,7 @@ function Get-SfosActiveDirectoryServer {
         IP address or domain name of the Active Directory server [doc].
 
         .PARAMETER ServerPort
-        Port through which the server communicates [doc]. Sophos documents a default of 389. Wire element is <Port>; renamed here to -ServerPort because -Port is already the fixed connection parameter (CLAUDE.md section 4) and cannot be reused. No alias 'Port' is defined either: PowerShell rejects a parameter alias that matches another parameter's own name on the same command - measured, it makes the whole command's metadata fail to resolve. The generated XML still uses <Port> unchanged. Because there is no alias, Get-SfosActiveDirectoryServer's Port property (named after the wire element, per section 7) does not auto-bind here via ValueFromPipelineByPropertyName; pass -ServerPort explicitly.
+        Port through which the server communicates [doc]. Sophos documents a default of 389. Wire element is <Port>; renamed here to -ServerPort because -Port is already the fixed connection parameter (the project build rules, section 4) and cannot be reused. No alias 'Port' is defined either: PowerShell rejects a parameter alias that matches another parameter's own name on the same command - measured, it makes the whole command's metadata fail to resolve. The generated XML still uses <Port> unchanged. Because there is no alias, Get-SfosActiveDirectoryServer's Port property (named after the wire element, per section 7) does not auto-bind here via ValueFromPipelineByPropertyName; pass -ServerPort explicitly.
 
         .PARAMETER NetBIOSDomain
         NetBIOS domain name [doc].
@@ -993,7 +993,7 @@ function Get-SfosLDAPServer {
         IP address or domain name of the LDAP server [doc].
 
         .PARAMETER ServerPort
-        Port through which the server communicates [doc]. Sophos documents a default of 389. Wire element is <Port>; renamed to -ServerPort because -Port is already the fixed connection parameter (CLAUDE.md section 4) and cannot be reused. No alias 'Port' is defined either: PowerShell rejects a parameter alias that matches another parameter's own name on the same command - measured, it makes the whole command's metadata fail to resolve. The generated XML still uses <Port> unchanged.
+        Port through which the server communicates [doc]. Sophos documents a default of 389. Wire element is <Port>; renamed to -ServerPort because -Port is already the fixed connection parameter (the project build rules, section 4) and cannot be reused. No alias 'Port' is defined either: PowerShell rejects a parameter alias that matches another parameter's own name on the same command - measured, it makes the whole command's metadata fail to resolve. The generated XML still uses <Port> unchanged.
 
         .PARAMETER Version
         LDAP protocol version [doc]: '2' or '3'.
@@ -1743,7 +1743,7 @@ function Get-SfosRADIUSServer {
         IP address of the RADIUS server. Measured against a live firewall via <InvalidParams>: the wire element is <ServerAddress>, not <ServerIP> as the Attribute/Parameter table names it. Mandatory - confirmed live.
 
         .PARAMETER ServerPort
-        Port through which the server communicates. Measured against a live firewall via <InvalidParams>: the wire element is <Port>, not <AuthenticationPort> as the Attribute/Parameter table names it. Because the true wire name collides with the fixed connection -Port parameter (CLAUDE.md section 4), it is renamed here to -ServerPort; no alias 'Port' is defined either, because PowerShell rejects a parameter alias that matches another parameter's own name on the same command - measured, it makes the whole command's metadata fail to resolve (see Get-SfosRADIUSServer's AliasProperty for the pipeline-binding workaround). Mandatory - confirmed live.
+        Port through which the server communicates. Measured against a live firewall via <InvalidParams>: the wire element is <Port>, not <AuthenticationPort> as the Attribute/Parameter table names it. Because the true wire name collides with the fixed connection -Port parameter (the project build rules, section 4), it is renamed here to -ServerPort; no alias 'Port' is defined either, because PowerShell rejects a parameter alias that matches another parameter's own name on the same command - measured, it makes the whole command's metadata fail to resolve (see Get-SfosRADIUSServer's AliasProperty for the pipeline-binding workaround). Mandatory - confirmed live.
 
         .PARAMETER Timeout
         Request timeout, in seconds. Undocumented in both the Attribute/Parameter table and the sample XML - found only by observing the <InvalidParams> of a live, deliberately incomplete <Set operation="add">, which named /AuthenticationServer/RADIUSServer/Timeout as missing. Confirmed mandatory; values 1-60 were accepted live on <Set operation="update">, every value from 61 up to 300 tried was rejected with code 501 naming Timeout as invalid - so 60 is enforced here as the measured maximum, even though no documentation states it.
@@ -2336,7 +2336,7 @@ function Get-SfosTACACSServer {
         IP address of the TACACS+ server. Measured against a live firewall via <InvalidParams>: the wire element is <ServerAddress>, not <ServerIP> as the Attribute/Parameter table names it (matching the sample configuration, which Task 1 had originally set aside in favour of the table). Mandatory - confirmed live.
 
         .PARAMETER ServerPort
-        Port through which the server communicates [doc]. The sample configuration shows a default of 49 (the standard TACACS+ port) and the wire element <Port>; the Attribute/Parameter table instead names this field AuthenticationPort with a default of 1812, which is identical to the RADIUS table row on the sibling page and does not match TACACS+'s traditional port. That row is treated as a copy/paste artifact from the RADIUS documentation and is not followed here - see the task report. Wire element is <Port>; renamed to -ServerPort because -Port is already the fixed connection parameter (CLAUDE.md section 4) and cannot be reused. No alias 'Port' is defined either: PowerShell rejects a parameter alias that matches another parameter's own name on the same command - measured, it makes the whole command's metadata fail to resolve. The generated XML still uses <Port> unchanged.
+        Port through which the server communicates [doc]. The sample configuration shows a default of 49 (the standard TACACS+ port) and the wire element <Port>; the Attribute/Parameter table instead names this field AuthenticationPort with a default of 1812, which is identical to the RADIUS table row on the sibling page and does not match TACACS+'s traditional port. That row is treated as a copy/paste artifact from the RADIUS documentation and is not followed here - see the task report. Wire element is <Port>; renamed to -ServerPort because -Port is already the fixed connection parameter (the project build rules, section 4) and cannot be reused. No alias 'Port' is defined either: PowerShell rejects a parameter alias that matches another parameter's own name on the same command - measured, it makes the whole command's metadata fail to resolve. The generated XML still uses <Port> unchanged.
 
         .PARAMETER SharedSecret
         Shared secret used to encrypt information passed to the appliance [doc].
@@ -2752,7 +2752,7 @@ function Remove-SfosTACACSServer {
 
         .NOTES
         Minimum supported PowerShell version: 5.1
-        The cmdlet noun is 'EDirectoryServer' for consistency with the other four authentication server cmdlets, but the wire element is <EDirectory> - without "Server" - confirmed against a live firewall response (see the region header). This is a deliberate deviation from CLAUDE.md section 3.
+        The cmdlet noun is 'EDirectoryServer' for consistency with the other four authentication server cmdlets, but the wire element is <EDirectory> - without "Server" - confirmed against a live firewall response (see the region header). This is a deliberate deviation from the project build rules, section 3.
         The stored bind password is never exposed here: the firewall does not return it on <Get>.
         The address field is <ServerIpDomain> - measured against a live firewall via <InvalidParams>. Task 1 had chosen ServerAddress from the Attribute/Parameter table, which turned out to be wrong for this entity; see the region header and the task report for the correction.
         The username field's wire element is <Username> - also measured live, matching the sample configuration rather than the table's EdirUsername. The cmdlet parameter and this output property still use the name EdirUsername, though, because the true wire name collides with this module's own connection -Username parameter; only the XML tag sent to and read from the firewall changed.
@@ -2842,7 +2842,7 @@ function Get-SfosEDirectoryServer {
         IP address or domain name of the eDirectory server. Measured against a live firewall via <InvalidParams>: the wire element is <ServerIpDomain>, not <ServerAddress> as the Attribute/Parameter table names it (Task 1 had chosen ServerAddress from the table; the sample configuration's ServerIpDomain turned out to be correct). Mandatory - confirmed live.
 
         .PARAMETER ServerPort
-        Port through which the server communicates [doc]. Sophos documents a default of 389. Wire element is <Port>; renamed to -ServerPort because -Port is already the fixed connection parameter (CLAUDE.md section 4) and cannot be reused. No alias 'Port' is defined either: PowerShell rejects a parameter alias that matches another parameter's own name on the same command - measured, it makes the whole command's metadata fail to resolve. The generated XML still uses <Port> unchanged. Mandatory - confirmed live.
+        Port through which the server communicates [doc]. Sophos documents a default of 389. Wire element is <Port>; renamed to -ServerPort because -Port is already the fixed connection parameter (the project build rules, section 4) and cannot be reused. No alias 'Port' is defined either: PowerShell rejects a parameter alias that matches another parameter's own name on the same command - measured, it makes the whole command's metadata fail to resolve. The generated XML still uses <Port> unchanged. Mandatory - confirmed live.
 
         .PARAMETER EdirUsername
         Admin username used to access eDirectory. Measured against a live firewall via <InvalidParams>: the wire element is <Username>, matching the sample configuration - not <EdirUsername> as the Attribute/Parameter table names it. The parameter here keeps the name EdirUsername anyway, because the true wire name <Username> would collide with this module's own connection -Username parameter; only the generated XML tag changed to <Username>. Mandatory - confirmed live.
@@ -5516,13 +5516,13 @@ function Remove-SfosUserGroupMember {
 #    <InvalidParams><Params>/GuestUser/Username</Params></InvalidParams> (doubled in the
 #    response). Neither changed the object - the follow-up Get showed guest-00001 unchanged.
 # 2. <Set operation="edit"> (undocumented but accepted by other entities in this API, see
-#    CLAUDE.md section 5) did not error - it answered code="200"
+#    the project build rules, section 5) did not error - it answered code="200"
 #    "Configuration applied successfully." - but the follow-up Get showed guest-00001
 #    untouched and a SECOND, brand-new object (guest-00002) created with the submitted
 #    fields. UserValidity was re-interpreted days->hours again (24 in, 576 out) exactly as
 #    New-SfosGuestUser does on create, confirming operation="edit" routed through the add
 #    path for this entity rather than performing an update. This is the class of write that
-#    answers 200 and changes nothing on the object it names - CLAUDE.md section 5 - except
+#    answers 200 and changes nothing on the object it names - the project build rules, section 5 - except
 #    here it also has the side effect of creating an unwanted duplicate.
 #
 # Both test objects were removed with Remove-SfosGuestUser and a follow-up Get-SfosGuestUser
@@ -5580,7 +5580,7 @@ function Remove-SfosUserGroupMember {
         .NOTES
         Minimum supported PowerShell version: 5.1
         Live-verified against the lab firewall (task 10) - the persisted object bears little resemblance to the 'Add' sample XML. Confirmed fields, none of which are documented anywhere: <Username> (an auto-generated login distinct from the caller-supplied <Name>, e.g. 'guest-00001'), <Email> is wrapped as <EmailList><EmailID>...</EmailID></EmailList> not a flat <Email>, <UserValidity> is returned in HOURS (an input of '1' via New-SfosGuestUser -UserValidity read back as '24'), plus <Group>, <SurfingQuotaPolicy>, <AccessTimePolicy>, <DataTransferPolicy>, <QoSPolicy>, <SSLVPNPolicy>, <CreateDate>, <ExpireDate>, <L2TP>, <PPTP>, <QuarantineDigest>, <MACBinding>, <LoginRestriction>, <ScheduleForApplianceAccess>. <ValidityStart> is not returned - it is a create-time-only directive, not a persisted attribute.
-        The output object exposes both the wire property name (Username) and the renamed parameter name (AccountName, an AliasProperty on Username - CLAUDE.md section 4, same collision as ClientlessUser.UserName) so that 'Get-SfosGuestUser | Remove-SfosGuestUser' binds by property name.
+        The output object exposes both the wire property name (Username) and the renamed parameter name (AccountName, an AliasProperty on Username - the project build rules, section 4, same collision as ClientlessUser.UserName) so that 'Get-SfosGuestUser | Remove-SfosGuestUser' binds by property name.
         Fields NoOfUsers and the 'genexpiryperiodtype' selector (values 1/2/3, documented Mandatory but with no confirmed wire element name in the sample XML or a live object) are not implemented - see task-3-report.md.
 
         .LINK
@@ -5829,7 +5829,7 @@ function New-SfosGuestUser {
         Removes a GuestUser object using the Sophos Firewall XML API ('Delete Guest User' operation). This cmdlet supports ShouldProcess; use -WhatIf to preview the change.
 
         .PARAMETER AccountName
-        Login username identifying the guest user (the auto-generated value shown as <Username> by Get-SfosGuestUser, e.g. 'guest-00001' - NOT the caller-supplied display -Name used at creation). Wire element is <Username>; renamed to -AccountName for the same reason as ClientlessUser's identifying parameter (CLAUDE.md section 4): -Username is already the fixed connection parameter and collides with it case-insensitively during PowerShell parameter binding. No alias 'Username' is defined either.
+        Login username identifying the guest user (the auto-generated value shown as <Username> by Get-SfosGuestUser, e.g. 'guest-00001' - NOT the caller-supplied display -Name used at creation). Wire element is <Username>; renamed to -AccountName for the same reason as ClientlessUser's identifying parameter (the project build rules, section 4): -Username is already the fixed connection parameter and collides with it case-insensitively during PowerShell parameter binding. No alias 'Username' is defined either.
 
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
@@ -5954,14 +5954,14 @@ function Remove-SfosGuestUser {
         The lab firewall's live object had no <SMSGateway> element even though the documentation marks it Mandatory - it is only relevant when GuestUserSettingsName is 'CellNumber', and the live configuration uses 'AutoGenerate'. Exposed here as optional.
         The sample XML also lists <grouplist_cat> and <smsgwprofileid_cat> - these read like internal admin-console field identifiers (lower-case, '_cat' suffix), appear in no other source and are not present on the live object, so they are not implemented; see task-3-report.md.
 
-        CONFIRMED LIVE DEFECT (task 10, lab firewall): calling Set-SfosGuestUserSettings - even a no-op update that resends the exact values this cmdlet had just read - makes every subsequent Get-SfosGuestUserSettings answer <Status>Transaction fail</Status> (no code attribute) instead of the settings, and this cmdlet correctly throws on it rather than mis-reading it as an empty result (see Assert-SfosApiReturnSuccess, CLAUDE.md section 5). The broken state was still present after a 30+ second wait and did not self-heal; a follow-up Set with the original captured values answered 200 but did not restore the Get path either. No other entity's Get was affected in the same session (SMSGateway kept working throughout), so this is isolated to GuestUserSettings, not a session- or Core-wide issue. This looks like a firmware-side bug in the settings singleton's own transaction handling, not something a client-side retry or workaround can fix - do not call Set-SfosGuestUserSettings against a firewall you cannot immediately verify afterward through the web admin console.
+        CONFIRMED LIVE DEFECT (task 10, lab firewall): calling Set-SfosGuestUserSettings - even a no-op update that resends the exact values this cmdlet had just read - makes every subsequent Get-SfosGuestUserSettings answer <Status>Transaction fail</Status> (no code attribute) instead of the settings, and this cmdlet correctly throws on it rather than mis-reading it as an empty result (see Assert-SfosApiReturnSuccess, the project build rules, section 5). The broken state was still present after a 30+ second wait and did not self-heal; a follow-up Set with the original captured values answered 200 but did not restore the Get path either. No other entity's Get was affected in the same session (SMSGateway kept working throughout), so this is isolated to GuestUserSettings, not a session- or Core-wide issue. This looks like a firmware-side bug in the settings singleton's own transaction handling, not something a client-side retry or workaround can fix - do not call Set-SfosGuestUserSettings against a firewall you cannot immediately verify afterward through the web admin console.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/API/CONFIGURE/Authentication/GuestUsersGeneralSettings/GuestUsersGeneralSettings.html
 #>
 function Get-SfosGuestUserSettings {
     # PSUseSingularNouns is suppressed on purpose: <GuestUserSettings> is the entity's own
-    # singleton name, not a plural container - it has no singular child element. CLAUDE.md
+    # singleton name, not a plural container - it has no singular child element. the project build rules
     # section 3 gives the Sophos wire spelling precedence here.
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '')]
     [CmdletBinding()]
@@ -6030,7 +6030,7 @@ function Get-SfosGuestUserSettings {
         Updates the GuestUserSettings on the Sophos Firewall.
 
         .DESCRIPTION
-        Updates the GuestUserSettings singleton using the Sophos Firewall XML API ('Configure Guest User' operation). This cmdlet reads the current settings first and resends every field, overriding only what the caller explicitly passes (read-modify-write, CLAUDE.md section 5). This cmdlet supports ShouldProcess; use -WhatIf to preview the change.
+        Updates the GuestUserSettings singleton using the Sophos Firewall XML API ('Configure Guest User' operation). This cmdlet reads the current settings first and resends every field, overriding only what the caller explicitly passes (read-modify-write, the project build rules, section 5). This cmdlet supports ShouldProcess; use -WhatIf to preview the change.
 
         .PARAMETER AllowGuestUserSettings
         Enable/Disable secured internet access for guest users. If omitted, the existing value is kept.
@@ -6106,13 +6106,13 @@ function Get-SfosGuestUserSettings {
 #>
 function Set-SfosGuestUserSettings {
     # PSUseSingularNouns is suppressed on purpose: <GuestUserSettings> is the entity's own
-    # singleton name, not a plural container - it has no singular child element. CLAUDE.md
+    # singleton name, not a plural container - it has no singular child element. the project build rules
     # section 3 gives the Sophos wire spelling precedence here.
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '')]
     # PSAvoidUsingUsernameAndPasswordParams/PSAvoidUsingPlainTextForPassword are false
     # positives: -PasswordComplexity is a policy selector for auto-generated guest
     # passwords (e.g. 'AlphanumericPassword'), not a credential, and the fixed connection
-    # -Password parameter (CLAUDE.md section 4) is already a SecureString.
+    # -Password parameter (the project build rules, section 4) is already a SecureString.
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingUsernameAndPasswordParams', '')]
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingPlainTextForPassword', 'PasswordComplexity')]
     [CmdletBinding(SupportsShouldProcess)]
@@ -6306,7 +6306,7 @@ function ConvertTo-SfosClientlessUserSanitizedXml {
 
         .NOTES
         Minimum supported PowerShell version: 5.1
-        The output object exposes both the wire property name (UserName) and the renamed parameter name (AccountName, an AliasProperty on UserName - CLAUDE.md section 4) so that 'Get-SfosClientlessUser | Set-SfosClientlessUser' binds by property name.
+        The output object exposes both the wire property name (UserName) and the renamed parameter name (AccountName, an AliasProperty on UserName - the project build rules, section 4) so that 'Get-SfosClientlessUser | Set-SfosClientlessUser' binds by property name.
         WebFilter, AppFilter and QOS appear in the 'Update Client Less Users' attribute table but have no corresponding element in either sample XML and no live object exists to confirm them - not implemented; see task-3-report.md.
 
         .LINK
@@ -6414,7 +6414,7 @@ function Get-SfosClientlessUser {
         Creates a ClientlessUser object using the Sophos Firewall XML API ('Add Clientless Users' operation). Clientless users bypass client login and access the internet directly.
 
         .PARAMETER AccountName
-        Login username of the clientless user. Wire element is <UserName>; renamed to -AccountName because -Username is already the fixed connection parameter (CLAUDE.md section 4) and 'UserName' collides with it case-insensitively during PowerShell parameter binding. No alias 'Username' is defined either - see the fragment header comment on Get-SfosGuestUser.
+        Login username of the clientless user. Wire element is <UserName>; renamed to -AccountName because -Username is already the fixed connection parameter (the project build rules, section 4) and 'UserName' collides with it case-insensitively during PowerShell parameter binding. No alias 'Username' is defined either - see the fragment header comment on Get-SfosGuestUser.
 
         .PARAMETER Name
         Display name of the user.
@@ -6562,7 +6562,7 @@ function New-SfosClientlessUser {
         Updates an existing ClientlessUser object on the Sophos Firewall.
 
         .DESCRIPTION
-        Updates a ClientlessUser object using the Sophos Firewall XML API ('Update Client Less Users' operation). This cmdlet reads the current object first and keeps whatever the caller does not explicitly pass (read-modify-write, CLAUDE.md section 5). Single parameter set so pipeline input from Get-SfosClientlessUser binds correctly (CLAUDE.md section 4).
+        Updates a ClientlessUser object using the Sophos Firewall XML API ('Update Client Less Users' operation). This cmdlet reads the current object first and keeps whatever the caller does not explicitly pass (read-modify-write, the project build rules, section 5). Single parameter set so pipeline input from Get-SfosClientlessUser binds correctly (the project build rules, section 4).
 
         .PARAMETER AccountName
         Login username identifying the clientless user. Same rename rationale as New-SfosClientlessUser.
@@ -6667,7 +6667,7 @@ function Set-SfosClientlessUser {
         $accountEsc = ConvertTo-SfosXmlEscaped -Text $AccountName
 
         # No confirmed server-side filter key for UserName, so the full set is fetched and
-        # matched client-side - see CLAUDE.md section 6 on unsupported keys being ignored,
+        # matched client-side - see the project build rules, section 6 on unsupported keys being ignored,
         # not rejected.
         $existing = @(Get-SfosClientlessUser -Firewall $params.Firewall `
                 -Port $params.Port `
@@ -6785,7 +6785,7 @@ function Set-SfosClientlessUser {
 
         .NOTES
         Minimum supported PowerShell version: 5.1
-        Not verified against a live firewall - no delete operation is documented for this entity. Verify in task 10; remove this cmdlet if the firewall rejects the removal or silently leaves the object in place (CLAUDE.md section 5, the append-only/no-op class of defect).
+        Not verified against a live firewall - no delete operation is documented for this entity. Verify in task 10; remove this cmdlet if the firewall rejects the removal or silently leaves the object in place (the project build rules, section 5, the append-only/no-op class of defect).
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/API/CONFIGURE/Authentication/ClientlessUsers/ClientlessUsers.html
@@ -6990,7 +6990,7 @@ function New-SfosClientlessUserRange {
 
         .NOTES
         Minimum supported PowerShell version: 5.1
-        Measured on the live firewall: <RequestParamterList> and <ResponseParamterList> each wrap exactly one <RequestParamter>/<ResponseParamter> element that itself holds N sibling <ParameterName> elements followed by N sibling <ParameterValue> elements, matched positionally by index - not N repeated <RequestParamter> elements each with one name/value pair. This cmdlet exposes them as parallel arrays (RequestParameterName/RequestParameterValue, ResponseParameterName/ResponseParameterValue) rather than reconstructing a merged object, per CLAUDE.md section 4 ('type a pipeline-bound parameter after what Get-* actually returns').
+        Measured on the live firewall: <RequestParamterList> and <ResponseParamterList> each wrap exactly one <RequestParamter>/<ResponseParamter> element that itself holds N sibling <ParameterName> elements followed by N sibling <ParameterValue> elements, matched positionally by index - not N repeated <RequestParamter> elements each with one name/value pair. This cmdlet exposes them as parallel arrays (RequestParameterName/RequestParameterValue, ResponseParameterName/ResponseParameterValue) rather than reconstructing a merged object, per the project build rules, section 4 ('type a pipeline-bound parameter after what Get-* actually returns').
         The wrapper element names carry the firmware's own misspelling 'Paramter' (RequestParamterList, RequestParamter, ResponseParamterList, ResponseParamter) - reproduced verbatim; ParameterName/ParameterValue are spelled correctly.
         <MobileNo> appears in the sample XML but is a parameter of the 'SMS Gateway Test Connection' operation, not a stored field of the entity - absent from the live object and not implemented.
 
@@ -7280,7 +7280,7 @@ function New-SfosSMSGateway {
         Updates an existing SMSGateway object on the Sophos Firewall.
 
         .DESCRIPTION
-        Updates an SMSGateway profile using the Sophos Firewall XML API ('Edit SMS Gateway Profile' operation). This cmdlet reads the current object first and keeps whatever the caller does not explicitly pass (read-modify-write, CLAUDE.md section 5).
+        Updates an SMSGateway profile using the Sophos Firewall XML API ('Edit SMS Gateway Profile' operation). This cmdlet reads the current object first and keeps whatever the caller does not explicitly pass (read-modify-write, the project build rules, section 5).
 
         .PARAMETER Name
         Name of the target SMS gateway.
@@ -7679,7 +7679,7 @@ function Remove-SfosSMSGateway {
 function Get-SfosOTPSettings {
     # PSUseSingularNouns is suppressed on purpose. 'Settings' is not a plural container here
     # but the name of the entity itself - the API element is <OTPSettings>, a singleton
-    # holding one configuration, and it has no <OTPSetting> child. CLAUDE.md section 3
+    # holding one configuration, and it has no <OTPSetting> child. the project build rules, section 3
     # puts the Sophos spelling above PowerShell habit and reserves the singular concession
     # for elements that really do wrap a list, such as <Services> around <Service>.
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '')]
@@ -7845,7 +7845,7 @@ function Get-SfosOTPSettings {
 function Set-SfosOTPSettings {
     # PSUseSingularNouns is suppressed on purpose. 'Settings' is not a plural container here
     # but the name of the entity itself - the API element is <OTPSettings>, a singleton
-    # holding one configuration, and it has no <OTPSetting> child. CLAUDE.md section 3
+    # holding one configuration, and it has no <OTPSetting> child. the project build rules, section 3
     # puts the Sophos spelling above PowerShell habit and reserves the singular concession
     # for elements that really do wrap a list, such as <Services> around <Service>.
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '')]
@@ -8140,7 +8140,7 @@ function Add-SfosOTPSettingsMember {
         result, this cmdlet can reliably remove usernames only when the removal empties the list
         completely; removing one username out of several currently cannot be done through this
         API and this cmdlet detects that after writing and throws rather than reporting a silent
-        success - the same rule CLAUDE.md documents for Remove-SfosFirewallRuleGroupMember.
+        success - the same rule the project build rules documents for Remove-SfosFirewallRuleGroupMember.
 
         .PARAMETER Members
         One or more usernames to remove from the explicit OTP user list.
@@ -8365,7 +8365,7 @@ function Remove-SfosOTPSettingsMember {
         [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '')]
         PSUseSingularNouns is suppressed on purpose: <OTPTokens> is the entity's own element
         name and there is no singular child element. Renaming it would break the mapping to
-        the API, which CLAUDE.md section 3 gives precedence over the PowerShell habit.
+        the API, which the project build rules, section 3 gives precedence over the PowerShell habit.
 
         The returned object has no -Secret/-SecretHash property. Measured live: the firewall
         does return a <secret hashform="mode1"> element - an opaque hash, not the plaintext
@@ -8543,7 +8543,7 @@ function Get-SfosOTPTokens {
         [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '')]
         PSUseSingularNouns is suppressed on purpose: <OTPTokens> is the entity's own element
         name and there is no singular child element. Renaming it would break the mapping to
-        the API, which CLAUDE.md section 3 gives precedence over the PowerShell habit.
+        the API, which the project build rules, section 3 gives precedence over the PowerShell habit.
 
         Verified against a live firewall: creating a token with a valid user and a hexadecimal
         secret succeeded and the object was found afterwards with Get-SfosOTPTokens. The
@@ -8797,7 +8797,7 @@ function New-SfosOTPTokens {
         [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '')]
         PSUseSingularNouns is suppressed on purpose: <OTPTokens> is the entity's own element
         name and there is no singular child element. Renaming it would break the mapping to
-        the API, which CLAUDE.md section 3 gives precedence over the PowerShell habit.
+        the API, which the project build rules, section 3 gives precedence over the PowerShell habit.
 
         This cmdlet deliberately has no -Secret parameter, unlike New-SfosOTPTokens. Verified
         against a live firewall: an update sent without <secret> left the token's secret
@@ -8990,12 +8990,12 @@ function Set-SfosOTPTokens {
         [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '')]
         PSUseSingularNouns is suppressed on purpose: <OTPTokens> is the entity's own element
         name and there is no singular child element. Renaming it would break the mapping to
-        the API, which CLAUDE.md section 3 gives precedence over the PowerShell habit.
+        the API, which the project build rules, section 3 gives precedence over the PowerShell habit.
 
         Verified against a live firewall: removing a token created for verification succeeded
         and Get-SfosOTPTokens no longer found it afterwards. This cmdlet still passes the raw
         firewall answer through without a not-found check of its own, the same caveat noted
-        for every other Remove-Sfos* cmdlet in CLAUDE.md's open-issues table.
+        for every other Remove-Sfos* cmdlet in the project build rules' open-issues table.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/API/CONFIGURE/Authentication/OTPTokens/operations/Delete%20OTP%20Token.html
@@ -9107,7 +9107,7 @@ function Remove-SfosOTPTokens {
 function Get-SfosFirewallAuthenticationGlobalSettings {
     # PSUseSingularNouns is suppressed on purpose: <FirewallAuthenticationGlobalSettings> is
     # the entity's own singleton name, not a plural container - it has no singular child
-    # element. CLAUDE.md section 3 gives the Sophos wire spelling precedence here.
+    # element. the project build rules, section 3 gives the Sophos wire spelling precedence here.
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '')]
     [CmdletBinding()]
     param(
@@ -9217,7 +9217,7 @@ function Get-SfosFirewallAuthenticationGlobalSettings {
 function Set-SfosFirewallAuthenticationGlobalSettings {
     # PSUseSingularNouns is suppressed on purpose: <FirewallAuthenticationGlobalSettings> is
     # the entity's own singleton name, not a plural container - it has no singular child
-    # element. CLAUDE.md section 3 gives the Sophos wire spelling precedence here.
+    # element. the project build rules, section 3 gives the Sophos wire spelling precedence here.
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '')]
     [CmdletBinding(SupportsShouldProcess)]
     param(
@@ -9348,7 +9348,7 @@ function Set-SfosFirewallAuthenticationGlobalSettings {
 function Get-SfosFirewallAuthenticationMethods {
     # PSUseSingularNouns is suppressed on purpose: <FirewallAuthenticationMethods> is the
     # entity's own singleton name, not a plural container - it has no singular child
-    # element. CLAUDE.md section 3 gives the Sophos wire spelling precedence here.
+    # element. the project build rules, section 3 gives the Sophos wire spelling precedence here.
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '')]
     [CmdletBinding()]
     param(
@@ -9458,7 +9458,7 @@ function Get-SfosFirewallAuthenticationMethods {
 function Set-SfosFirewallAuthenticationMethods {
     # PSUseSingularNouns is suppressed on purpose: <FirewallAuthenticationMethods> is the
     # entity's own singleton name, not a plural container - it has no singular child
-    # element. CLAUDE.md section 3 gives the Sophos wire spelling precedence here.
+    # element. the project build rules, section 3 gives the Sophos wire spelling precedence here.
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '')]
     [CmdletBinding(SupportsShouldProcess)]
     param(
@@ -9846,7 +9846,7 @@ function Remove-SfosFirewallAuthenticationMethodsMember {
 function Get-SfosFirewallAuthenticationNTLMSettings {
     # PSUseSingularNouns is suppressed on purpose: <FirewallAuthenticationNTLMSettings> is
     # the entity's own singleton name, not a plural container - it has no singular child
-    # element. CLAUDE.md section 3 gives the Sophos wire spelling precedence here.
+    # element. the project build rules, section 3 gives the Sophos wire spelling precedence here.
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '')]
     [CmdletBinding()]
     param(
@@ -9953,7 +9953,7 @@ function Get-SfosFirewallAuthenticationNTLMSettings {
 function Set-SfosFirewallAuthenticationNTLMSettings {
     # PSUseSingularNouns is suppressed on purpose: <FirewallAuthenticationNTLMSettings> is
     # the entity's own singleton name, not a plural container - it has no singular child
-    # element. CLAUDE.md section 3 gives the Sophos wire spelling precedence here.
+    # element. the project build rules, section 3 gives the Sophos wire spelling precedence here.
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '')]
     [CmdletBinding(SupportsShouldProcess)]
     param(
@@ -10093,7 +10093,7 @@ function Set-SfosFirewallAuthenticationNTLMSettings {
 function Get-SfosFirewallAuthenticationCTASSettings {
     # PSUseSingularNouns is suppressed on purpose: <FirewallAuthenticationCTASSettings> is
     # the entity's own singleton name, not a plural container - it has no singular child
-    # element. CLAUDE.md section 3 gives the Sophos wire spelling precedence here.
+    # element. the project build rules, section 3 gives the Sophos wire spelling precedence here.
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '')]
     [CmdletBinding()]
     param(
@@ -10202,7 +10202,7 @@ function Get-SfosFirewallAuthenticationCTASSettings {
 function Set-SfosFirewallAuthenticationCTASSettings {
     # PSUseSingularNouns is suppressed on purpose: <FirewallAuthenticationCTASSettings> is
     # the entity's own singleton name, not a plural container - it has no singular child
-    # element. CLAUDE.md section 3 gives the Sophos wire spelling precedence here.
+    # element. the project build rules, section 3 gives the Sophos wire spelling precedence here.
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '')]
     [CmdletBinding(SupportsShouldProcess)]
     param(
@@ -10341,7 +10341,7 @@ function Set-SfosFirewallAuthenticationCTASSettings {
 function Get-SfosFirewallAuthenticationiOSWebClientSettings {
     # PSUseSingularNouns is suppressed on purpose: <FirewallAuthenticationiOSWebClientSettings>
     # is the entity's own singleton name, not a plural container - it has no singular child
-    # element. CLAUDE.md section 3 gives the Sophos wire spelling precedence here.
+    # element. the project build rules, section 3 gives the Sophos wire spelling precedence here.
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '')]
     [CmdletBinding()]
     param(
@@ -10444,7 +10444,7 @@ function Get-SfosFirewallAuthenticationiOSWebClientSettings {
 function Set-SfosFirewallAuthenticationiOSWebClientSettings {
     # PSUseSingularNouns is suppressed on purpose: <FirewallAuthenticationiOSWebClientSettings>
     # is the entity's own singleton name, not a plural container - it has no singular child
-    # element. CLAUDE.md section 3 gives the Sophos wire spelling precedence here.
+    # element. the project build rules, section 3 gives the Sophos wire spelling precedence here.
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '')]
     [CmdletBinding(SupportsShouldProcess)]
     param(
@@ -12332,7 +12332,7 @@ function Remove-SfosSSLVPNAuthenticationMember {
 function Get-SfosWebAuthenticationSettings {
     # PSUseSingularNouns is suppressed on purpose: <WebAuthenticationSettings> is the
     # entity's own singleton name, not a plural container - it has no singular child
-    # element. CLAUDE.md section 3 gives the Sophos wire spelling precedence here.
+    # element. the project build rules, section 3 gives the Sophos wire spelling precedence here.
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '')]
     [CmdletBinding()]
     param(
@@ -12494,7 +12494,7 @@ function Get-SfosWebAuthenticationSettings {
 function Set-SfosWebAuthenticationSettings {
     # PSUseSingularNouns is suppressed on purpose: <WebAuthenticationSettings> is the
     # entity's own singleton name, not a plural container - it has no singular child
-    # element. CLAUDE.md section 3 gives the Sophos wire spelling precedence here.
+    # element. the project build rules, section 3 gives the Sophos wire spelling precedence here.
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '')]
     [CmdletBinding(SupportsShouldProcess)]
     param(
@@ -12654,7 +12654,7 @@ function Set-SfosWebAuthenticationSettings {
         active one is empty, not $null. SsoButtonLabel is not in the sample XML on the
         operations page but is documented in that page's own Attribute/Parameter Information
         table (default "Single sign-on") and is confirmed live inside <DefaultLayout> - a
-        table/sample disagreement per CLAUDE.md section 5, not an undocumented field.
+        table/sample disagreement per the project build rules, section 5, not an undocumented field.
         SystemGeneratedHtml is read-only in every test run against this firmware: setting
         UserDefinedTemplate to real HTML content left SystemGeneratedHtml empty rather than
         populating it, and the operations page's own Attribute/Parameter Information table
@@ -12878,7 +12878,7 @@ function Set-SfosCaptivePortalAppearance {
     # PSAvoidUsingUsernameAndPasswordParams/PSAvoidUsingPlainTextForPassword are false
     # positives: -PasswordFieldLabel is the caption text shown next to the password
     # input box on the captive portal login page, not a credential, and the fixed
-    # connection -Password parameter (CLAUDE.md section 4) is already a SecureString.
+    # connection -Password parameter (the project build rules, section 4) is already a SecureString.
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingUsernameAndPasswordParams', '')]
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingPlainTextForPassword', 'PasswordFieldLabel')]
     [CmdletBinding(SupportsShouldProcess)]
@@ -13083,7 +13083,7 @@ function Set-SfosCaptivePortalAppearance {
         The sample XML on the operations page also shows an 18th field, EnterValidUsername,
         sitting between EnterUsername and EnterPassword (it is absent from the page's own
         Attribute/Parameter Information table - the two disagree on which fields exist, per
-        CLAUDE.md section 5). Measured live: a Get of DefaultCaptivePortal does not return an
+        the project build rules, section 5). Measured live: a Get of DefaultCaptivePortal does not return an
         EnterValidUsername element at all on this firmware. Same precedent as FileType/
         -Template in the Web module: a field the Get never returns cannot be read back, so
         Set-SfosDefaultCaptivePortal does not expose it either, rather than implementing a
@@ -13176,8 +13176,8 @@ function Get-SfosDefaultCaptivePortal {
         Measured live: sending a Set with only an unrecognised element under
         DefaultCaptivePortal (no real field at all) answered code="200" and left every one of
         the 17 real fields on the firewall unchanged - unlike the singletons documented in
-        CLAUDE.md section 5 where an update clears every omitted field. This cmdlet still
-        performs full read-modify-write regardless, per CLAUDE.md section 5's rule that this
+        the project build rules, section 5 where an update clears every omitted field. This cmdlet still
+        performs full read-modify-write regardless, per the project build rules, section 5's rule that this
         applies "without exception" - the single data point above is not treated as proof that
         every field is safe to omit.
 
@@ -13287,7 +13287,7 @@ function Set-SfosDefaultCaptivePortal {
     # PSAvoidUsingUsernameAndPasswordParams/PSAvoidUsingPlainTextForPassword are false
     # positives: -PasswordFieldLabel, -CredentialLoginButtonLabel and -EnterPassword are
     # caption texts shown on the default captive portal login page, not credentials, and
-    # the fixed connection -Password parameter (CLAUDE.md section 4) is already a
+    # the fixed connection -Password parameter (the project build rules, section 4) is already a
     # SecureString.
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingUsernameAndPasswordParams', '')]
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingPlainTextForPassword', 'PasswordFieldLabel')]
@@ -13924,7 +13924,7 @@ function Remove-SfosDirectWebProxyAuthenticationMember {
 # path, including - measured, not merely assumed - when the ServerName does not exist,
 # which is documented as a known limitation below.
 #
-# Three-source conflict, resolved by live measurement per CLAUDE.md 5: the Attribute/
+# Three-source conflict, resolved by live measurement per the project build rules 5: the Attribute/
 # Parameter table on the Sophos 22.0 doc page names the RoleMapping profile field
 # 'profileidentifier'; the sample XML on the same page calls it 'profileid'. A live
 # <Set operation="add"> using 'profileid' was accepted and echoed back verbatim by <Get> as
@@ -13963,7 +13963,7 @@ function Remove-SfosDirectWebProxyAuthenticationMember {
 # (code 200) - the firewall does not enforce this constraint server-side. ValidateSet is
 # kept here regardless, because the two keywords are the only values that have any
 # documented meaning to the firewall; sending anything else is accepted but does nothing
-# useful. This deviation from doc-vs-measured is recorded here per CLAUDE.md 5, not silently
+# useful. This deviation from doc-vs-measured is recorded here per the project build rules 5, not silently
 # corrected away.
 
 <#
@@ -14562,7 +14562,7 @@ function Set-SfosAzureADSSO {
         Minimum supported PowerShell version: 5.1
         Known limitation, measured live: removing a ServerName that does not exist answers
         code 200 "Configuration applied successfully" - the same misleading behaviour already
-        recorded for Remove-Sfos* generally in CLAUDE.md, but here without even the raw-528
+        recorded for Remove-Sfos* generally in the project build rules, but here without even the raw-528
         passthrough other entities show. This cmdlet does not pre-check existence (consistent
         with every other Remove-Sfos* in this module); the caller cannot distinguish "removed"
         from "never existed" from the response alone.
@@ -14909,7 +14909,7 @@ function Set-SfosSTAS {
 # 'Android' are allowed", but the page's own sample XML comment lists four options -
 # "iOS/Android/iPhone/iPad". Measured live: <DeviceType>iPhone</DeviceType> is accepted with
 # status 200, contradicting the table. The ValidateSet below follows the sample and the live
-# measurement, not the narrower table wording - per CLAUDE.md section 5, when the sources
+# measurement, not the narrower table wording - per the project build rules, section 5, when the sources
 # disagree only a live call settles it.
 
 <#
@@ -14925,7 +14925,7 @@ function Set-SfosSTAS {
         .PARAMETER UserNameLike
         Optional username filter, matched as a substring anywhere in the value. Applied
         client-side only - server-side filtering for this entity has not been verified, so no
-        <Filter> is sent (CLAUDE.md section 6: an unverified key risks a silent full-table scan
+        <Filter> is sent (the project build rules, section 6: an unverified key risks a silent full-table scan
         rather than a real filter).
 
         .PARAMETER HostIPLike
@@ -14974,7 +14974,7 @@ function Set-SfosSTAS {
         carrying <UserID>, <UserName>, <LiveUserID>, <ClientType>, <HostIP>, <IPFamily>, <MAC>,
         <StartTime>, <Upload>, <Download>, <DataTransferRate> and <InternetUsageTime>. An empty
         result answers <LiveUser transactionid=""><Status>No. of records Zero.</Status></LiveUser>
-        with no <UserID> - matching CLAUDE.md section 5's documented empty-result wording - and
+        with no <UserID> - matching the project build rules, section 5's documented empty-result wording - and
         is returned as an empty array rather than thrown. The status path is
         /Response/LiveUser/Status, so -ObjectName below is 'LiveUser', same as the entity name -
         unlike Connect-/Disconnect-SfosLiveUser, whose status sits under the operation's own
@@ -14987,7 +14987,7 @@ function Set-SfosSTAS {
         case-insensitively with their own -Username connection parameter and breaks the whole
         cmdlet - Get-Help and every invocation throw "parameter 'Username' cannot be specified
         because it conflicts with the parameter alias of the same name" - measured while
-        building this cmdlet, the same failure mode CLAUDE.md section 4 already documents for
+        building this cmdlet, the same failure mode the project build rules, section 4 already documents for
         -ServerPort. Adding the alias on this cmdlet's output instead avoids the collision
         entirely.
 
@@ -15015,7 +15015,7 @@ function Get-SfosLiveUser {
     $params = Resolve-SfosParameters -BoundParameters $PSBoundParameters
 
     # No server-side filter key is sent: server-side filtering for LiveUser has not been
-    # verified against a live firewall (CLAUDE.md section 6), so both -UserNameLike and
+    # verified against a live firewall (the project build rules, section 6), so both -UserNameLike and
     # -HostIPLike are applied client-side only, below.
     $inner = @"
 <Get>
@@ -15104,7 +15104,7 @@ function Get-SfosLiveUser {
 
         .PARAMETER LiveUserName
         Guest/end-user username to log in. Wire element is <UserName>; named -LiveUserName
-        here because -Username is already the fixed connection parameter (CLAUDE.md section 4)
+        here because -Username is already the fixed connection parameter (the project build rules, section 4)
         and cannot be reused - measured elsewhere in this module (section 4, -ServerPort) that
         a parameter alias colliding with another parameter's own name breaks the whole
         command's metadata resolution, so this is a rename, not an alias.
@@ -15180,7 +15180,7 @@ function Connect-SfosLiveUser {
         # connection parameter below and breaks the whole cmdlet (Get-Help and every invocation
         # throw "parameter 'Username' cannot be specified because it conflicts with the
         # parameter alias of the same name" - measured while building this cmdlet, same failure
-        # mode CLAUDE.md section 4 already documents for -ServerPort). Pipeline binding by
+        # mode the project build rules, section 4 already documents for -ServerPort). Pipeline binding by
         # property name instead relies on Get-SfosLiveUser exposing matching AliasProperty
         # members (LiveUserName, IPAddress) on its output - see that cmdlet's .NOTES.
         [Parameter(Mandatory, ValueFromPipelineByPropertyName)]
@@ -15286,7 +15286,7 @@ function Connect-SfosLiveUser {
         # NOT the case here: every login attempt measured live - success and both provoked failures
         # alike - answered with a <Status code="..."> under /Response/LiveUserLogin. If a future
         # firmware ever omits it, this call still refuses to report a success it cannot back up
-        # (CLAUDE.md section 5: a missing status element is not success), instead of silently
+        # (the project build rules, section 5: a missing status element is not success), instead of silently
         # passing through Assert-SfosApiReturnSuccess's lenient default.
         $statusList = @(Get-SfosApiStatus -Xml $XmlResponse -ObjectName 'LiveUserLogin' | Where-Object { $_ })
         if ($statusList.Count -eq 0) {

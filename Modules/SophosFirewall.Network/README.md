@@ -380,7 +380,7 @@ of that.
   this entity, so this module ships no `New-`/`Remove-SfosGatewayConfiguration` `[doc]`.
 - **`Zone`'s server-side filter on `Type` returns zero matches instead of every zone.**
   `Get-SfosZone -TypeLike` is therefore applied client-side only, same as every other
-  unsupported filter key (CLAUDE.md section 6).
+  unsupported filter key (the project build rules, section 6).
 - **`New-`/`Set-SfosGreRoute` use `-HostAddress` (alias `-Host`).** `$Host` is an automatic
   PowerShell variable holding the console host; a parameter literally named `-Host` would
   shadow it inside the function. The wire element stays `<Host>`.

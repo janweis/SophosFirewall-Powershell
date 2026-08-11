@@ -1120,7 +1120,7 @@ Describe 'LiveUser - undocumented write path throws on a status-less response' {
 Describe 'Get-SfosLiveUser' {
     # Live-verified request/response shape (2026-08-11): <Get><LiveUser></LiveUser></Get>, no
     # server-side filter key - server-side filtering for this entity has not been confirmed, so
-    # none is sent (CLAUDE.md section 6). Empty result answers
+    # none is sent (the project build rules, section 6). Empty result answers
     # <LiveUser transactionid=""><Status>No. of records Zero.</Status></LiveUser>.
 
     BeforeAll {

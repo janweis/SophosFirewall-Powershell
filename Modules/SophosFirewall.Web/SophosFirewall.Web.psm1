@@ -1314,7 +1314,7 @@ function New-SfosFileType {
         Template appears only in the vendor's sample XML, not in the documented attribute
         table, and Get-SfosFileType never returns a <Template> element - measured on SFOS
         22.0 / APIVersion 2200.1, whether or not one was sent. A field the Get cannot read
-        back is a field the read-modify-write cannot preserve (see CLAUDE.md section 5), so
+        back is a field the read-modify-write cannot preserve (see the project build rules, section 5), so
         offering it here would promise something the API does not deliver. Template is
         therefore a create-time parameter only.
 
@@ -1732,7 +1732,7 @@ function Get-SfosWebFilterCategory {
         external (URL-based) category. ConfigureCategory is not exposed as its own
         parameter - it is derived from which parameter set is selected: passing -Domain
         and/or -Keyword builds a 'Local' category, passing -Url builds an 'External' one
-        (CLAUDE.md section 4). The firewall documents Classification, QoSPolicy and
+        (the project build rules, section 4). The firewall documents Classification, QoSPolicy and
         ConfigureCategory as optional, but rejects a create that omits any of them with a
         500/501, so all three are always sent.
 
@@ -1979,7 +1979,7 @@ function New-SfosWebFilterCategory {
         singled out by the firewall as effectively mandatory (500/501 if missing), so both
         are always sent. ConfigureCategory cannot be split into parameter sets here: with
         pipeline input PowerShell fixes the parameter set before it binds properties
-        (CLAUDE.md section 4), so a Get-SfosWebFilterCategory | Set-SfosWebFilterCategory call
+        (the project build rules, section 4), so a Get-SfosWebFilterCategory | Set-SfosWebFilterCategory call
         would silently land in whichever set is the default. It is therefore a single
         mandatory parameter instead, matching the pattern used for HostType in
         Set-SfosIPHost.
@@ -3606,7 +3606,7 @@ function New-SfosWebFilterException {
     }
 
     # Die Enable*-Felder sind keine eigenen Parameter, sondern werden aus dem
-    # Vorhandensein des jeweiligen Array-Parameters abgeleitet (CLAUDE.md SS4). So kann
+    # Vorhandensein des jeweiligen Array-Parameters abgeleitet (the project build rules SS4). So kann
     # der Aufrufer den live bestaetigten Invalid-State "Enable*=yes ohne Daten" gar
     # nicht erst erzeugen.
     $enableSrcIP = if ($SourceIPAddress -and @($SourceIPAddress).Count -gt 0) { 'yes' } else { 'no' }
@@ -3975,7 +3975,7 @@ function Set-SfosWebFilterException {
         }
 
         # Die Enable*-Felder sind keine eigenen Parameter, sondern werden aus dem
-        # Vorhandensein der jeweiligen Zielliste abgeleitet (CLAUDE.md SS4). So kann der
+        # Vorhandensein der jeweiligen Zielliste abgeleitet (the project build rules SS4). So kann der
         # Aufrufer den live bestaetigten Invalid-State "Enable*=yes ohne Daten" gar nicht
         # erst erzeugen.
         $enableSrcIP = if (@($targetSourceIPAddress).Count -gt 0) { 'yes' } else { 'no' }
@@ -4206,7 +4206,7 @@ function Remove-SfosWebFilterException {
     by Get-SfosWebFilterPolicy) into the <Category><ID>...</ID><type>...</type></Category>
     fragment SFOS expects inside a rule's <CategoryList>.
 
-    The wire element is lowercase <type> - confirmed live, and the same oddity CLAUDE.md
+    The wire element is lowercase <type> - confirmed live, and the same oddity the project build rules
     documents for UserActivity's <type> child element. The object property stays PascalCase
     ("Type") for PowerShell ergonomics; only the emitted XML tag is lowercase.
 
@@ -5478,7 +5478,7 @@ function New-SfosWebFilterPolicyRule {
         # -InputObject, otherwise the parameter default. The ContainsKey test is what makes
         # editing safe - without it every default would overwrite the base, so changing one
         # field of an existing rule would silently reset Schedule and the enabled flags.
-        # Same reasoning as New-SfosFirewallRuleNetworkPolicy; see CLAUDE.md section 5.
+        # Same reasoning as New-SfosFirewallRuleNetworkPolicy; see the project build rules, section 5.
         #
         # -Category cannot be Mandatory any more, because a rule arriving through
         # -InputObject already carries its categories. Without either, there is nothing to
@@ -6314,7 +6314,7 @@ function Set-SfosSurfingQuotaPolicy {
         # Parameter sets cannot carry this: with pipeline input PowerShell fixes the set
         # before it binds properties, so a Cyclic/NonCyclic-specific parameter would never
         # bind for the type that is not the default set. The combination is validated here
-        # instead, against a single parameter set (CLAUDE.md SS4).
+        # instead, against a single parameter set (the project build rules SS4).
         $xmlTypeFields = ''
         switch ($CycleType) {
             'Cyclic' {
@@ -7396,7 +7396,7 @@ function Remove-SfosContentConditionListMember {
 # These five elements are singletons on the Sophos Firewall: there is exactly one instance
 # per firewall, it has no <Name>, and the API exposes no create/delete for it - only <Get>
 # and <Set operation="update">. That is why this fragment has no New-*/Remove-* cmdlets for
-# them, unlike every other entity in this module family (CLAUDE.md SS4 permits deviation from
+# them, unlike every other entity in this module family (the project build rules SS4 permits deviation from
 # the CRUD skeleton when documented with a reason; this is the reason).
 #
 # IMPORTANT correction versus the original spec (web-spec.md SS0/SS7): live testing against
@@ -7406,7 +7406,7 @@ function Remove-SfosContentConditionListMember {
 # the "true single-field update" assumption in the spec. Because it is unknown which other
 # fields on which of these five entities carry the same defect, every Set-* cmdlet in this
 # fragment now follows the same read-modify-write pattern as the object entities elsewhere in
-# this module family (CLAUDE.md SS5): call the matching Get-* first, resolve each field to the
+# this module family (the project build rules SS5): call the matching Get-* first, resolve each field to the
 # caller's explicit value (via $PSBoundParameters.ContainsKey()) or otherwise the value just
 # read back, and always send the complete entity. This costs one extra GET per Set, but closes
 # the defect regardless of which field actually triggers it - the root cause was deliberately
@@ -7648,7 +7648,7 @@ function Set-SfosMalwareProtection {
 function Get-SfosWebFilterSettings {
     # PSUseSingularNouns is suppressed on purpose. 'Settings' is not a plural container here
     # but the name of the entity itself - the API element is <WebFilterSettings>, a singleton
-    # holding one configuration, and it has no <WebFilterSetting> child. CLAUDE.md section 3
+    # holding one configuration, and it has no <WebFilterSetting> child. the project build rules, section 3
     # puts the Sophos spelling above PowerShell habit and reserves the singular concession
     # for elements that really do wrap a list, such as <Services> around <Service>.
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '')]
@@ -7814,7 +7814,7 @@ function Get-SfosWebFilterSettings {
 function Set-SfosWebFilterSettings {
     # PSUseSingularNouns is suppressed on purpose. 'Settings' is not a plural container here
     # but the name of the entity itself - the API element is <WebFilterSettings>, a singleton
-    # holding one configuration, and it has no <WebFilterSetting> child. CLAUDE.md section 3
+    # holding one configuration, and it has no <WebFilterSetting> child. the project build rules, section 3
     # puts the Sophos spelling above PowerShell habit and reserves the singular concession
     # for elements that really do wrap a list, such as <Services> around <Service>.
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '')]
@@ -7968,7 +7968,7 @@ function Set-SfosWebFilterSettings {
 function Get-SfosWebFilterProtectionSettings {
     # PSUseSingularNouns is suppressed on purpose. 'Settings' is not a plural container here
     # but the name of the entity itself - the API element is <WebFilterProtectionSettings>, a singleton
-    # holding one configuration, and it has no <WebFilterProtectionSetting> child. CLAUDE.md section 3
+    # holding one configuration, and it has no <WebFilterProtectionSetting> child. the project build rules, section 3
     # puts the Sophos spelling above PowerShell habit and reserves the singular concession
     # for elements that really do wrap a list, such as <Services> around <Service>.
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '')]
@@ -8113,7 +8113,7 @@ function Get-SfosWebFilterProtectionSettings {
 function Set-SfosWebFilterProtectionSettings {
     # PSUseSingularNouns is suppressed on purpose. 'Settings' is not a plural container here
     # but the name of the entity itself - the API element is <WebFilterProtectionSettings>, a singleton
-    # holding one configuration, and it has no <WebFilterProtectionSetting> child. CLAUDE.md section 3
+    # holding one configuration, and it has no <WebFilterProtectionSetting> child. the project build rules, section 3
     # puts the Sophos spelling above PowerShell habit and reserves the singular concession
     # for elements that really do wrap a list, such as <Services> around <Service>.
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '')]
@@ -8258,7 +8258,7 @@ function Set-SfosWebFilterProtectionSettings {
 function Get-SfosWebFilterAdvancedSettings {
     # PSUseSingularNouns is suppressed on purpose. 'Settings' is not a plural container here
     # but the name of the entity itself - the API element is <WebFilterAdvancedSettings>, a singleton
-    # holding one configuration, and it has no <WebFilterAdvancedSetting> child. CLAUDE.md section 3
+    # holding one configuration, and it has no <WebFilterAdvancedSetting> child. the project build rules, section 3
     # puts the Sophos spelling above PowerShell habit and reserves the singular concession
     # for elements that really do wrap a list, such as <Services> around <Service>.
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '')]
@@ -8368,7 +8368,7 @@ function Get-SfosWebFilterAdvancedSettings {
 function Set-SfosWebFilterAdvancedSettings {
     # PSUseSingularNouns is suppressed on purpose. 'Settings' is not a plural container here
     # but the name of the entity itself - the API element is <WebFilterAdvancedSettings>, a singleton
-    # holding one configuration, and it has no <WebFilterAdvancedSetting> child. CLAUDE.md section 3
+    # holding one configuration, and it has no <WebFilterAdvancedSetting> child. the project build rules, section 3
     # puts the Sophos spelling above PowerShell habit and reserves the singular concession
     # for elements that really do wrap a list, such as <Services> around <Service>.
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '')]
@@ -8494,7 +8494,7 @@ function Set-SfosWebFilterAdvancedSettings {
 function Get-SfosDefaultWebFilterNotificationSettings {
     # PSUseSingularNouns is suppressed on purpose. 'Settings' is not a plural container here
     # but the name of the entity itself - the API element is <DefaultWebFilterNotificationSettings>, a singleton
-    # holding one configuration, and it has no <DefaultWebFilterNotificationSetting> child. CLAUDE.md section 3
+    # holding one configuration, and it has no <DefaultWebFilterNotificationSetting> child. the project build rules, section 3
     # puts the Sophos spelling above PowerShell habit and reserves the singular concession
     # for elements that really do wrap a list, such as <Services> around <Service>.
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '')]
@@ -8591,7 +8591,7 @@ function Get-SfosDefaultWebFilterNotificationSettings {
 function Set-SfosDefaultWebFilterNotificationSettings {
     # PSUseSingularNouns is suppressed on purpose. 'Settings' is not a plural container here
     # but the name of the entity itself - the API element is <DefaultWebFilterNotificationSettings>, a singleton
-    # holding one configuration, and it has no <DefaultWebFilterNotificationSetting> child. CLAUDE.md section 3
+    # holding one configuration, and it has no <DefaultWebFilterNotificationSetting> child. the project build rules, section 3
     # puts the Sophos spelling above PowerShell habit and reserves the singular concession
     # for elements that really do wrap a list, such as <Services> around <Service>.
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '')]

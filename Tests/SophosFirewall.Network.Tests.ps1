@@ -10,7 +10,7 @@
     Invoke-SfosApi is always mocked; no test touches a real firewall.
 
     With 100 exported functions, exhaustive per-cmdlet coverage is neither achievable nor
-    useful. Coverage here is weighted towards the failure modes CLAUDE.md and the module's own
+    useful. Coverage here is weighted towards the failure modes the project build rules and the module's own
     .NOTES call out as measured, expensive defects: the eight wire element names that differ
     from their documentation folder (a wrong root element answers 529 and fails silently for
     every caller who does not inspect the raw response), the read-modify-write cmdlets whose
@@ -57,7 +57,7 @@ Describe 'Module Loading' {
         # merge precedence (Resolve-SfosGatewayFieldValue). If FunctionsToExport ever grew to
         # include one of these by accident, a caller could bypass the read-modify-write logic
         # in the matching Set-* and send an incomplete entity that silently drops fields
-        # (CLAUDE.md section 5).
+        # (the project build rules, section 5).
         It 'None of the 17 private helpers should be visible' {
             $privateHelpers = @(
                 'ConvertTo-SfosInterfaceXml',
@@ -86,7 +86,7 @@ Describe 'Module Loading' {
 }
 
 Describe 'Wire Element Names (doc folder differs from API element)' {
-    # CLAUDE.md section 3 / module header: eight documentation folders carry a different name
+    # the project build rules, section 3 / module header: eight documentation folders carry a different name
     # than the XML element they describe. A wrong root element answers 529 "Input request
     # module is Invalid" - or, for GreTunnel/GreRoute, silently hits a same-named-but-wrong-case
     # element instead, since the two only differ in capitalisation from their doc folders
@@ -246,7 +246,7 @@ Describe 'Read-Modify-Write' {
 
     Context 'Set-SfosInterface' {
         BeforeEach {
-            # Set-SfosInterface reads the current interface first (CLAUDE.md section 5). The
+            # Set-SfosInterface reads the current interface first (the project build rules, section 5). The
             # mocked Get answers with a fully populated interface so a partial -MTU-only update
             # can be checked against it: IPAddress/Netmask/NetworkZone/IPv4Assignment are the
             # fields whose loss would be most expensive (dropping the session's own IP or zone).
@@ -289,7 +289,7 @@ Describe 'Read-Modify-Write' {
 
         It 'Should resend IPAddress, Netmask, NetworkZone and IPv4Assignment unchanged on an MTU-only update' {
             # Omitting any of these on a live update would silently clear the field
-            # (CLAUDE.md section 5) - on a physical port this can drop the session's own IP.
+            # (the project build rules, section 5) - on a physical port this can drop the session's own IP.
             Set-SfosInterface -Hardware 'Port9' -MTU 9000 @conn -Confirm:$false
 
             Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Network -Times 1 -Exactly -ParameterFilter {

@@ -178,7 +178,7 @@ function ConvertTo-SfosFirewallRuleNetworkPolicyXml {
     # confirmed in fw-live-FirewallRule.xml on all six existing rules. The vendor doc's
     # attribute table uses the correctly spelled "TrafficShapingPolicy"; sending that name
     # instead would land on an unknown element and the field would not be set. Same class of
-    # trap as the invented <CountryHostGroup> element documented in CLAUDE.md - the wire
+    # trap as the invented <CountryHostGroup> element documented in the project build rules - the wire
     # spelling wins.
     $trafficShapingEsc = ConvertTo-SfosXmlEscaped -Text ([string]$NetworkPolicy.TrafficShappingPolicy)
     $scanSmtpEsc = ConvertTo-SfosXmlEscaped -Text ([string]$NetworkPolicy.ScanSMTP)
@@ -578,7 +578,7 @@ function Get-SfosFirewallRule {
     -InputObject that is already the parameter's documented default, because PowerShell assigns
     parameter defaults before the function body runs regardless of whether the caller supplied
     the parameter. Centralised here so the precedence cannot drift between the ~30 NetworkPolicy
-    fields (CLAUDE.md section 5's "$PSBoundParameters.ContainsKey, not a truthiness test").
+    fields (the project build rules, section 5's "$PSBoundParameters.ContainsKey, not a truthiness test").
 
 .PARAMETER IsBound
     Whether the caller explicitly passed the parameter, from $PSBoundParameters.ContainsKey.
@@ -1396,7 +1396,7 @@ function Set-SfosFirewallRule {
         # actually passed (checked via $PSBoundParameters.ContainsKey, never a truthiness test)
         # overrides the base, everything else is copied from the current rule (or -NetworkPolicy,
         # if given). A default here would make that field look "passed" on every call and
-        # silently reset it - the same trap CLAUDE.md section 5 documents for -IPFamily.
+        # silently reset it - the same trap the project build rules, section 5 documents for -IPFamily.
         [ValidateSet('Accept', 'Reject', 'Drop')]
         [string]$Action,
 
@@ -3566,7 +3566,7 @@ function Remove-SfosNATRule {
     Services/Service - all repeatable single-value lists wrapped in one outer
     element [doc, sample XML on the Add/Update operations page]. Every value is
     escaped here. An empty or absent -Value still returns the (empty) wrapper
-    element, because SFOS replaces the whole entity on update - see CLAUDE.md
+    element, because SFOS replaces the whole entity on update - see the project build rules
     SS5 - and an absent wrapper is how a field gets cleared, not how it is left
     unchanged.
 
@@ -3647,7 +3647,7 @@ function ConvertTo-SfosSSLTLSInspectionRuleWebsitesXml {
     property shape Get-SfosSSLTLSInspectionRule returns - and escapes every value.
 
     SFOS replaces the whole entity on <Set operation="update">: any element this function
-    does not emit is cleared on the firewall [doc, CLAUDE.md SS5]. The caller is responsible
+    does not emit is cleared on the firewall [doc, the project build rules SS5]. The caller is responsible
     for merging in every field it wants preserved before calling this function; nothing is
     read back here.
 
@@ -4088,7 +4088,7 @@ function New-SfosSSLTLSInspectionRule {
         supply the target rule name directly or via the pipeline.
 
         SFOS replaces the whole entity on update - any element not sent in the request is
-        cleared on the firewall [doc, CLAUDE.md SS5]. This cmdlet reads the current rule first
+        cleared on the firewall [doc, the project build rules SS5]. This cmdlet reads the current rule first
         and keeps whatever the caller does not explicitly pass. List parameters
         (SourceZones/SourceNetworks/Identity/DestinationZones/DestinationNetworks/Services/
         Website) are wholesale replacements when supplied, not merges - to add one zone to an
@@ -4315,7 +4315,7 @@ function Set-SfosSSLTLSInspectionRule {
         Removes a SSLTLSInspectionRule using the Sophos Firewall XML API. This cmdlet
         supports ShouldProcess; use -WhatIf to preview the change.
 
-        Unlike the general Remove-Sfos* pattern in this codebase (see CLAUDE.md "Still open",
+        Unlike the general Remove-Sfos* pattern in this codebase (see the project build rules "Still open",
         which passes the raw firewall error through for a non-existent object rather than
         reading first), this cmdlet reads the object before deleting it, at the cost of one
         extra round trip per call. The reason is specific to this entity: the firewall's only
@@ -4485,7 +4485,7 @@ function Remove-SfosSSLTLSInspectionRule {
 function Get-SfosSSLTLSInspectionSettings {
     # PSUseSingularNouns is suppressed on purpose. 'Settings' is not a plural container here
     # but the name of the entity itself - the API element is <SSLTLSInspectionSettings>, a
-    # singleton holding one configuration. CLAUDE.md section 3 puts the Sophos spelling above
+    # singleton holding one configuration. the project build rules, section 3 puts the Sophos spelling above
     # PowerShell habit.
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '')]
     [CmdletBinding()]
@@ -4612,7 +4612,7 @@ function Get-SfosSSLTLSInspectionSettings {
 function Set-SfosSSLTLSInspectionSettings {
     # PSUseSingularNouns is suppressed on purpose. 'Settings' is not a plural container here
     # but the name of the entity itself - the API element is <SSLTLSInspectionSettings>, a
-    # singleton holding one configuration. CLAUDE.md section 3 puts the Sophos spelling above
+    # singleton holding one configuration. the project build rules, section 3 puts the Sophos spelling above
     # PowerShell habit.
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '')]
     [CmdletBinding(SupportsShouldProcess)]

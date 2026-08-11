@@ -117,7 +117,7 @@ Describe 'Request XML Generation' {
 
         # Documentation folder for this entity is "SecurityPolicy"; sending that as the
         # wire root answers 529 "Input request module is Invalid" on a live firewall
-        # (CLAUDE.md SS5, module header). This test locks in the measured element name.
+        # (the project build rules SS5, module header). This test locks in the measured element name.
         It 'Should never send SecurityPolicy as the wire root element' {
             $np = New-SfosFirewallRuleNetworkPolicy -SourceZone 'LAN' -DestinationZone 'WAN'
             New-SfosFirewallRule -Name 'Allow-LAN-to-WAN' -Status Enable -Position Bottom -PolicyType Network -NetworkPolicy $np @conn -Confirm:$false
@@ -199,7 +199,7 @@ Describe 'Request XML Generation' {
 }
 
 Describe 'Status is a data field, not an API status' {
-    # Live-verified collision (CLAUDE.md module header): <Status> inside a FirewallRule node is
+    # Live-verified collision (the project build rules module header): <Status> inside a FirewallRule node is
     # the rule's own Enable/Disable flag, not a request status. A response carrying several
     # <FirewallRule><Status>Enable</Status></FirewallRule> siblings must not be read as a
     # broken/erroring request - Core's Get-SfosApiStatus tells the two apart before this
@@ -251,7 +251,7 @@ Describe 'Read-Modify-Write' {
         BeforeEach {
             # Set-SfosFirewallRule reads the current rule before writing, so the mock has to
             # answer a <Get> with a matching, fully resolved rule - including Position/After,
-            # the single most expensive field to lose (CLAUDE.md SS5).
+            # the single most expensive field to lose (the project build rules SS5).
             Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Firewall -MockWith {
                 if ($InnerXml -match '<Get>') {
                     [PSCustomObject]@{ Content = @'

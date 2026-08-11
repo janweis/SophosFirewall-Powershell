@@ -43,7 +43,7 @@ jobs:
             Write-Error "Secret 'PSGALLERY_API_KEY' is not set. Add it in the repository settings before running this workflow."
             exit 1
           }
-          Write-Host "✓ API key secret is present"
+          Write-Host "OK: API key secret is present"
 
       - name: Determine publish order
         id: plan
@@ -116,7 +116,7 @@ jobs:
             try {
               $manifest = Test-ModuleManifest -Path $manifestPath -ErrorAction Stop
               $result.Version = $manifest.Version.ToString()
-              Write-Host "✓ Manifest valid: $moduleName v$($result.Version)"
+              Write-Host "OK: Manifest valid: $moduleName v$($result.Version)"
             }
             catch {
               $result.Detail = "Test-ModuleManifest failed: $($_.Exception.Message)"
@@ -155,7 +155,7 @@ jobs:
               if ($exported.Count -eq 0) {
                 throw "Module imported but exports no functions."
               }
-              Write-Host "✓ Imports cleanly, exports $($exported.Count) function(s)"
+              Write-Host "OK: Imports cleanly, exports $($exported.Count) function(s)"
               Remove-Module -Name $moduleName -Force -ErrorAction SilentlyContinue
             }
             catch {
@@ -183,7 +183,7 @@ jobs:
                 Publish-Module -Path $moduleDir -NuGetApiKey $env:NUGET_API_KEY -Force -ErrorAction Stop
                 $result.Status = 'Published'
                 $result.Detail = "Published $moduleName v$($result.Version) to PowerShell Gallery"
-                Write-Host "✓ $($result.Detail)" -ForegroundColor Green
+                Write-Host "OK: $($result.Detail)" -ForegroundColor Green
               }
               catch {
                 $result.Detail = "Publish-Module failed: $($_.Exception.Message)"
@@ -196,7 +196,7 @@ jobs:
 
           $results | Format-Table -AutoSize | Out-String | Write-Host
 
-          $summary = "# 📦 Release Summary`n`n"
+          $summary = "# Release Summary`n`n"
           $summary += "| Module | Version | Status | Detail |`n"
           $summary += "|---|---|---|---|`n"
           foreach ($r in $results) {

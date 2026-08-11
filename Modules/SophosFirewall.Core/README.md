@@ -112,7 +112,15 @@ $safe = ConvertTo-SfosXmlEscaped -Text $description
 $xml = "<Set><Zone><Description>$safe</Description></Zone></Set>"
 ```
 
-**Escape Mappings:** `&` → `&amp;` | `<` → `&lt;` | `>` → `&gt;` | `"` → `&quot;` | `'` → `&apos;`
+Escape mappings:
+
+| Input | Output |
+|-------|--------|
+| `&` | `&amp;` |
+| `<` | `&lt;` |
+| `>` | `&gt;` |
+| `"` | `&quot;` |
+| `'` | `&apos;` |
 
 
 ## Troubleshooting

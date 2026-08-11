@@ -104,4 +104,4 @@ For security concerns, contact: jan.weis@it-explorations.de
 
 ---
 
-Thank you for helping keep this project secure! 🔒
+Thank you for helping keep this project secure.

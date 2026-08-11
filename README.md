@@ -80,13 +80,13 @@ Studio, Object usage, Logs, Advanced services, Services and ports, Certification
 
 ## Key Features
 
-- ✅ **330 Functions** - Six of roughly twenty API areas covered
-- ✅ **PowerShell 5.1+** - Full version compatibility
-- ✅ **Session Management** - One connection for all modules
-- ✅ **Pipeline Support** - Fluent cmdlet chaining
-- ✅ **Safety Features** - WhatIf/Confirm for write operations
-- ✅ **XML Security** - Automatic injection prevention
-- ✅ **Self-Signed Certs** - Test environment support
+- 330 functions covering six of roughly twenty API areas
+- PowerShell 5.1 and 7.x
+- Session management: connect once, use every module
+- Pipeline support between cmdlets
+- WhatIf/Confirm on all write operations
+- Automatic XML escaping of user input
+- Self-signed certificate support for test environments
 
 ## Requirements
 

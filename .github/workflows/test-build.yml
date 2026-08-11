@@ -92,9 +92,9 @@ jobs:
               Write-Error "PSScriptAnalyzer found $($errors.Count) error(s)"
               exit 1
             } else {
-              Write-Host "✓ No critical code analysis issues found" -ForegroundColor Green
+              Write-Host "OK: No critical code analysis issues found" -ForegroundColor Green
               if ($warnings) {
-                Write-Host "  ℹ $($warnings.Count) warning(s) detected (non-blocking)" -ForegroundColor Yellow
+                Write-Host "  $($warnings.Count) warning(s) detected (non-blocking)" -ForegroundColor Yellow
               }
             }
           }
@@ -119,10 +119,10 @@ jobs:
           foreach ($manifest in $manifests) {
             try {
               $testResult = Test-ModuleManifest -Path $manifest.FullName -ErrorAction Stop
-              Write-Host "✓ Valid: $($manifest.Name) (v$($testResult.Version))" -ForegroundColor Green
+              Write-Host "OK: Valid: $($manifest.Name) (v$($testResult.Version))" -ForegroundColor Green
             }
             catch {
-              Write-Error "✗ Invalid: $($manifest.Name) - $_"
+              Write-Error "FAIL: Invalid: $($manifest.Name) - $_"
               $failCount++
             }
           }
@@ -173,7 +173,7 @@ jobs:
             Write-Error "Security issues found: $($findings.Count) potential credential(s)"
             exit 1
           } else {
-            Write-Host "✓ No hardcoded credentials detected"
+            Write-Host "OK: No hardcoded credentials detected"
           }
 
   build-module:
@@ -203,10 +203,10 @@ jobs:
             $destDir = Join-Path $buildPath $moduleName
             
             Copy-Item -Path $moduleDir -Destination $destDir -Recurse -Force
-            Write-Host "📦 Built: $moduleName"
+            Write-Host "Built: $moduleName"
           }
           
-          Write-Host "✓ Build complete: $buildPath"
+          Write-Host "OK: Build complete: $buildPath"
       
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v7
@@ -243,7 +243,7 @@ jobs:
             # Don't fail build, just warn for now
             # exit 1
           } else {
-            Write-Host "✓ All modules have documentation"
+            Write-Host "OK: All modules have documentation"
           }
 
   summary:
@@ -255,7 +255,7 @@ jobs:
     steps:
       - name: Create Job Summary
         run: |
-          echo "# 🧪 Test Summary" >> $GITHUB_STEP_SUMMARY
+          echo "# Test Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- **Pester Tests**: ${{ needs.pester-test.result }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Code Analysis**: ${{ needs.code-analysis.result }}" >> $GITHUB_STEP_SUMMARY

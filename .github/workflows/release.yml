@@ -16,6 +16,7 @@ on:
           - SophosFirewall.Firewall
           - SophosFirewall.Network
           - SophosFirewall.Authentication
+          - SophosFirewall.Routing
       dryRun:
         description: 'Dry run (do not actually publish)'
         required: true
@@ -58,7 +59,8 @@ jobs:
               'SophosFirewall.Web',
               'SophosFirewall.Firewall',
               'SophosFirewall.Network',
-              'SophosFirewall.Authentication'
+              'SophosFirewall.Authentication',
+              'SophosFirewall.Routing'
             )
           } else {
             $order = @($selected)

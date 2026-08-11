@@ -6,12 +6,8 @@ cmdlets are shipped; roughly a dozen further areas of the API are still open.
 ## Quick Start
 
 ```powershell
-# 1a. SophosFirewall.Core is on the PowerShell Gallery
-Install-Module SophosFirewall.Core -Repository PSGallery -Scope CurrentUser
-
-# 1b. The domain modules are not published yet - import them from this repository
-$env:PSModulePath = "$PWD\Modules;$env:PSModulePath"
-Import-Module SophosFirewall.HostsAndServices
+# 1. Install from the PowerShell Gallery (SophosFirewall.Core is pulled in automatically)
+Install-Module SophosFirewall.HostsAndServices -Repository PSGallery -Scope CurrentUser
 
 # 2. Connect to firewall
 $cred = Get-Credential
@@ -24,7 +20,7 @@ New-SfosIPHost -Name "Server1" -HostType IP -IPAddress "10.0.0.5"
 
 ## Available Modules
 
-### Shipped (v1.0.0)
+### Shipped
 
 | Module | Functions | Purpose |
 |--------|-----------|---------|
@@ -38,12 +34,6 @@ New-SfosIPHost -Name "Server1" -HostType IP -IPAddress "10.0.0.5"
 330 cmdlets in total. Every one of them was called against a live SFOS 22.0 appliance, not
 only against mocks — the firmware behaviour that differs from the vendor documentation is
 recorded in the `.NOTES` of the affected function and summarised in each module README.
-
-Only `SophosFirewall.Core` is on the PowerShell Gallery. The package published there as
-`SophosFirewall.HostAndServices` — note the missing second "s" — is an **outdated** build
-that shipped an entity name (`CountryHostGroup`) the API does not have, which made every
-create, update and delete on country groups fail silently. Use the `HostsAndServices` module
-from this repository instead.
 
 ## Documentation
 

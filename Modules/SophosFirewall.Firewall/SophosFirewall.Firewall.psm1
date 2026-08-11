@@ -1,6 +1,5 @@
 #requires -Version 5.1
-#requires -Modules SophosFirewall.Core
-
+#requires -Modules @{ ModuleName = 'SophosFirewall.Core'; ModuleVersion = '1.1.0' }
 <#
         .SYNOPSIS
         Manages firewall rules, rule groups, NAT rules and SSL/TLS inspection on Sophos Firewall.

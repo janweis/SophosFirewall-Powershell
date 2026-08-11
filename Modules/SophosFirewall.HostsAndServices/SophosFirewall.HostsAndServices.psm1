@@ -1,6 +1,5 @@
 #requires -Version 5.1
-#requires -Modules SophosFirewall.Core
-
+#requires -Modules @{ ModuleName = 'SophosFirewall.Core'; ModuleVersion = '1.1.0' }
 <#
         .SYNOPSIS
         Manages IP hosts, FQDN hosts, MAC hosts, host groups, services, and service groups on Sophos Firewall.

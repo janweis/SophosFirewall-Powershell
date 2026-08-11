@@ -1,13 +1,17 @@
 # Sophos Firewall PowerShell Module Suite
 
-Comprehensive PowerShell module collection for Sophos XGS/SFOS firewall management. 21 modules with 474+ cmdlets for complete API coverage.
+PowerShell module collection for Sophos XGS/SFOS firewall management. Six modules with 330
+cmdlets are shipped; roughly a dozen further areas of the API are still open.
 
 ## Quick Start
 
 ```powershell
-# 1. Install from PowerShell Gallery
+# 1a. SophosFirewall.Core is on the PowerShell Gallery
 Install-Module SophosFirewall.Core -Repository PSGallery -Scope CurrentUser
-Install-Module SophosFirewall.HostsAndServices -Repository PSGallery -Scope CurrentUser
+
+# 1b. The domain modules are not published yet - import them from this repository
+$env:PSModulePath = "$PWD\Modules;$env:PSModulePath"
+Import-Module SophosFirewall.HostsAndServices
 
 # 2. Connect to firewall
 $cred = Get-Credential
@@ -20,7 +24,7 @@ New-SfosIPHost -Name "Server1" -HostType IP -IPAddress "10.0.0.5"
 
 ## Available Modules
 
-### Published (v1.0.0)
+### Shipped (v1.0.0)
 
 | Module | Functions | Purpose |
 |--------|-----------|---------|
@@ -29,13 +33,24 @@ New-SfosIPHost -Name "Server1" -HostType IP -IPAddress "10.0.0.5"
 | **SophosFirewall.Web** | 52 | Web protection: URL groups, categories, file types, filter policies and exceptions, quotas, settings |
 | **SophosFirewall.Firewall** | 21 | Firewall rules and rule groups, NAT rules, SSL/TLS inspection |
 | **SophosFirewall.Network** | 100 | Interfaces, VLANs, zones, gateways, DNS, DHCP, ARP, tunnels |
+| **SophosFirewall.Authentication** | 97 | Authentication servers, users and groups, guest and clientless users, one-time passwords, firewall/admin/VPN/web authentication, captive portal, Azure AD SSO, STAS, live users |
+
+330 cmdlets in total. Every one of them was called against a live SFOS 22.0 appliance, not
+only against mocks — the firmware behaviour that differs from the vendor documentation is
+recorded in the `.NOTES` of the affected function and summarised in each module README.
+
+Only `SophosFirewall.Core` is on the PowerShell Gallery. The package published there as
+`SophosFirewall.HostAndServices` — note the missing second "s" — is an **outdated** build
+that shipped an entity name (`CountryHostGroup`) the API does not have, which made every
+create, update and delete on country groups fail silently. Use the `HostsAndServices` module
+from this repository instead.
 
 ### Planned
 
 Module names follow the area names of the SFOS web admin, verbatim — with one exception
 noted below. Only areas that actually have API entities are listed; see "Not planned".
 
-**Configure**: Routing, Authentication, SystemServices, VPN\*
+**Configure**: Routing, SystemServices, VPN\*
 **Protect**: IntrusionPrevention, Applications, Wireless, Email, WebServer, ActiveThreatResponse
 **System**: SophosCentral, Profiles, Administration, BackupAndFirmware, Certificates
 **Monitor & analyze**: ZeroDayProtection, Diagnostics
@@ -61,10 +76,11 @@ Studio, Object usage, Logs, Advanced services, Services and ports, Certification
 - [SophosFirewall.Web README](Modules/SophosFirewall.Web/README.md) - Web protection, including the firmware limitations found on SFOS 22.0
 - [SophosFirewall.Firewall README](Modules/SophosFirewall.Firewall/README.md) - Firewall, NAT and TLS inspection rules; read the safety notes before using the write cmdlets
 - [SophosFirewall.Network README](Modules/SophosFirewall.Network/README.md) - Interfaces, zones, gateways, DNS and DHCP; a wrong write here can cut off the API path used to fix it
+- [SophosFirewall.Authentication README](Modules/SophosFirewall.Authentication/README.md) - Who may log in and how; read the known limitations before using the write cmdlets
 
 ## Key Features
 
-- ✅ **474+ Functions** - Complete Sophos Firewall API coverage
+- ✅ **330 Functions** - Six of roughly twenty API areas covered
 - ✅ **PowerShell 5.1+** - Full version compatibility
 - ✅ **Session Management** - One connection for all modules
 - ✅ **Pipeline Support** - Fluent cmdlet chaining

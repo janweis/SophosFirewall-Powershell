@@ -45,30 +45,6 @@ that shipped an entity name (`CountryHostGroup`) the API does not have, which ma
 create, update and delete on country groups fail silently. Use the `HostsAndServices` module
 from this repository instead.
 
-### Planned
-
-Module names follow the area names of the SFOS web admin, verbatim — with one exception
-noted below. Only areas that actually have API entities are listed; see "Not planned".
-
-**Configure**: Routing, SystemServices, VPN\*
-**Protect**: IntrusionPrevention, Applications, Wireless, Email, WebServer, ActiveThreatResponse
-**System**: SophosCentral, Profiles, Administration, BackupAndFirmware, Certificates
-**Monitor & analyze**: ZeroDayProtection, Diagnostics
-
-\* The web admin splits VPN into *Remote access VPN* and *Site-to-site VPN*, while the API
-reference keeps a single `VPN` category covering both. Which split the module follows is
-still open; the documentation does not map entities to the two UI areas.
-
-`SophosFirewall.Firewall` is the one place where the module name follows the API reference
-rather than the web admin. The reference groups these entities under `PROTECT/Firewall`,
-while the web admin calls the same area *Rules and policies*. The entity names follow the
-API too — `FirewallRule`, `FirewallRuleGroup`, `NATRule` — so naming the module after the
-UI would have left it the odd one out against its own contents.
-
-**Not planned** — these areas exist in the web admin but have no API entities, so no module
-can be built for them: Control center, Current activities, Reports, Sophos Firewall Config
-Studio, Object usage, Logs, Advanced services, Services and ports, Certifications.
-
 ## Documentation
 
 - [SophosFirewall.Core README](Modules/SophosFirewall.Core/README.md) - Foundation module details

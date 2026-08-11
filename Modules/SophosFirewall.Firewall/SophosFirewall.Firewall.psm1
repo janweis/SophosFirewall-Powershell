@@ -29,7 +29,7 @@
         .EXAMPLE
         # Create a disabled rule at the bottom of the list
         $policy = New-SfosFirewallRuleNetworkPolicy -Action Accept -SourceZone LAN -DestinationZone WAN
-        New-SfosFirewallRule -Name "Allow-LAN-to-WAN" -Status Disable -Position Bottom -NetworkPolicy $policy
+        New-SfosFirewallRule -Name "Allow-LAN-to-WAN" -Status Disable -Position Bottom -PolicyType Network -NetworkPolicy $policy
 
         .EXAMPLE
         # Group rules and inspect the members

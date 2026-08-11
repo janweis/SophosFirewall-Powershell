@@ -54,8 +54,14 @@ $script:CertCallbackLock = [object]::new()
     System.String. The XML-escaped string.
 
 .EXAMPLE
-    ConvertTo-SfosXmlEscaped -Text "Company & Co <test>"
-    Returns: "Company &amp; Co &lt;test&gt;"
+    # Escape a value before interpolating it into request XML.
+    # Returns: Smith &amp; Sons
+    ConvertTo-SfosXmlEscaped -Text "Smith & Sons"
+
+    # Angle brackets are deliberately absent from this example: PowerShell's help renderer
+    # treats raw < > in an .EXAMPLE as markup and silently drops them together with the rest
+    # of the line, so an example containing them reaches the reader mutilated. The cmdlet
+    # escapes them all the same - see .DESCRIPTION.
 #>
 function ConvertTo-SfosXmlEscaped {
     [CmdletBinding()]
@@ -145,7 +151,13 @@ function Assert-SfosApiLoginSuccess {
 .OUTPUTS
     The response from the API as a WebResponseObject.
 .EXAMPLE
-    Invoke-SfosApi -Firewall "firewall.example.com" -Port 4444 -Username (ConvertTo-SecureString "admin" -AsPlainText -Force) -Password (ConvertTo-SecureString "password" -AsPlainText -Force) -InnerXml "<SomeRequest>Data</SomeRequest>" -SkipCertificateCheck
+    # -Username is a plain string; only -Password is a SecureString. Passing a SecureString
+    # for the user name converts it to the text "System.Security.SecureString" and the login
+    # fails. The inner XML is shown entity-encoded because PowerShell's help renderer drops
+    # raw angle brackets from examples - pass it with real < and >.
+    $securePw = Read-Host -AsSecureString
+    $inner = "&lt;Get&gt;&lt;IPHost&gt;&lt;/IPHost&gt;&lt;/Get&gt;"
+    Invoke-SfosApi -Firewall "firewall.example.com" -Port 4444 -Username "admin" -Password $securePw -InnerXml $inner -SkipCertificateCheck
 #>
 function Invoke-SfosApi {
     [CmdletBinding()]

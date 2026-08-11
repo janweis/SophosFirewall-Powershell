@@ -12594,7 +12594,9 @@ function Get-SfosDynamicDNS {
     None. Throws an exception if creation fails.
 
 .EXAMPLE
-    New-SfosDynamicDNS -HostName "example.invalid" -Interface "PortB" -IPv4Address UsePortIP -ServiceProvider DynDNS -LoginName "ddnsuser" -Password "ddnspass"
+    # The provider account password is -DDNSPassword. -Password is the connection parameter
+    # of this module and expects a SecureString, so it cannot stand in for it.
+    New-SfosDynamicDNS -HostName "example.invalid" -Interface "PortB" -IPv4Address UsePortIP -ServiceProvider DynDNS -LoginName "ddnsuser" -DDNSPassword "ddnspass"
 
 .NOTES
     Minimum supported PowerShell version: 5.1

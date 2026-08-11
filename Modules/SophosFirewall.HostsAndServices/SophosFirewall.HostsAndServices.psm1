@@ -7392,9 +7392,10 @@ Assert-SfosApiReturnSuccess -Xml $XmlResponse -ObjectName 'ServiceGroup' -Action
         New-SfosServiceGroup -Name "Microsoft365" -Members @('HTTPS', 'SMTP', 'IMAPS') -Description "Office 365 services"
 
         .EXAMPLE
-        # Create empty group and add members later
-        New-SfosServiceGroup -Name "CustomApps" -Description "Custom application ports"
-        Add-SfosServiceGroupMember -Name "CustomApps" -Members @('CustomHTTPS', 'AppPort-8080')
+        # Start with one member and add more later. A ServiceGroup cannot be created empty:
+        # the API marks its member list mandatory, unlike IPHostGroup or FQDNHostGroup.
+        New-SfosServiceGroup -Name "CustomApps" -Members @('CustomHTTPS') -Description "Custom application ports"
+        Add-SfosServiceGroupMember -Name "CustomApps" -Members @('AppPort-8080')
 
         .EXAMPLE
         # Create service group for database services

@@ -1,4 +1,4 @@
-﻿@{
+@{
     RootModule           = 'SophosFirewall.Core.psm1'
     ModuleVersion        = '1.0.0'
     GUID                 = 'cf0350d0-30af-4cd9-ae9e-8eb43356718d'
@@ -25,7 +25,7 @@
     PrivateData          = @{
         PSData = @{
             Tags         = @('Sophos', 'Firewall', 'XGS', 'SFOS', 'API', 'Core', 'Helper')
-            LicenseUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/blob/main/Modules/SophosFirewall.Core/LICENSE'
+            LicenseUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/blob/main/Modules/SophosFirewall.Core/LICENSE.txt'
             ProjectUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/tree/main/Modules/SophosFirewall.Core'
             ReleaseNotes = @'
 Version 1.0.0 (2025-12-31)

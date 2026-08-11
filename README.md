@@ -1,4 +1,4 @@
-﻿# Sophos Firewall PowerShell Module Suite
+# Sophos Firewall PowerShell Module Suite
 
 Comprehensive PowerShell module collection for Sophos XGS/SFOS firewall management. 21 modules with 474+ cmdlets for complete API coverage.
 
@@ -7,15 +7,15 @@ Comprehensive PowerShell module collection for Sophos XGS/SFOS firewall manageme
 ```powershell
 # 1. Install from PowerShell Gallery
 Install-Module SophosFirewall.Core -Repository PSGallery -Scope CurrentUser
-Install-Module SophosFirewall.HostAndServices -Repository PSGallery -Scope CurrentUser
+Install-Module SophosFirewall.HostsAndServices -Repository PSGallery -Scope CurrentUser
 
 # 2. Connect to firewall
 $cred = Get-Credential
 Connect-SfosFirewall -Firewall "192.168.1.1" -Port 4444 -Credential $cred -SkipCertificateCheck
 
 # 3. Use modules
-Get-SfosIpHost
-New-SfosIpHost -Name "Server1" -IpAddress "10.0.0.5"
+Get-SfosIPHost
+New-SfosIPHost -Name "Server1" -HostType IP -IPAddress "10.0.0.5"
 ```
 
 ## Available Modules
@@ -25,19 +25,42 @@ New-SfosIpHost -Name "Server1" -IpAddress "10.0.0.5"
 | Module | Functions | Purpose |
 |--------|-----------|---------|
 | **SophosFirewall.Core** | 7 | Session management, API, XML security |
-| **SophosFirewall.HostAndServices** | 53 | Host and service management |
+| **SophosFirewall.HostsAndServices** | 53 | Host and service management |
+| **SophosFirewall.Web** | 52 | Web protection: URL groups, categories, file types, filter policies and exceptions, quotas, settings |
+| **SophosFirewall.Firewall** | 21 | Firewall rules and rule groups, NAT rules, SSL/TLS inspection |
+| **SophosFirewall.Network** | 100 | Interfaces, VLANs, zones, gateways, DNS, DHCP, ARP, tunnels |
 
-### Coming Q1-Q2 2026
+### Planned
 
-**CONFIGURE** (145 functions): Network, Authentication, Routing, VPN, SystemServices  
-**PROTECT** (235 functions): Firewall, Web, Applications, EmailMTA, Wireless, WebServer, IntrusionPrevention, ActiveThreatResponse  
-**SYSTEM** (28 functions): Administration, BackupFirmware, Certificates, Profiles, Diagnostics  
-**ANALYSE** (6 functions): ZeroDayProtection
+Module names follow the area names of the SFOS web admin, verbatim — with one exception
+noted below. Only areas that actually have API entities are listed; see "Not planned".
+
+**Configure**: Routing, Authentication, SystemServices, VPN\*
+**Protect**: IntrusionPrevention, Applications, Wireless, Email, WebServer, ActiveThreatResponse
+**System**: SophosCentral, Profiles, Administration, BackupAndFirmware, Certificates
+**Monitor & analyze**: ZeroDayProtection, Diagnostics
+
+\* The web admin splits VPN into *Remote access VPN* and *Site-to-site VPN*, while the API
+reference keeps a single `VPN` category covering both. Which split the module follows is
+still open; the documentation does not map entities to the two UI areas.
+
+`SophosFirewall.Firewall` is the one place where the module name follows the API reference
+rather than the web admin. The reference groups these entities under `PROTECT/Firewall`,
+while the web admin calls the same area *Rules and policies*. The entity names follow the
+API too — `FirewallRule`, `FirewallRuleGroup`, `NATRule` — so naming the module after the
+UI would have left it the odd one out against its own contents.
+
+**Not planned** — these areas exist in the web admin but have no API entities, so no module
+can be built for them: Control center, Current activities, Reports, Sophos Firewall Config
+Studio, Object usage, Logs, Advanced services, Services and ports, Certifications.
 
 ## Documentation
 
 - [SophosFirewall.Core README](Modules/SophosFirewall.Core/README.md) - Foundation module details
-- [SophosFirewall.HostAndServices README](Modules/SophosFirewall.HostAndServices/README.md) - Host/service management
+- [SophosFirewall.HostsAndServices README](Modules/SophosFirewall.HostsAndServices/README.md) - Host/service management
+- [SophosFirewall.Web README](Modules/SophosFirewall.Web/README.md) - Web protection, including the firmware limitations found on SFOS 22.0
+- [SophosFirewall.Firewall README](Modules/SophosFirewall.Firewall/README.md) - Firewall, NAT and TLS inspection rules; read the safety notes before using the write cmdlets
+- [SophosFirewall.Network README](Modules/SophosFirewall.Network/README.md) - Interfaces, zones, gateways, DNS and DHCP; a wrong write here can cut off the API path used to fix it
 
 ## Key Features
 
@@ -61,22 +84,22 @@ New-SfosIpHost -Name "Server1" -IpAddress "10.0.0.5"
 ### Host Management
 ```powershell
 # List all hosts
-Get-SfosIpHost
+Get-SfosIPHost
 
 # Create host
-New-SfosIpHost -Name "WebServer" -IpAddress "10.0.0.5" -Description "Web server"
+New-SfosIPHost -Name "WebServer" -HostType IP -IPAddress "10.0.0.5" -Description "Web server"
 
 # Update host
-Set-SfosIpHost -Name "WebServer" -Description "Updated"
+Set-SfosIPHost -Name "WebServer" -HostType IP -IPAddress "10.0.0.5" -Description "Updated"
 
 # Delete host
-Remove-SfosIpHost -Name "WebServer" -Confirm
+Remove-SfosIPHost -Name "WebServer" -Confirm
 ```
 
 ### Service Management
 ```powershell
 # Create service
-New-SfosService -Name "CustomHTTPS" -Protocol "TCP" -Port "8443"
+New-SfosService -Name "CustomHTTPS" -Protocol TCP -DstPort "8443" -SrcPort "1:65535"
 
 # List services
 Get-SfosService | Format-Table -AutoSize
@@ -84,12 +107,14 @@ Get-SfosService | Format-Table -AutoSize
 
 ## Module Organization
 
-| Category | Modules | Functions |
-|----------|---------|-----------|
-| CONFIGURE | Network, Authentication, Routing, VPN, SystemServices | 145 |
-| PROTECT | Firewall, Web, Applications, EmailMTA, Wireless, WebServer, IntrusionPrevention, ActiveThreatResponse | 235 |
-| SYSTEM | Administration, BackupFirmware, Certificates, Profiles, Diagnostics | 28 |
-| ANALYSE | ZeroDayProtection | 6 |
+One module per area of the SFOS web admin, named after that area.
+
+| Web admin menu | Modules |
+|---|---|
+| Configure | Network, Routing, Authentication, SystemServices, VPN |
+| Protect | RulesAndPolicies, IntrusionPrevention, Web, Applications, Wireless, Email, WebServer, ActiveThreatResponse |
+| System | SophosCentral, Profiles, HostsAndServices, Administration, BackupAndFirmware, Certificates |
+| Monitor & analyze | ZeroDayProtection, Diagnostics |
 
 ## Architecture
 

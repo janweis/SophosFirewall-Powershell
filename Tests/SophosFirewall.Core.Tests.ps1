@@ -132,12 +132,30 @@ Describe 'SophosFirewall.Core Module' {
             { Assert-SfosApiReturnSuccess -Xml $xml } | Should -Not -Throw
         }
         
-        It 'Should not throw on status 202' {
+        It 'Should not throw on status 216' {
+            # 216 "Operation Successful" is a documented success code. 202 is not in the
+            # table Sophos publishes at all and must not be accepted.
             $xmlResponse = @'
-<Response><Status code="202"><Msg>Success</Msg></Status></Response>
+<Response><Status code="216"><Msg>Success</Msg></Status></Response>
 '@
             $xml = [xml]$xmlResponse
             { Assert-SfosApiReturnSuccess -Xml $xml } | Should -Not -Throw
+        }
+
+        It 'Should throw on the undocumented status 202' {
+            $xmlResponse = @'
+<Response><Status code="202"><Msg>Accepted</Msg></Status></Response>
+'@
+            $xml = [xml]$xmlResponse
+            { Assert-SfosApiReturnSuccess -Xml $xml } | Should -Throw
+        }
+
+        It 'Should warn but not throw on a partial-success code' {
+            $xmlResponse = @'
+<Response><Status code="201"><Msg>Operation partially successful.</Msg></Status></Response>
+'@
+            $xml = [xml]$xmlResponse
+            { Assert-SfosApiReturnSuccess -Xml $xml -WarningAction SilentlyContinue } | Should -Not -Throw
         }
         
         It 'Should throw on status 502' {
@@ -158,6 +176,11 @@ Describe 'SophosFirewall.Core Module' {
     }
     
     Context 'Resolve-SfosParameters - Parameter Merging' {
+        AfterEach {
+            # Tests must not leave session state behind for the next test
+            Disconnect-SfosFirewall
+        }
+
         It 'Should use provided parameters when supplied' {
             $params = @{
                 BoundParameters = @{
@@ -185,6 +208,10 @@ Describe 'SophosFirewall.Core Module' {
     }
     
     Context 'Connect-SfosFirewall / Disconnect-SfosFirewall - Session Management' {
+        AfterEach {
+            Disconnect-SfosFirewall
+        }
+
         It 'Connect should store connection parameters' {
             # This would require actual firewall connection or mocking
             # Validate that function accepts parameters without error
@@ -213,6 +240,208 @@ Describe 'SophosFirewall.Core Module' {
             $xml = [xml]$validXml
             { $result = Get-SfosApiStatus -Xml $xml } | Should -Not -Throw
         }
+    }
+}
+
+Describe 'Invoke-SfosApi - Request Building' {
+
+    BeforeAll {
+        $callArgs = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    BeforeEach {
+        Mock -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -MockWith {
+            [PSCustomObject]@{
+                StatusCode = 200
+                Content    = '<Response APIVersion="2200.1"><Login><status>Authentication Successful</status></Login></Response>'
+            }
+        }
+    }
+
+    It 'Should URL-encode the request body' {
+        Invoke-SfosApi @callArgs -InnerXml '<Get><IPHost/></Get>' | Out-Null
+
+        Should -Invoke -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -Times 1 -Exactly -ParameterFilter {
+            $Body -like 'reqxml=%3CRequest%3E%3CLogin%3E*'
+        }
+    }
+
+    It 'Should not leave a raw ampersand in the body - it would truncate reqxml' {
+        # 'A&B' becomes 'A&amp;B' through XML escaping; unencoded that ends the form field
+        # and SFOS answers with code 529.
+        $inner = '<Get><IPHost><Filter><key name="Name" criteria="like">A&amp;B</key></Filter></IPHost></Get>'
+        Invoke-SfosApi @callArgs -InnerXml $inner | Out-Null
+
+        Should -Invoke -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -Times 1 -Exactly -ParameterFilter {
+            $Body -notmatch '&' -and $Body -match '%26amp%3B'
+        }
+    }
+
+    It 'Should not send an APIVersion attribute unless asked to' {
+        Invoke-SfosApi @callArgs -InnerXml '<Get><IPHost/></Get>' | Out-Null
+
+        Should -Invoke -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -Times 1 -Exactly -ParameterFilter {
+            [uri]::UnescapeDataString($Body) -like '*<Request><Login>*'
+        }
+    }
+
+    It 'Should send the APIVersion attribute when supplied' {
+        Invoke-SfosApi @callArgs -InnerXml '<Get><IPHost/></Get>' -ApiVersion '2200.1' | Out-Null
+
+        Should -Invoke -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -Times 1 -Exactly -ParameterFilter {
+            [uri]::UnescapeDataString($Body) -like '*<Request APIVersion="2200.1">*'
+        }
+    }
+
+    It 'Should XML-escape credentials' {
+        Invoke-SfosApi -Firewall 'fw.example.test' -Port 4444 -Username 'a<b' `
+            -Password (ConvertTo-SecureString 'p&w' -AsPlainText -Force) -InnerXml '<Get/>' | Out-Null
+
+        Should -Invoke -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -Times 1 -Exactly -ParameterFilter {
+            $decoded = [uri]::UnescapeDataString($Body)
+            $decoded -like '*<Username>a&lt;b</Username>*' -and $decoded -like '*<Password>p&amp;w</Password>*'
+        }
+    }
+}
+
+Describe 'Assert-SfosApiReturnSuccess - Empty Results' {
+
+    It 'Should not throw when SFOS reports an empty result without a status code' {
+        # Real SFOS answer for a filter with no matches
+        $xml = [xml]@'
+<Response APIVersion="2200.1">
+  <Login><status>Authentication Successful</status></Login>
+  <IPHost transactionid=""><Status>No. of records Zero.</Status></IPHost>
+</Response>
+'@
+        { Assert-SfosApiReturnSuccess -Xml $xml -ObjectName 'IPHost' -Action 'get' } | Should -Not -Throw
+    }
+
+    It 'Should still throw when a real error code is present' {
+        $xml = [xml]'<Response><Status code="529">Input request file is Invalid</Status></Response>'
+        { Assert-SfosApiReturnSuccess -Xml $xml -Action 'get' } | Should -Throw
+    }
+
+    It 'Should throw on a code-less status that is not the empty-result wording' {
+        # Real SFOS answer to a filtered Get on ContentConditionList. It carries no code
+        # either, so treating every code-less status as "no records" reported a populated
+        # list as empty.
+        $xml = [xml]@'
+<Response APIVersion="2200.1">
+  <Login><status>Authentication Successful</status></Login>
+  <ContentConditionList transactionid=""><Status>Transaction fail</Status></ContentConditionList>
+</Response>
+'@
+        { Assert-SfosApiReturnSuccess -Xml $xml -ObjectName 'ContentConditionList' -Action 'get' } |
+            Should -Throw '*Transaction fail*'
+    }
+}
+
+Describe 'Get-SfosApiStatus - Status field versus API status' {
+
+    # A FirewallRule and a NATRule carry <Status>Enable</Status> as a data field. Matching
+    # /Response/<Entity>/Status blindly picked those up, so a six-rule response looked like
+    # six status nodes and every Get on the entity failed.
+
+    It 'Should ignore a Status data field inside a named object' {
+        $xml = [xml]@'
+<Response APIVersion="2200.1">
+  <Login><status>Authentication Successful</status></Login>
+  <FirewallRule transactionid=""><Name>Allow-LAN</Name><Status>Enable</Status></FirewallRule>
+  <FirewallRule transactionid=""><Name>Block-Guest</Name><Status>Disable</Status></FirewallRule>
+</Response>
+'@
+        @(Get-SfosApiStatus -Xml $xml -ObjectName 'FirewallRule').Count | Should -Be 0
+        { Assert-SfosApiReturnSuccess -Xml $xml -ObjectName 'FirewallRule' -Action 'get' } | Should -Not -Throw
+    }
+
+    It 'Should still see a real status in a container without a name' {
+        $xml = [xml]'<Response><Login><status>Authentication Successful</status></Login><FirewallRule transactionid=""><Status code="200">Configuration applied successfully.</Status></FirewallRule></Response>'
+
+        @(Get-SfosApiStatus -Xml $xml -ObjectName 'FirewallRule').Code | Should -Be '200'
+    }
+
+    It 'Should still see a coded error that arrives next to a named object' {
+        # The Name test alone would hide this one, so the code attribute wins regardless.
+        $xml = [xml]'<Response><Login><status>Authentication Successful</status></Login><FirewallRule><Name>Allow-LAN</Name><Status code="502">Entity having same name already exists</Status></FirewallRule></Response>'
+
+        { Assert-SfosApiReturnSuccess -Xml $xml -ObjectName 'FirewallRule' -Action 'create' -Target 'Allow-LAN' } |
+            Should -Throw '*502*'
+    }
+
+    It 'Should still report the empty result for an entity that has a Status field' {
+        $xml = [xml]'<Response><Login><status>Authentication Successful</status></Login><FirewallRule transactionid=""><Status>No. of records Zero.</Status></FirewallRule></Response>'
+
+        { Assert-SfosApiReturnSuccess -Xml $xml -ObjectName 'FirewallRule' -Action 'get' } | Should -Not -Throw
+    }
+}
+
+Describe 'Assert-SfosApiReturnSuccess - Login Failure' {
+
+    It 'Should throw when the firewall reports an authentication failure' {
+        # Real answer of a failed login: HTTP 200, no entity, no status code - only the
+        # lowercase <status> under <Login>. Treating this as success made every write
+        # report success while nothing happened on the firewall.
+        $xml = [xml]'<Response APIVersion="2200.1"><Login><status>Authentication Failure</status></Login></Response>'
+
+        { Assert-SfosApiReturnSuccess -Xml $xml -ObjectName 'IPHost' -Action 'create' -Target 'Web01' } |
+            Should -Throw '*Authentication Failure*'
+    }
+
+    It 'Should not throw when the login succeeded and the entity status is 200' {
+        $xml = [xml]'<Response><Login><status>Authentication Successful</status></Login><IPHost><Status code="200">OK</Status></IPHost></Response>'
+
+        { Assert-SfosApiReturnSuccess -Xml $xml -ObjectName 'IPHost' -Action 'create' } | Should -Not -Throw
+    }
+}
+
+Describe 'Get-SfosApiStatus - Multiple Status Nodes' {
+
+    It 'Should return one object per status node instead of collapsing them' {
+        # A bulk delete answers with one <Status> per object. Property access used to
+        # collapse these into a single value whose code read "200 529".
+        $xml = [xml]'<Response><FQDNHost><Status code="200">OK</Status><Status code="526">Record does not exist.</Status></FQDNHost></Response>'
+
+        $result = @(Get-SfosApiStatus -Xml $xml -ObjectName 'FQDNHost')
+
+        $result.Count | Should -Be 2
+        $result[0].Code | Should -Be '200'
+        $result[1].Code | Should -Be '526'
+    }
+
+    It 'Should throw on the failing node of a mixed bulk result' {
+        $xml = [xml]'<Response><FQDNHost><Status code="200">OK</Status><Status code="526">Record does not exist.</Status></FQDNHost></Response>'
+
+        { Assert-SfosApiReturnSuccess -Xml $xml -ObjectName 'FQDNHost' -Action 'remove' } |
+            Should -Throw '*526*'
+    }
+}
+
+Describe 'Resolve-SfosParameters - Explicit Values Win' {
+
+    AfterEach {
+        Disconnect-SfosFirewall
+    }
+
+    It 'Should let an explicit -SkipCertificateCheck:$false override the session' {
+        $cred = New-Object System.Management.Automation.PSCredential('u', (ConvertTo-SecureString 'p' -AsPlainText -Force))
+        Connect-SfosFirewall -Firewall 'fw.example.test' -Credential $cred -SkipCertificateCheck | Out-Null
+
+        $resolved = Resolve-SfosParameters -BoundParameters @{ SkipCertificateCheck = [switch]$false }
+        $resolved.SkipCertificateCheck | Should -BeFalse
+    }
+
+    It 'Should inherit SkipCertificateCheck from the session when not specified' {
+        $cred = New-Object System.Management.Automation.PSCredential('u', (ConvertTo-SecureString 'p' -AsPlainText -Force))
+        Connect-SfosFirewall -Firewall 'fw.example.test' -Credential $cred -SkipCertificateCheck | Out-Null
+
+        $resolved = Resolve-SfosParameters -BoundParameters @{}
+        $resolved.SkipCertificateCheck | Should -BeTrue
     }
 }
 

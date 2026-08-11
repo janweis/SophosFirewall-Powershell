@@ -10,8 +10,8 @@ $cred = Get-Credential
 Connect-SfosFirewall -Firewall "192.168.1.1" -Credential $cred -SkipCertificateCheck
 
 # Use any other Sophos Firewall module - connection is automatically available
-Get-SfosZone           # From SophosFirewall.Network
-Get-SfosIpHost        # From SophosFirewall.HostAndServices
+Get-SfosIPHostGroup    # From SophosFirewall.HostsAndServices
+Get-SfosIPHost        # From SophosFirewall.HostsAndServices
 
 # Disconnect when done
 Disconnect-SfosFirewall
@@ -22,7 +22,7 @@ Disconnect-SfosFirewall
 SophosFirewall.Core is automatically loaded as a dependency when you import any other Sophos Firewall module:
 
 ```powershell
-Import-Module SophosFirewall.HostAndServices   # Core loads automatically
+Import-Module SophosFirewall.HostsAndServices   # Core loads automatically
 ```
 
 Or import directly:

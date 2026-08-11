@@ -30,6 +30,11 @@
 # Session context for connection reuse across cmdlets
 $script:SfosConnection = $null
 
+# Guards the process-wide certificate callback under PS 5.1. ServicePointManager is static,
+# so two calls in parallel runspaces could each save the other's temporary "accept all"
+# callback as the original and leave validation permanently disabled.
+$script:CertCallbackLock = [object]::new()
+
 #endregion
 
 #region XML Helper Functions
@@ -73,6 +78,51 @@ function ConvertTo-SfosXmlEscaped {
 
 <#
 .SYNOPSIS
+    Throws when an API response reports a failed login. Internal helper, not exported.
+
+.DESCRIPTION
+    SFOS reports authentication outside the entity status: a lowercase <status> element
+    directly under <Login>, with no code attribute, in an otherwise empty HTTP 200 body.
+    Because it matches neither status path, an unchecked response looks like "no records"
+    to Get-* and like success to every write operation.
+
+.PARAMETER Content
+    Raw response body.
+#>
+function Assert-SfosApiLoginSuccess {
+    [CmdletBinding()]
+    param(
+        [AllowEmptyString()]
+        [AllowNull()]
+        [string]$Content
+    )
+
+    if (-not $Content) {
+        return
+    }
+
+    # A non-XML body is not this function's problem - the caller parses and reports it.
+    $xml = $null
+    try {
+        $xml = [xml]$Content
+    }
+    catch {
+        return
+    }
+
+    $loginNode = $xml.SelectSingleNode('/Response/Login/status')
+    if (-not $loginNode) {
+        return
+    }
+
+    $loginStatus = [string]$loginNode.InnerText
+    if ($loginStatus -and $loginStatus -notmatch 'Success') {
+        throw "Sophos API login failed: $loginStatus"
+    }
+}
+
+<#
+.SYNOPSIS
     Invokes a Sophos Firewall API request.
 .DESCRIPTION
     Sends an XML request to the Sophos Firewall API endpoint and returns the response.
@@ -86,6 +136,10 @@ function ConvertTo-SfosXmlEscaped {
     The password for authentication (as SecureString for security).
 .PARAMETER InnerXml
     The inner XML content of the API request.
+.PARAMETER ApiVersion
+    Optional APIVersion attribute for the <Request> element (for example '2200.1').
+    When omitted, the firewall processes the request using its own current schema
+    version, which is what keeps one module compatible with several firmware levels.
 .PARAMETER SkipCertificateCheck
     Skips SSL certificate validation for self-signed certificates.
 .OUTPUTS
@@ -109,26 +163,44 @@ function Invoke-SfosApi {
         
         [Parameter(Mandatory)]
         [string]$InnerXml,
-        
+
+        [string]$ApiVersion,
+
         [switch]$SkipCertificateCheck
     )
-    
+
     # Variables for secure handling and cleanup
     $plainPassword = $null
     $passwordBstr = $null
     $savedCertCallback = $null
-    
+    $certCallbackChanged = $false
+    $certLockTaken = $false
+
     try {
         # Security: XML-escape credentials to prevent injection attacks
         $usernameEscaped = ConvertTo-SfosXmlEscaped -Text $Username
         
-        # Convert Password SecureString to plaintext with BSTR cleanup
+        # Convert Password SecureString to plaintext with BSTR cleanup.
+        # PtrToStringBSTR, not PtrToStringAuto: a BSTR is length-prefixed and may contain
+        # embedded null characters, which PtrToStringAuto would silently truncate at.
         $passwordBstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($Password)
-        $plainPassword = [Runtime.InteropServices.Marshal]::PtrToStringAuto($passwordBstr)
+        $plainPassword = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($passwordBstr)
         $passwordEscaped = ConvertTo-SfosXmlEscaped -Text $plainPassword
         
         $uri = ("https://{0}:{1}/webconsole/APIController" -f $Firewall, $Port)
-        $body = "reqxml=<Request><Login><Username>$usernameEscaped</Username><Password>$passwordEscaped</Password></Login>$InnerXml</Request>"
+
+        # APIVersion is optional. When omitted the firewall answers using its own current
+        # schema version, which keeps a single module usable across firmware levels.
+        $versionAttribute = ''
+        if ($ApiVersion) {
+            $versionAttribute = " APIVersion=`"$ApiVersion`""
+        }
+        $requestXml = "<Request$versionAttribute><Login><Username>$usernameEscaped</Username><Password>$passwordEscaped</Password></Login>$InnerXml</Request>"
+
+        # The body is form-encoded, so the XML has to be URL-encoded. Left unencoded, any
+        # '&' - including every '&amp;' produced by XML escaping - terminates the reqxml
+        # field and SFOS rejects the request with code 529 'Input request file is Invalid'.
+        $body = 'reqxml=' + [uri]::EscapeDataString($requestXml)
         
         $invokeParams = @{
             Uri         = $uri
@@ -136,26 +208,70 @@ function Invoke-SfosApi {
             Body        = $body
             ErrorAction = 'Stop'
         }
-        
+
+        # -UseBasicParsing under PS 5.1: without it Invoke-WebRequest hands the response to
+        # the Internet Explorer DOM parser, which throws NullReferenceException on any
+        # machine that has no IE engine - Windows Server included. Every call would fail.
+        # PS 7 dropped the parameter; passing it there is harmless but pointless.
+        if ($PSVersionTable.PSVersion.Major -le 5) {
+            $invokeParams['UseBasicParsing'] = $true
+        }
+
         # Handle certificate validation for PS 5.1 vs PS 7+
         if ($SkipCertificateCheck) {
             if ($PSVersionTable.PSVersion.Major -le 5) {
-                # Save current callback before modifying global state
+                # Serialise the swap: the callback is process-wide, so a concurrent call
+                # must not observe - and later restore - this call's temporary value.
+                [System.Threading.Monitor]::Enter($script:CertCallbackLock)
+                $certLockTaken = $true
                 $savedCertCallback = [Net.ServicePointManager]::ServerCertificateValidationCallback
+                $certCallbackChanged = $true
                 [Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
             }
-            else {
+            elseif ($PSVersionTable.PSVersion.Major -gt 5) {
                 # PS 7+: Use parameter instead of global callback
-                return Invoke-WebRequest @invokeParams -SkipCertificateCheck
+                $invokeParams['SkipCertificateCheck'] = $true
             }
         }
-        
-        return Invoke-WebRequest @invokeParams
+
+        try {
+            $response = Invoke-WebRequest @invokeParams
+        }
+        catch {
+            # Flatten the exception chain. PowerShell reports "The SSL connection could not
+            # be established, see inner exception", and the domain functions re-throw only
+            # that top-level text - the inner exception naming the actual cause
+            # (RemoteCertificateNameMismatch, connection refused, ...) never reaches the
+            # caller. Doing it here fixes it for all 53 of them at once.
+            $messages = @()
+            $current = $_.Exception
+            while ($current) {
+                if ($current.Message -and $messages -notcontains $current.Message) {
+                    $messages += $current.Message
+                }
+                $current = $current.InnerException
+            }
+            throw ($messages -join ' -> ')
+        }
+
+        # Every response passes through here, so this is the one place that can catch a
+        # failed login. SFOS answers it with HTTP 200 and nothing but the lowercase
+        # <status> under <Login> - no entity, no status code. Left unchecked, Get-* would
+        # return an empty result and every write would report success.
+        Assert-SfosApiLoginSuccess -Content $response.Content
+
+        return $response
     }
     finally {
-        # Restore previous certificate validation callback
-        if ($null -ne $savedCertCallback) {
+        # Restore previous certificate validation callback. The flag is required: the
+        # saved callback is normally $null, so a null check would skip the restore and
+        # leave certificate validation disabled for the rest of the process.
+        if ($certCallbackChanged) {
             [Net.ServicePointManager]::ServerCertificateValidationCallback = $savedCertCallback
+        }
+
+        if ($certLockTaken) {
+            [System.Threading.Monitor]::Exit($script:CertCallbackLock)
         }
         
         # Free BSTR memory to prevent leaks
@@ -202,26 +318,47 @@ function Get-SfosApiStatus {
         [string]$ObjectName
     )
     
-    $statusNode = $null
+    # SelectNodes, not property access: $Xml.Response.$ObjectName silently returns the CLR
+    # member of XmlElement when the entity is called Name, Item or Count, and it collapses
+    # several <Status> siblings - a bulk delete returns one per object - into a single
+    # value whose .code reads "200 529".
+    $statusNodes = @()
     $hint = $null
-    
-    if ($ObjectName -and $Xml.Response.$ObjectName -and ($Xml.Response.$ObjectName.Status -notlike '')) {
-        $statusNode = $Xml.Response.$ObjectName.Status
+
+    if ($ObjectName) {
+        # '<Status>' is not always an API status. Some entities carry a field of that name:
+        # a FirewallRule and a NATRule both hold <Status>Enable</Status> as their enabled
+        # flag, so a plain /Response/FirewallRule/Status matches six data fields on a
+        # six-rule response and none of them says anything about the request.
+        #
+        # A node counts as an API status when it carries a 'code' attribute, or when its
+        # parent is not a data object - data objects have a <Name>, status containers do
+        # not. Both halves matter: dropping the @code test would hide a real error that
+        # arrives alongside a named object, and dropping the Name test brings the
+        # Enable/Disable fields back.
+        $statusNodes = @($Xml.SelectNodes("/Response/$ObjectName/Status[@code or not(../Name)]"))
         $hint = "/Response/$ObjectName/Status"
     }
-    elseif ($Xml.Response -and $Xml.Response.Status) {
-        $statusNode = $Xml.Response.Status
+
+    if (-not $statusNodes.Count) {
+        $statusNodes = @($Xml.SelectNodes('/Response/Status'))
         $hint = '/Response/Status'
     }
-    
-    if (-not $statusNode) {
-        return $null
+
+    if (-not $statusNodes.Count) {
+        # A bare 'return', not 'return $null': the caller almost always wraps this in @(),
+        # and @($null) is a one-element array holding $null rather than an empty one, which
+        # reads as "one unreadable status" instead of "no status at all".
+        return
     }
-    
-    return [PSCustomObject]@{
-        Code      = [string]$statusNode.code
-        Message   = [string]$statusNode.'#text'
-        XPathHint = $hint
+
+    # One object per status node, so a caller can tell which entity failed
+    foreach ($statusNode in $statusNodes) {
+        [PSCustomObject]@{
+            Code      = [string]$statusNode.GetAttribute('code')
+            Message   = [string]$statusNode.InnerText
+            XPathHint = $hint
+        }
     }
 }
 
@@ -230,8 +367,15 @@ function Get-SfosApiStatus {
     Validates that an API response indicates success.
 
 .DESCRIPTION
-    Checks the status code in the XML response and throws an error if not successful.
-    Success codes are 200 (OK) and 202 (Accepted).
+    Checks the login status and the entity status codes of an API response and throws if
+    the request did not succeed. Codes follow the table published by Sophos: 200 and 216
+    are success, 201/203/211-215 succeed with a warning, everything else is a failure.
+    There is no code 202 in that table.
+
+    The published table covers 200-216 and 500-599. Codes 217 and 222 were measured against
+    a live firewall on operations that demonstrably succeeded and only produce a warning;
+    every other undocumented code throws, so an unrecognised status is never mistaken for
+    success. See the comments at the corresponding checks.
 
 .PARAMETER Xml
     The XML response from the API.
@@ -261,16 +405,78 @@ function Assert-SfosApiReturnSuccess {
         [string]$Target
     )
     
-    $status = Get-SfosApiStatus -Xml $Xml -ObjectName $ObjectName
-    if (-not $status) {
-        return
-    }
-    
     $actionPart = if ($Action) { $Action } else { 'execute request' }
     $targetPart = if ($Target) { " for '$Target'" } else { '' }
-    
-    if ($status.Code -ne '200' -and $status.Code -ne '202') {
-        throw "Sophos API error while trying to $actionPart$targetPart. Code $($status.Code) - $($status.Message) (StatusPath=$($status.XPathHint))"
+
+    # Authentication is reported outside the entity status and would otherwise slip past
+    # every code check below. Invoke-SfosApi already catches this for live calls; the check
+    # is repeated here for callers that hand in a parsed response directly.
+    $loginNode = $Xml.SelectSingleNode('/Response/Login/status')
+    if ($loginNode) {
+        $loginStatus = [string]$loginNode.InnerText
+        if ($loginStatus -and $loginStatus -notmatch 'Success') {
+            throw "Sophos API login failed while trying to $actionPart$targetPart. $loginStatus"
+        }
+    }
+
+    # Where-Object, not just @(): Get-SfosApiStatus returns $null when the response carries
+    # no <Status> at all, and @($null) is a one-element array holding $null - not an empty
+    # one. Without the filter the loop below inspects that $null and reports a status-less
+    # response as a broken status.
+    $statusList = @(Get-SfosApiStatus -Xml $Xml -ObjectName $ObjectName | Where-Object { $_ })
+    if (-not $statusList.Count) {
+        return
+    }
+
+    foreach ($status in $statusList) {
+        # An empty result is reported as <Status>No. of records Zero.</Status> without a
+        # code attribute. That is not a failure, so Get-* must not throw on it.
+        #
+        # Only that one wording is waved through. Treating *every* code-less status as an
+        # empty result fails open: a filtered Get on ContentConditionList answers
+        # <Status>Transaction fail</Status>, also without a code, and the caller would have
+        # seen an empty list while matching objects existed. Same class of defect as the
+        # login failure that used to read as success - so anything unrecognised throws.
+        if (-not $status.Code) {
+            if ($status.Message -match 'records\s+Zero') {
+                continue
+            }
+
+            throw "Sophos API returned a status without a code while trying to $actionPart$targetPart. '$($status.Message)' (StatusPath=$($status.XPathHint))"
+        }
+
+        $code = 0
+        if (-not [int]::TryParse($status.Code, [ref]$code)) {
+            throw "Sophos API returned an unreadable status code while trying to $actionPart$targetPart. Code '$($status.Code)' - $($status.Message) (StatusPath=$($status.XPathHint))"
+        }
+
+        # Status codes per the table published by Sophos
+        if ($code -eq 200 -or $code -eq 216) {
+            continue
+        }
+
+        if ($code -eq 201 -or $code -eq 203 -or ($code -ge 211 -and $code -le 215)) {
+            Write-Warning "Sophos API reported code $code while trying to $actionPart$targetPart. $($status.Message)"
+            continue
+        }
+
+        # The published table runs 200-216 and then resumes at 500, so 217-499 is undefined.
+        # Only the two codes actually measured against a firewall are let through, and only
+        # because the write demonstrably succeeded in both cases: creating a WebFilterCategory
+        # with an external URL list answers 217 or 222 'Unable to get status message' and the
+        # object is created correctly.
+        #
+        # The rest of that range still throws. Waving through every undocumented code would
+        # fail open - an unrecognised code would be reported as success while the firewall
+        # did nothing, which is exactly the defect class this module has been bitten by
+        # before. A wrongly reported failure is visible and harmless; a wrongly reported
+        # success is neither.
+        if ($code -eq 217 -or $code -eq 222) {
+            Write-Warning "Sophos API returned code $code while trying to $actionPart$targetPart, which the published status table does not describe. The operation is expected to have succeeded, but verify the result on the firewall. $($status.Message)"
+            continue
+        }
+
+        throw "Sophos API error while trying to $actionPart$targetPart. Code $code - $($status.Message) (StatusPath=$($status.XPathHint))"
     }
 }
 
@@ -315,7 +521,9 @@ function Resolve-SfosParameters {
         if (-not $resolved.Firewall) {
             $resolved.Firewall = $script:SfosConnection.Firewall
         }
-        if (-not $resolved.Port) {
+        # ContainsKey again: 0 is falsy, so -not would treat an explicit -Port 0 as
+        # "not supplied" and quietly substitute another port instead of rejecting it.
+        if (-not $BoundParameters.ContainsKey('Port')) {
             $resolved.Port = $script:SfosConnection.Port
         }
         if (-not $resolved.Username) {
@@ -324,7 +532,9 @@ function Resolve-SfosParameters {
         if (-not $resolved.Password) {
             $resolved.Password = $script:SfosConnection.Password
         }
-        if (-not $resolved.SkipCertificateCheck) {
+        # ContainsKey, not -not: an explicit -SkipCertificateCheck:$false must win over
+        # a session that was opened with the switch enabled.
+        if (-not $BoundParameters.ContainsKey('SkipCertificateCheck')) {
             $resolved.SkipCertificateCheck = $script:SfosConnection.SkipCertificateCheck
         }
     }
@@ -333,10 +543,16 @@ function Resolve-SfosParameters {
         throw 'No active Sophos Firewall connection found. Use Connect-SfosFirewall to establish a connection or provide Firewall, Username, and Password explicitly.'
     }
     
-    if (-not $resolved.Port) {
+    if (-not $BoundParameters.ContainsKey('Port') -and -not $resolved.Port) {
         $resolved.Port = $script:DefaultSfosPort
     }
-    
+
+    # Connect-SfosFirewall validates the range, this path did not: a negative port used to
+    # travel all the way into the URI and surface as an opaque UriFormatException.
+    if ($resolved.Port -lt 1 -or $resolved.Port -gt 65535) {
+        throw "Port $($resolved.Port) is outside the valid range 1-65535."
+    }
+
     return $resolved
 }
 

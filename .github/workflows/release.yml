@@ -1,0 +1,212 @@
+name: Release to PowerShell Gallery
+
+on:
+  workflow_dispatch:
+    inputs:
+      module:
+        description: 'Module to publish (all publishes Core first, then the rest)'
+        required: true
+        type: choice
+        default: 'all'
+        options:
+          - all
+          - SophosFirewall.Core
+          - SophosFirewall.HostsAndServices
+          - SophosFirewall.Web
+          - SophosFirewall.Firewall
+          - SophosFirewall.Network
+          - SophosFirewall.Authentication
+      dryRun:
+        description: 'Dry run (do not actually publish)'
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish Modules
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Verify API key secret is present
+        shell: pwsh
+        env:
+          NUGET_API_KEY: ${{ secrets.PSGALLERY_API_KEY }}
+        run: |
+          if ([string]::IsNullOrEmpty($env:NUGET_API_KEY)) {
+            Write-Error "Secret 'PSGALLERY_API_KEY' is not set. Add it in the repository settings before running this workflow."
+            exit 1
+          }
+          Write-Host "✓ API key secret is present"
+
+      - name: Determine publish order
+        id: plan
+        shell: pwsh
+        run: |
+          $selected = '${{ inputs.module }}'
+
+          if ($selected -eq 'all') {
+            $order = @(
+              'SophosFirewall.Core',
+              'SophosFirewall.HostsAndServices',
+              'SophosFirewall.Web',
+              'SophosFirewall.Firewall',
+              'SophosFirewall.Network',
+              'SophosFirewall.Authentication'
+            )
+          } else {
+            $order = @($selected)
+          }
+
+          Write-Host "Publish order: $($order -join ', ')"
+          $json = $order | ConvertTo-Json -Compress
+          if ($order.Count -eq 1) {
+            # ConvertTo-Json on a 1-element array without -AsArray (PS 5.1) yields a scalar; force array form
+            $json = "[$json]"
+          }
+          "modules=$json" >> $env:GITHUB_OUTPUT
+
+      - name: Publish modules
+        shell: pwsh
+        env:
+          NUGET_API_KEY: ${{ secrets.PSGALLERY_API_KEY }}
+          DRY_RUN: ${{ inputs.dryRun }}
+        run: |
+          # Not setting $ErrorActionPreference = 'Stop' globally: each risky cmdlet below
+          # already carries its own -ErrorAction Stop inside a try/catch. A global 'Stop'
+          # would also turn the diagnostic Write-Error calls into terminating errors and
+          # abort the whole loop after the first skipped module.
+          $modulesRoot = Join-Path $PWD 'Modules'
+          $env:PSModulePath = "$modulesRoot$([System.IO.Path]::PathSeparator)$env:PSModulePath"
+          Write-Host "PSModulePath includes: $modulesRoot"
+
+          $isDryRun = [System.Convert]::ToBoolean($env:DRY_RUN)
+          Write-Host "Dry run: $isDryRun"
+
+          $moduleNames = '${{ steps.plan.outputs.modules }}' | ConvertFrom-Json
+
+          $results = @()
+
+          foreach ($moduleName in $moduleNames) {
+            Write-Host "`n=== $moduleName ===" -ForegroundColor Cyan
+
+            $result = [PSCustomObject]@{
+              Module    = $moduleName
+              Version   = $null
+              Status    = 'Skipped'
+              Detail    = ''
+            }
+
+            $manifestPath = Join-Path $modulesRoot "$moduleName\$moduleName.psd1"
+
+            if (-not (Test-Path -Path $manifestPath)) {
+              $result.Detail = "Manifest not found at $manifestPath"
+              Write-Error $result.Detail
+              $results += $result
+              continue
+            }
+
+            # 1. Manifest must be valid (RequiredModules resolved via PSModulePath above)
+            try {
+              $manifest = Test-ModuleManifest -Path $manifestPath -ErrorAction Stop
+              $result.Version = $manifest.Version.ToString()
+              Write-Host "✓ Manifest valid: $moduleName v$($result.Version)"
+            }
+            catch {
+              $result.Detail = "Test-ModuleManifest failed: $($_.Exception.Message)"
+              Write-Error $result.Detail
+              $results += $result
+              continue
+            }
+
+            # 2. Target version must not already exist in the Gallery
+            $feedUri = "https://www.powershellgallery.com/api/v2/FindPackagesById()?id='$moduleName'"
+            try {
+              $existing = Invoke-RestMethod -Uri $feedUri -ErrorAction Stop
+              $existingVersions = @($existing | ForEach-Object { $_.properties.Version })
+            }
+            catch {
+              $result.Detail = "Could not query PowerShell Gallery for '$moduleName': $($_.Exception.Message)"
+              Write-Error $result.Detail
+              $results += $result
+              continue
+            }
+
+            Write-Host "Versions already in Gallery: $(if ($existingVersions) { $existingVersions -join ', ' } else { '(none)' })"
+
+            if ($existingVersions -contains $result.Version) {
+              $result.Status = 'Skipped'
+              $result.Detail = "Version $($result.Version) already exists in the Gallery. Publishing is not possible (bump ModuleVersion first)."
+              Write-Error $result.Detail
+              $results += $result
+              continue
+            }
+
+            # 3. Module must import and export at least one function
+            try {
+              Import-Module -Name $manifestPath -Force -ErrorAction Stop
+              $exported = @(Get-Command -Module $moduleName -CommandType Function -ErrorAction Stop)
+              if ($exported.Count -eq 0) {
+                throw "Module imported but exports no functions."
+              }
+              Write-Host "✓ Imports cleanly, exports $($exported.Count) function(s)"
+              Remove-Module -Name $moduleName -Force -ErrorAction SilentlyContinue
+            }
+            catch {
+              $result.Detail = "Import check failed: $($_.Exception.Message)"
+              Write-Error $result.Detail
+              $results += $result
+              continue
+            }
+
+            # 4. Publish (or simulate)
+            $moduleDir = Split-Path -Path $manifestPath -Parent
+
+            if ($isDryRun) {
+              # NOTE: Publish-Module -WhatIf does NOT reliably suppress the underlying
+              # 'nuget.exe push' call in PowerShellGet (verified: it attempted a real push
+              # and only failed because of an invalid key). Calling it here with a real API
+              # key would risk a genuine publish during a dry run, so the dry run never calls
+              # Publish-Module at all - it only reports what a real run would do.
+              $result.Status = 'DryRun'
+              $result.Detail = "Would publish $moduleName v$($result.Version) to PowerShell Gallery (PSGallery)"
+              Write-Host "DRY RUN: $($result.Detail)" -ForegroundColor Yellow
+            }
+            else {
+              try {
+                Publish-Module -Path $moduleDir -NuGetApiKey $env:NUGET_API_KEY -Force -ErrorAction Stop
+                $result.Status = 'Published'
+                $result.Detail = "Published $moduleName v$($result.Version) to PowerShell Gallery"
+                Write-Host "✓ $($result.Detail)" -ForegroundColor Green
+              }
+              catch {
+                $result.Detail = "Publish-Module failed: $($_.Exception.Message)"
+                Write-Error $result.Detail
+              }
+            }
+
+            $results += $result
+          }
+
+          $results | Format-Table -AutoSize | Out-String | Write-Host
+
+          $summary = "# 📦 Release Summary`n`n"
+          $summary += "| Module | Version | Status | Detail |`n"
+          $summary += "|---|---|---|---|`n"
+          foreach ($r in $results) {
+            $version = if ($r.Version) { $r.Version } else { 'n/a' }
+            $detail = $r.Detail -replace '\|', '\|'
+            $summary += "| $($r.Module) | $version | $($r.Status) | $detail |`n"
+          }
+          $summary >> $env:GITHUB_STEP_SUMMARY
+
+          if ($results | Where-Object { $_.Status -eq 'Skipped' }) {
+            Write-Error "One or more modules could not be published. See table above."
+            exit 1
+          }

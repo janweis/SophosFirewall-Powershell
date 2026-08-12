@@ -934,7 +934,7 @@ Describe 'Set-SfosApplicationClassificationAssignmentBatch - edge cases' {
     }
 }
 
-Describe 'Add-SfosApplicationFilterCategoryMember - QoSPolicy None client-side guard (regression)' {
+Describe 'Add-SfosApplicationFilterCategoryMember - QoSPolicy None client-side guard' {
 
     BeforeAll {
         $conn = @{
@@ -946,8 +946,8 @@ Describe 'Add-SfosApplicationFilterCategoryMember - QoSPolicy None client-side g
     }
 
     It 'throws at parameter binding for -QoSPolicy None and never calls the API' {
-        # Regression test for the ValidateScript fix on -QoSPolicy: 'None' is a silent no-op
-        # on the firewall (200, nothing stored), so it must be rejected before any API call.
+        # -QoSPolicy 'None' is a silent no-op on the firewall (200, nothing stored), so it
+        # must be rejected before any API call.
         Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Applications
 
         { Add-SfosApplicationFilterCategoryMember -Name 'Mobile Applications' -Application 'Instagram' -QoSPolicy 'None' @conn -Confirm:$false } |
@@ -957,12 +957,10 @@ Describe 'Add-SfosApplicationFilterCategoryMember - QoSPolicy None client-side g
     }
 
     It 'upserts a new member while preserving an existing per-application override' {
-        # Two existing/target entries deliberately, not one: PowerShell 5.1 has a measured
-        # defect (see the dedicated Describe below) where a genuine single-element array
-        # assigned through Set-SfosApplicationFilterCategory's
-        # '$x = if (cond) { @($y) } else {...}' idiom collapses back to a bare scalar, which
-        # would make this specific assertion fail on PS 5.1 for reasons unrelated to what
-        # this test is actually checking (RuleList-style Read-Modify-Write preservation).
+        # Two existing/target entries deliberately, not one: on Windows PowerShell 5.1 a
+        # genuine single-element array assigned through the '$x = if (cond) { @($y) } else
+        # {...}' idiom collapses back to a bare scalar, which would make this assertion fail
+        # for reasons unrelated to what it actually checks (Read-Modify-Write preservation).
         Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Applications -MockWith {
             if ($InnerXml -match '<Get>') {
                 [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><ApplicationFilterCategory transactionid=""><Name>Mobile Applications</Name><QoSPolicy>None</QoSPolicy><BandwidthUsageType></BandwidthUsageType><Description>Mobile apps</Description><ApplicationSettings><Application><Name>WhatsApp</Name><QoSPolicy>Streaming Video - Limit to SD Quality</QoSPolicy></Application></ApplicationSettings></ApplicationFilterCategory></Response>' }
@@ -983,15 +981,12 @@ Describe 'Add-SfosApplicationFilterCategoryMember - QoSPolicy None client-side g
     }
 }
 
-Describe 'Set-SfosApplicationFilterCategory - single-element ApplicationSettings (regression)' {
-    # Regression test for a defect found by this suite and fixed 2026-08-12: under Windows
-    # PowerShell 5.1, assigning straight from `if (...) { @(A) } else { @(B) }` collapsed a
-    # genuine single-element array back to a bare scalar, the scalar had no .Count, and the
-    # whole ApplicationSettings wrapper was silently omitted from the request - so the FIRST
-    # per-app override of a category could never be added on 5.1 (fine on PS 7, fine on both
-    # engines with two or more entries). The fix wraps the WHOLE if/else in @(), same class
-    # and same-day fix as Set-SfosMulticastRoute in the Routing module. This test asserts
-    # the correct behavior on both engines.
+Describe 'Set-SfosApplicationFilterCategory - single-element ApplicationSettings' {
+    # @() must wrap the whole if/else: on Windows PowerShell 5.1, assigning straight from
+    # `if (...) { @(A) } else { @(B) }` collapses a genuine single-element array back to a
+    # bare scalar, which has no .Count, so the whole ApplicationSettings wrapper is silently
+    # omitted from the request - the first per-app override of a category could never be
+    # added on 5.1. This test asserts the correct behavior on both engines.
 
     BeforeAll {
         $conn = @{
@@ -1091,5 +1086,53 @@ Describe 'Set-SfosApplicationFilterCategory - additional validation' {
         }
 
         { Set-SfosApplicationFilterCategory -Name 'DoesNotExist' -QoSPolicy 'None' @conn -Confirm:$false } | Should -Throw '*was not found*'
+    }
+}
+
+Describe 'Session parameter (multi-session support)' {
+
+    BeforeAll {
+        $cred1 = [pscredential]::new('apiuser', (ConvertTo-SecureString 'pw1' -AsPlainText -Force))
+        $cred2 = [pscredential]::new('apiuser', (ConvertTo-SecureString 'pw2' -AsPlainText -Force))
+        Connect-SfosFirewall -Firewall 'fw1.example.test' -Credential $cred1 -Name 'fw1' | Out-Null
+        Connect-SfosFirewall -Firewall 'fw2.example.test' -Credential $cred2 -Name 'fw2' -NoDefault | Out-Null
+    }
+
+    AfterAll { Disconnect-SfosFirewall -All }
+
+    BeforeEach {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Applications -MockWith {
+            [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><ApplicationFilterPolicy transactionid=""><Status>No. of records Zero.</Status></ApplicationFilterPolicy></Response>' }
+        }
+    }
+
+    It 'Resolves the named session instead of the ambient default (direct path)' {
+        Get-SfosApplicationFilterPolicy -Session 'fw2' | Out-Null
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Applications -ParameterFilter {
+            $Firewall -eq 'fw2.example.test'
+        }
+    }
+
+    It 'Uses the ambient default when -Session is omitted' {
+        Get-SfosApplicationFilterPolicy | Out-Null
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Applications -ParameterFilter {
+            $Firewall -eq 'fw1.example.test'
+        }
+    }
+
+    It 'Resolves a session object on the begin-block pipeline path (New-SfosApplicationFilterPolicy)' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Applications -MockWith {
+            [PSCustomObject]@{ Content = '<Response><ApplicationFilterPolicy><Status code="200">Configuration applied successfully.</Status></ApplicationFilterPolicy></Response>' }
+        }
+        $s2 = Get-SfosSession -Name 'fw2'
+        New-SfosApplicationFilterPolicy -Name 'CrossFwPolicy' -DefaultAction Allow -Session 'fw2' -Confirm:$false
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Applications -ParameterFilter {
+            $Firewall -eq 'fw2.example.test' -and $InnerXml -match '<Name>CrossFwPolicy</Name>'
+        }
+    }
+
+    It 'Throws on an unknown session name without calling the API' {
+        { Get-SfosApplicationFilterPolicy -Session 'nichtda' } | Should -Throw '*No session named*'
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Applications -Times 0 -Exactly
     }
 }

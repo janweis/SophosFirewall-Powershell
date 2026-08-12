@@ -782,8 +782,8 @@ Describe 'Read-Modify-Write - User' {
     }
 
     It 'Should heal a QuarantineDigest of literal "0" to Disable instead of resending the invalid value' {
-        # Live-verified: a User created without an explicit QuarantineDigest is stored as "0",
-        # which the firewall rejects with 501 on a later update. Set-SfosUser normalises it.
+        # A User created without an explicit QuarantineDigest is stored as "0", which the
+        # firewall rejects with 501 on a later update. Set-SfosUser normalises it.
         Set-SfosUser -AccountName 'jdoe' -Description 'Updated via PowerShell' @conn -Confirm:$false
 
         Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -Times 1 -Exactly -ParameterFilter {
@@ -806,9 +806,8 @@ Describe 'Read-Modify-Write - User' {
 }
 
 Describe 'Remove-SfosUser - lowercased <Name>, not <Username>, with read-back' {
-    # Live-verified (see the function .NOTES / region header): the Delete User operation only
-    # honours <Name>, case-sensitively against the always-lowercase stored value. <Username>
-    # or the caller's original casing both answer a false 200 and remove nothing.
+    # The Delete User operation only honours <Name>, case-sensitively against the always-lowercase
+    # stored value. <Username> or the caller's original casing both answer a false 200 and remove nothing.
 
     BeforeAll {
         $conn = @{
@@ -1201,9 +1200,8 @@ Describe 'Read-Modify-Write - UserGroup, GuestUserSettings, OTPSettings, Firewal
 }
 
 Describe 'Add-/Remove-SfosUserGroupMember write through the User object, not GroupMembers' {
-    # Live-verified: writing <GroupMembers> under <UserGroup> answers 200 and does nothing.
-    # Membership lives on the User object's own <Group> field. This is the single most
-    # important behaviour in the module to guard with a test.
+    # Writing <GroupMembers> under <UserGroup> answers 200 and does nothing.
+    # Membership lives on the User object's own <Group> field.
 
     BeforeAll {
         $conn = @{
@@ -1448,8 +1446,8 @@ Describe 'OTPSettings member management' {
 }
 
 Describe 'GuestUser - no update path exists' {
-    # Live-verified: neither operation="update" nor the undocumented operation="edit" works
-    # for GuestUser (edit silently creates a duplicate). No Set-SfosGuestUser is shipped.
+    # Neither operation="update" nor the undocumented operation="edit" works for GuestUser
+    # (edit silently creates a duplicate). No Set-SfosGuestUser is shipped.
 
     It 'Set-SfosGuestUser should not exist' {
         Get-Command Set-SfosGuestUser -ErrorAction SilentlyContinue | Should -BeNullOrEmpty
@@ -1482,8 +1480,8 @@ Describe 'GuestUser - no update path exists' {
         }
 
         It 'Remove-SfosGuestUser should identify the object by the auto-generated Username, not Name' {
-            # Live-verified: <Remove><GuestUser><Name>...</Name></GuestUser></Remove> answers
-            # 500; the auto-generated login (Username) is required instead.
+            # <Remove><GuestUser><Name>...</Name></GuestUser></Remove> answers 500; the
+            # auto-generated login (Username) is required instead.
             Remove-SfosGuestUser -AccountName 'guest-00001' @conn -Confirm:$false
 
             Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -Times 1 -Exactly -ParameterFilter {
@@ -2046,12 +2044,11 @@ Describe 'STAS' {
 }
 
 Describe 'LiveUser - undocumented write path throws on a status-less response' {
-    # Live-verified: every write shape tried against LiveUser answers HTTP 200 with a
-    # well-formed <Response> but NO <Status> node anywhere for the LiveUser object - only the
-    # unrelated API-session <Login> block. Assert-SfosApiReturnSuccess alone treats a
-    # status-less response as success (the same lenient pattern that is correct for
-    # Get-SfosSTAS), so both cmdlets add their own explicit check and are expected to always
-    # throw on this firmware - the throw is the correct, documented behaviour.
+    # Every write shape tried against LiveUser answers HTTP 200 with a well-formed <Response>
+    # but no <Status> node anywhere for the LiveUser object - only the unrelated API-session
+    # <Login> block. Assert-SfosApiReturnSuccess alone treats a status-less response as
+    # success, so both cmdlets add their own explicit check and always throw on this
+    # firmware - the throw is the correct, documented behaviour.
 
     BeforeAll {
         $conn = @{
@@ -2078,10 +2075,6 @@ Describe 'LiveUser - undocumented write path throws on a status-less response' {
             Should -Throw '*returned no status for logging out live user*'
     }
 
-    # This assertion was stale: it checked for the old, undocumented <Set operation="login">
-    # shape the region header (SophosFirewall.Authentication.psm1) records as superseded by the
-    # documented <LiveUserLogin>/<Admin> shape. Updated to match the current request, without
-    # changing what the test verifies (the fields sent for the end-user login).
     It 'Connect-SfosLiveUser should send the documented LiveUserLogin shape with UserName/IPAddress' {
         try { Connect-SfosLiveUser -LiveUserName 'jdoe' -IPAddress '10.0.0.55' @conn -Confirm:$false } catch {}
 
@@ -2095,10 +2088,9 @@ Describe 'LiveUser - undocumented write path throws on a status-less response' {
 }
 
 Describe 'Get-SfosLiveUser' {
-    # Live-verified request/response shape (2026-08-11): <Get><LiveUser></LiveUser></Get>, no
-    # server-side filter key - server-side filtering for this entity has not been confirmed, so
-    # none is sent (the project build rules, section 6). Empty result answers
-    # <LiveUser transactionid=""><Status>No. of records Zero.</Status></LiveUser>.
+    # Request/response shape: <Get><LiveUser></LiveUser></Get>, no server-side filter key -
+    # server-side filtering for this entity has not been confirmed, so none is sent. Empty
+    # result answers <LiveUser transactionid=""><Status>No. of records Zero.</Status></LiveUser>.
 
     BeforeAll {
         $conn = @{
@@ -2109,11 +2101,8 @@ Describe 'Get-SfosLiveUser' {
         }
     }
 
-    # The It title deliberately avoids literal '<Tag>' sequences: with them present here,
-    # Pester's own parsing of later tests in this file (specifically the Should -Invoke
-    # -ParameterFilter block below) breaks with a bizarre CommandNotFoundException for a
-    # mangled token - reproduced in isolation, disappears once the title text no longer
-    # contains raw XML angle brackets. Not a defect in Get-SfosLiveUser or its request XML.
+    # The It title deliberately avoids literal '<Tag>' sequences: raw XML angle brackets there
+    # break Pester's own parsing of the later Should -Invoke -ParameterFilter block in this file.
     It 'Should send the Get LiveUser request with no server-side filter key' {
         Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
             [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><LiveUser transactionid=""><Status>No. of records Zero.</Status></LiveUser></Response>' }
@@ -2194,8 +2183,8 @@ Describe 'Error Paths' {
     }
 
     It 'A code-less Status of Transaction fail should throw and NOT be read as an empty result' {
-        # Live-verified defect: a broken GuestUserSettings singleton answers exactly this
-        # shape on every subsequent Get. Only "No. of records Zero." counts as empty.
+        # A broken GuestUserSettings singleton answers exactly this shape on every subsequent
+        # Get. Only "No. of records Zero." counts as empty.
         Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
             [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><GuestUserSettings><Status>Transaction fail</Status></GuestUserSettings></Response>' }
         }
@@ -2669,9 +2658,9 @@ Describe 'VPNAuthentication / SSLVPNAuthentication - Set, Read-Modify-Write, mem
         }
 
         It 'Remove- should throw (not report success) when the firewall refuses to empty the list to the sole remaining server' {
-            # Live-verified: removing the last entry answers code 500 "Operation could not be
-            # performed on Entity" and leaves the list unchanged. No read-back is performed by
-            # this cmdlet for that case - the status code alone must be trusted to throw.
+            # Removing the last entry answers code 500 "Operation could not be performed on
+            # Entity" and leaves the list unchanged. No read-back is performed by this cmdlet
+            # for that case - the status code alone must be trusted to throw.
             Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
                 if ($InnerXml -match '<Get>') {
                     [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><VPNAuthentication><VPNAuthenticationMethods>Custom</VPNAuthenticationMethods><VPNAuthenticationServerList><AuthenticationServer>Local</AuthenticationServer></VPNAuthenticationServerList></VPNAuthentication></Response>' }
@@ -3394,8 +3383,8 @@ Describe 'DirectWebProxyAuthentication - Set, Read-Modify-Write, member cmdlets 
         }
 
         It 'Should throw naming the append-only defect when the firewall reports success but the member is still present' {
-            # MultiUserHosts is one of this API's several append-only-on-update lists (same
-            # defect class as WebFilterCategory/URLList) - a 200 that changes nothing.
+            # MultiUserHosts is one of this API's several append-only-on-update lists - a 200
+            # that changes nothing.
             Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
                 if ($InnerXml -match '<Set operation="update">') {
                     [PSCustomObject]@{ Content = '<Response><DirectWebProxyAuthentication><Status code="200">Configuration applied successfully.</Status></DirectWebProxyAuthentication></Response>' }
@@ -3410,5 +3399,59 @@ Describe 'DirectWebProxyAuthentication - Set, Read-Modify-Write, member cmdlets 
 
             Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -Times 3 -Exactly
         }
+    }
+}
+
+Describe 'Session parameter (multi-session support)' {
+
+    BeforeAll {
+        $cred1 = [pscredential]::new('apiuser', (ConvertTo-SecureString 'pw1' -AsPlainText -Force))
+        $cred2 = [pscredential]::new('apiuser', (ConvertTo-SecureString 'pw2' -AsPlainText -Force))
+        Connect-SfosFirewall -Firewall 'fw1.example.test' -Credential $cred1 -Name 'fw1' | Out-Null
+        Connect-SfosFirewall -Firewall 'fw2.example.test' -Credential $cred2 -Name 'fw2' -NoDefault | Out-Null
+    }
+
+    AfterAll { Disconnect-SfosFirewall -All }
+
+    BeforeEach {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+            [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><User transactionid=""><Status>No. of records Zero.</Status></User></Response>' }
+        }
+    }
+
+    It 'Resolves the named session instead of the ambient default (direct path)' {
+        Get-SfosUser -Session 'fw2' | Out-Null
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -ParameterFilter {
+            $Firewall -eq 'fw2.example.test'
+        }
+    }
+
+    It 'Uses the ambient default when -Session is omitted' {
+        Get-SfosUser | Out-Null
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -ParameterFilter {
+            $Firewall -eq 'fw1.example.test'
+        }
+    }
+
+    It 'Resolves a session object on the begin-block pipeline path (Set-SfosUserGroup)' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+            if ($InnerXml -match '<Get>\s*<UserGroup>') {
+                [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><UserGroup><GroupDetail><Name>Sales</Name><GroupType>Normal</GroupType><SurfingQuotaPolicy>Unlimited</SurfingQuotaPolicy><AccessTimePolicy>AllowedAllTheTime</AccessTimePolicy><QoSPolicy>None</QoSPolicy><QuarantineDigest>Enable</QuarantineDigest><LoginRestriction>AnyNode</LoginRestriction></GroupDetail></UserGroup></Response>' }
+            }
+            else {
+                [PSCustomObject]@{ Content = '<Response><GroupDetail><Status code="200">Configuration applied successfully.</Status></GroupDetail></Response>' }
+            }
+        }
+
+        Set-SfosUserGroup -Name 'Sales' -Session 'fw2' -Confirm:$false
+
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -ParameterFilter {
+            $Firewall -eq 'fw2.example.test' -and $InnerXml -match '<Set operation="update">' -and $InnerXml -match '<Name>Sales</Name>'
+        }
+    }
+
+    It 'Throws on an unknown session name without calling the API' {
+        { Get-SfosUser -Session 'nichtda' } | Should -Throw '*No session named*'
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -Times 0 -Exactly
     }
 }

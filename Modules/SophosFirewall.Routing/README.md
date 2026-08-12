@@ -58,6 +58,19 @@ Import-Module -Name "C:\Path\To\SophosFirewall.Routing.psd1"
 Connect-SfosFirewall -Firewall "192.168.1.1" -Port 4444 -Credential (Get-Credential) -SkipCertificateCheck
 ```
 
+### Multi-Session Usage
+
+```powershell
+# Register two connections without disturbing the default session
+Connect-SfosFirewall -Firewall "fw1.example.test" -Credential (Get-Credential) -Name "fw1"
+Connect-SfosFirewall -Firewall "fw2.example.test" -Credential (Get-Credential) -Name "fw2" -NoDefault
+
+# Read a gateway's mail-notification setting from fw1 and apply it to the same-named
+# gateway on fw2, without touching the ambient default session
+Get-SfosGatewayHost -Session "fw1" -NameLike "ISP1" |
+    Set-SfosGatewayHost -Session "fw2" -MailNotification ON
+```
+
 ### Gateway and Health Check Management
 
 ```powershell

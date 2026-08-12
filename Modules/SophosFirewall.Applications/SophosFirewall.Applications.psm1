@@ -1,4 +1,4 @@
-#requires -Version 5.1
+﻿#requires -Version 5.1
 #requires -Modules SophosFirewall.Core
 
 <#
@@ -209,6 +209,13 @@ function ConvertTo-SfosApplicationFilterPolicyEntityXml {
         firewall as the server-side filter and re-applied client-side, per the project's
         filtering rules.
 
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the
         stored connection context.
@@ -272,6 +279,7 @@ function Get-SfosApplicationFilterPolicy {
         [string]$Username,
         [SecureString]$Password,
         [switch]$SkipCertificateCheck,
+        [object]$Session,
 
         [switch]$AsXml
     )
@@ -386,6 +394,13 @@ function Get-SfosApplicationFilterPolicy {
         with an empty RuleList (measured), which Get-SfosApplicationFilterPolicy then reports
         back as RuleList = @().
 
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, uses stored connection context.
 
@@ -450,7 +465,9 @@ function New-SfosApplicationFilterPolicy {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     begin {
@@ -531,6 +548,13 @@ function New-SfosApplicationFilterPolicy {
         remove a single rule without touching the rest of the list, use
         Add-SfosApplicationFilterPolicyRule / Remove-SfosApplicationFilterPolicyRule instead.
 
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the
         stored connection context.
@@ -601,7 +625,9 @@ function Set-SfosApplicationFilterPolicy {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     begin {
@@ -678,6 +704,13 @@ function Set-SfosApplicationFilterPolicy {
         .PARAMETER Name
         Name of the target policy.
 
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the
         stored connection context.
@@ -725,7 +758,9 @@ function Remove-SfosApplicationFilterPolicy {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     begin {
@@ -988,6 +1023,13 @@ function New-SfosApplicationFilterPolicyRule {
         .PARAMETER Rule
         Rule object to append, built with New-SfosApplicationFilterPolicyRule.
 
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the
         stored connection context.
@@ -1044,7 +1086,9 @@ function Add-SfosApplicationFilterPolicyRule {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     begin {
@@ -1112,6 +1156,13 @@ function Add-SfosApplicationFilterPolicyRule {
         Zero-based position of the rule to remove within the policy's RuleList, in the order
         returned by Get-SfosApplicationFilterPolicy. Throws if out of range.
 
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the
         stored connection context.
@@ -1165,7 +1216,9 @@ function Remove-SfosApplicationFilterPolicyRule {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     begin {
@@ -1300,6 +1353,13 @@ function ConvertTo-SfosApplicationObjectEntityXml {
         the firewall as the server-side filter and re-applied client-side, per the project's
         filtering rules.
 
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the
         stored connection context.
@@ -1351,6 +1411,7 @@ function Get-SfosApplicationObject {
         [string]$Username,
         [SecureString]$Password,
         [switch]$SkipCertificateCheck,
+        [object]$Session,
 
         [switch]$AsXml
     )
@@ -1463,6 +1524,13 @@ function Get-SfosApplicationObject {
         to report SelectAllRule back as 'Enable' regardless of what was sent, and drops the
         computed lists - same finding as the policy Rule shape. Default '' (empty).
 
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, uses stored connection context.
 
@@ -1521,7 +1589,9 @@ function New-SfosApplicationObject {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     begin {
@@ -1609,6 +1679,13 @@ function New-SfosApplicationObject {
         .PARAMETER SmartFilter
         Free-text search filter. If omitted, the existing value is kept.
 
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the
         stored connection context.
@@ -1682,7 +1759,9 @@ function Set-SfosApplicationObject {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     begin {
@@ -1755,6 +1834,13 @@ function Set-SfosApplicationObject {
         .PARAMETER Name
         Name of the target object.
 
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the
         stored connection context.
@@ -1801,7 +1887,9 @@ function Remove-SfosApplicationObject {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     begin {
@@ -1849,21 +1937,21 @@ function Remove-SfosApplicationObject {
 # SophosFirewall.Applications - Group B: ApplicationFilterCategory,
 # ApplicationClassificationAssignment (single + batch), ApplicationClassification switch.
 #
-# Measured live against SFOS 22.0 (FW1 lab, 2026-08-12). Key cross-cutting findings for
+# Measured live against SFOS 22.0 in the lab. Key cross-cutting findings for
 # this fragment - see each function's .NOTES for the specific evidence:
 #
 # 1. ApplicationFilterCategory has NO documented add or delete operation - only "edit"
 #    (doc URL .../ApplicationFilterCategory/operations/ApplicationCategory.html). The 26
-#    categories are firmware-fixed. Per CLAUDE.md SS5, operation="edit" is untrusted without
+#    categories are firmware-fixed. operation="edit" is untrusted without
 #    a duplicate check; measured live, "edit" behaves identically to "update" for this
 #    entity (200, no duplicate created, same silent-no-op-on-Description behaviour - see
-#    Set-SfosApplicationFilterCategory). "update" is used exclusively, matching SS5's rule
-#    that only "add"/"update" are trusted verbs. New-/Remove- are deliberately not built:
+#    Set-SfosApplicationFilterCategory). "update" is used exclusively, since only "add"/
+#    "update" are trusted verbs in this API. New-/Remove- are deliberately not built:
 #    there is no operation to base them on, and inventing operation="add" against a fixed
-#    26-row table would be exactly the kind of guess SS5 warns against.
+#    26-row table would be exactly the kind of unsafe guess.
 # 2. Get-SfosApplicationFilterCategory: server-side filtering is a no-op for BOTH "Name"
 #    and "Description" keys (measured: a Name-like or Description-like filter for a single
-#    category returns all 26 rows unchanged). Per CLAUDE.md SS6 this project sends only keys
+#    category returns all 26 rows unchanged). This project sends only keys
 #    "known to work" - since neither measured key works for this entity, no <Filter> is sent
 #    at all and -NameLike is client-side only, the same exception already documented for
 #    ContentConditionList.
@@ -1871,8 +1959,8 @@ function Remove-SfosApplicationObject {
 #    firmware [measured]: a <Set operation="update"> that changes ONLY Description answers
 #    200, and a subsequent Get shows the original text unchanged - reproduced 3 times,
 #    including bundled with a QoSPolicy change that DID persist in the same request. This is
-#    the same defect class as Remove-SfosSSLBookmark (CLAUDE.md SS5): a write that reports
-#    success and changes nothing. Per SS5's rule for that class, the cmdlet reads the object
+#    the same defect class as Remove-SfosSSLBookmark: a write that reports
+#    success and changes nothing. For that class, the cmdlet reads the object
 #    back and throws when a caller-requested Description change did not take effect, rather
 #    than silently reporting success.
 # 4. QoSPolicy on ApplicationFilterCategory only accepts a QoSPolicy object whose own
@@ -1888,14 +1976,14 @@ function Remove-SfosApplicationObject {
 #    QoSPolicy in the same request persists correctly.
 # 6. The per-application QoS override subtree <ApplicationSettings><Application><Name/
 #    QoSPolicy></Application></ApplicationSettings> DOES work and follows the documented
-#    full-replace rule from CLAUDE.md SS5: writing it with one <Application> entry persists
+#    full-replace rule: writing it with one <Application> entry persists
 #    and is visible on the next Get (measured with Application 'Instagram' and QoSPolicy
 #    'Streaming Video - Limit to SD Quality' inside category 'Mobile Applications');
 #    omitting the wrapper entirely on a later update clears it back to no per-app overrides.
 #    Set-SfosApplicationFilterCategory therefore preserves the existing ApplicationSettings
 #    list whenever the caller does not pass -ApplicationSettings, and the dedicated
-#    Add-/Remove-SfosApplicationFilterCategoryMember cmdlets exist per CLAUDE.md SS3 ("every
-#    entity that has a member list gets Add-/Remove-...Member").
+#    Add-/Remove-SfosApplicationFilterCategoryMember cmdlets exist because every
+#    entity that has a member list gets Add-/Remove-...Member cmdlets.
 # 7. ApplicationClassificationAssignment: server-side filtering is a no-op for BOTH
 #    "Application" and "Classification" keys, exact and like criteria alike [measured against
 #    the live 520-row set - every filter tried still returned all 520 rows]. -ApplicationLike
@@ -1908,8 +1996,8 @@ function Remove-SfosApplicationObject {
 #    failed" naming /ApplicationClassificationAssignment/Classification in <InvalidParams>.
 #    No documented enum exists for this field and the vendor operation page confirms none is
 #    published. Only 'New' is confirmed to work on this firmware; the parameter is therefore
-#    left as an unrestricted string (no ValidateSet), consistent with CLAUDE.md's rule
-#    against inventing enum values the API does not document, and the finding is recorded
+#    left as an unrestricted string (no ValidateSet) rather than inventing enum values the
+#    API does not document, and the finding is recorded
 #    here rather than baked into client-side validation that could reject a value the vendor
 #    later documents.
 # 9. ApplicationClassificationBatchAssignment: the wire element names are lower-case
@@ -1917,7 +2005,7 @@ function Remove-SfosApplicationObject {
 #    the single-assignment operation's <Application>/<Classification>. Sending the
 #    upper-case, single-assignment names inside the batch wrapper is rejected: 501 with an
 #    EMPTY <InvalidParams/> (no field named) - measured, and the same empty-InvalidParams
-#    signature CLAUDE.md documents for the IsDefault/PerConnectionAuth blockers elsewhere in
+#    signature seen for the IsDefault/PerConnectionAuth blockers elsewhere in
 #    this project. A batch call with an unknown Application name is rejected the same way
 #    (501, empty <InvalidParams/>), so an unresolvable entry in a batch cannot be diagnosed
 #    per-item from the response - it is reported as one failure for the whole batch, unlike
@@ -1940,8 +2028,7 @@ function Remove-SfosApplicationObject {
 # single field <ACTION>On/Off</ACTION> - upper-case element name, unlike every other entity
 # in this module):
 # - No operation page exists for this entity at all (confirmed absent from the Applications
-#   doc tree per apps-doku-inventar.md). Per this task's Baseline-first rule (the
-#   DoSSettings incident) the write path was probed only after capturing
+#   doc tree per apps-doku-inventar.md). The write path was probed only after capturing
 #   baseline-ApplicationClassification-b.xml, and the ACTUAL toggle (On -> Off -> On) is
 #   run as the LAST step of the whole session, not interleaved with the rest of the
 #   verification, to keep the window during which application classification is off as
@@ -1953,7 +2040,7 @@ function Remove-SfosApplicationObject {
 #   operation="update" answered a clean 200 and a following Get still read 'On' - the
 #   documented precondition for going ahead with the real toggle test.
 # - Get-SfosApplicationClassification uses the identical coded-vs-code-less Status special
-#   case as Get-SfosIPSSwitch (CLAUDE.md: a Status DATA FIELD without a code attribute is not
+#   case as Get-SfosIPSSwitch (a Status DATA FIELD without a code attribute is not
 #   an API error) - here the field is <ACTION>, not <Status>, so there is no naming collision
 #   at all and no special-casing is actually required; Get-SfosApplicationClassification
 #   simply reads /Response/ApplicationClassification/ACTION as data. Documented here because
@@ -1978,6 +2065,13 @@ function Remove-SfosApplicationObject {
 
 .PARAMETER NameLike
     Filters by Name, substring match. Client-side only - see .DESCRIPTION.
+
+.PARAMETER Session
+A session object returned by Connect-SfosFirewall, or the name of a session
+registered with Connect-SfosFirewall -Name. Overrides the stored default
+connection context; any of -Firewall/-Port/-Username/-Password/
+-SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
 
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
@@ -2031,6 +2125,7 @@ function Get-SfosApplicationFilterCategory {
         [string]$Username,
         [SecureString]$Password,
         [switch]$SkipCertificateCheck,
+        [object]$Session,
 
         [switch]$AsXml
     )
@@ -2097,7 +2192,7 @@ function Get-SfosApplicationFilterCategory {
     category and cannot itself be changed [doc: "Category Name cannot be changed"].
 
     Reads the current object first and writes back every field, overriding only what the
-    caller passed (CLAUDE.md SS5 read-modify-write) - this entity replaces the whole object on
+    caller passed (read-modify-write) - this entity replaces the whole object on
     update, so an omitted ApplicationSettings list would otherwise silently clear every
     per-application QoS override.
 
@@ -2106,7 +2201,7 @@ function Get-SfosApplicationFilterCategory {
     change that DID persist in the same request. If the caller explicitly asks for a
     Description change, this cmdlet re-reads the object afterwards and throws when the
     change did not take effect, rather than reporting a success that did not happen -
-    the same treatment CLAUDE.md documents for Remove-SfosSSLBookmark's silent no-op delete.
+    the same treatment as Remove-SfosSSLBookmark's silent no-op delete.
 
 .PARAMETER Name
     Name of the category to update [doc]. Identifies the object; cannot be changed.
@@ -2137,6 +2232,13 @@ function Get-SfosApplicationFilterCategory {
     update that omits the <ApplicationSettings> wrapper entirely clears any existing
     overrides). Prefer Add-/Remove-SfosApplicationFilterCategoryMember for single-application
     changes - they read the current list for you.
+
+.PARAMETER Session
+A session object returned by Connect-SfosFirewall, or the name of a session
+registered with Connect-SfosFirewall -Name. Overrides the stored default
+connection context; any of -Firewall/-Port/-Username/-Password/
+-SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
 
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
@@ -2199,7 +2301,9 @@ function Set-SfosApplicationFilterCategory {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     process {
@@ -2222,12 +2326,9 @@ function Set-SfosApplicationFilterCategory {
             throw "ApplicationFilterCategory '$Name': -BandwidthUsageType must be 'Individual', 'Shared' or an empty string, got '$targetBandwidth'."
         }
         $targetDescription = if ($bp.ContainsKey('Description')) { $Description } else { $existing.Description }
-        # @() must wrap the WHOLE if/else: on Windows PowerShell 5.1 a one-element array
-        # produced inside a branch unrolls to a scalar on assignment, the scalar has no
-        # .Count, and the ApplicationSettings block silently vanished from the request -
-        # the first per-app override of a category could never be added on 5.1 (defect
-        # found by the per-function test build-out 2026-08-12; same class as the
-        # Set-SfosMulticastRoute fix of the same day).
+        # @() must wrap the whole if/else: on Windows PowerShell 5.1 a one-element array from
+        # a branch unrolls to a scalar on assignment, which has no .Count, so the
+        # ApplicationSettings block would silently vanish from the request.
         $targetAppSettings = @(if ($bp.ContainsKey('ApplicationSettings')) { $ApplicationSettings } else { $existing.ApplicationSettings })
 
         if (-not $PSCmdlet.ShouldProcess("ApplicationFilterCategory '$Name' on $($params.Firewall)", 'Update')) {
@@ -2296,8 +2397,7 @@ function Set-SfosApplicationFilterCategory {
     Reads the current ApplicationFilterCategory, upserts one entry in its ApplicationSettings
     list (updates QoSPolicy if -Application already has an override, otherwise adds a new
     one), and writes the complete list back - this entity replaces the whole
-    ApplicationSettings subtree on update, so every other override would otherwise be lost
-    (CLAUDE.md SS5).
+    ApplicationSettings subtree on update, so every other override would otherwise be lost.
 
 .PARAMETER Name
     Name of the ApplicationFilterCategory to modify.
@@ -2310,6 +2410,13 @@ function Set-SfosApplicationFilterCategory {
     constraint as Set-SfosApplicationFilterCategory -QoSPolicy applies here - unconfirmed for
     the per-application field specifically, since the live test used 'Streaming Video - Limit
     to SD Quality' (PolicyBasedOn=Application) throughout.
+
+.PARAMETER Session
+A session object returned by Connect-SfosFirewall, or the name of a session
+registered with Connect-SfosFirewall -Name. Overrides the stored default
+connection context; any of -Firewall/-Port/-Username/-Password/
+-SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
 
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
@@ -2371,7 +2478,9 @@ function Add-SfosApplicationFilterCategoryMember {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     process {
@@ -2415,6 +2524,13 @@ function Add-SfosApplicationFilterCategoryMember {
 
 .PARAMETER Application
     Name of the application whose per-application QoS override should be removed.
+
+.PARAMETER Session
+A session object returned by Connect-SfosFirewall, or the name of a session
+registered with Connect-SfosFirewall -Name. Overrides the stored default
+connection context; any of -Firewall/-Port/-Username/-Password/
+-SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
 
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
@@ -2460,7 +2576,9 @@ function Remove-SfosApplicationFilterCategoryMember {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     process {
@@ -2523,6 +2641,13 @@ function Remove-SfosApplicationFilterCategoryMember {
 .PARAMETER ClassificationLike
     Filters by Classification, substring match. Client-side only - see .DESCRIPTION.
 
+.PARAMETER Session
+A session object returned by Connect-SfosFirewall, or the name of a session
+registered with Connect-SfosFirewall -Name. Overrides the stored default
+connection context; any of -Firewall/-Port/-Username/-Password/
+-SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -2575,6 +2700,7 @@ function Get-SfosApplicationClassificationAssignment {
         [string]$Username,
         [SecureString]$Password,
         [switch]$SkipCertificateCheck,
+        [object]$Session,
 
         [switch]$AsXml
     )
@@ -2598,7 +2724,7 @@ function Get-SfosApplicationClassificationAssignment {
     Assert-SfosApiReturnSuccess -Xml $XmlResponse -ObjectName 'ApplicationClassificationAssignment' -Action 'get'
 
     # This entity has no <Name> child at all - the Core status heuristic's Name-sibling test
-    # (CLAUDE.md SS5) does not apply here; every returned node carries <Application> and
+    # does not apply here; every returned node carries <Application> and
     # <Classification> and none of them collides with a status container, so a plain
     # selection of every child node is safe.
     $nodes = Select-Xml -Xml $XmlResponse -XPath '/Response/ApplicationClassificationAssignment[Application]' | ForEach-Object -Process { $_.Node }
@@ -2650,6 +2776,13 @@ function Get-SfosApplicationClassificationAssignment {
     accepted on this firmware - every other value tried (see fragment header) is rejected
     with 501. Not restricted by ValidateSet because no vendor enum is documented for this
     field - see the fragment header for why inventing one would be unsafe.
+
+.PARAMETER Session
+A session object returned by Connect-SfosFirewall, or the name of a session
+registered with Connect-SfosFirewall -Name. Overrides the stored default
+connection context; any of -Firewall/-Port/-Username/-Password/
+-SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
 
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
@@ -2708,7 +2841,9 @@ function Set-SfosApplicationClassificationAssignment {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     begin {
@@ -2780,6 +2915,13 @@ function Set-SfosApplicationClassificationAssignment {
     One or more objects with Application and Classification properties, typically from
     Get-SfosApplicationClassificationAssignment.
 
+.PARAMETER Session
+A session object returned by Connect-SfosFirewall, or the name of a session
+registered with Connect-SfosFirewall -Name. Overrides the stored default
+connection context; any of -Firewall/-Port/-Username/-Password/
+-SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -2833,7 +2975,9 @@ function Set-SfosApplicationClassificationAssignmentBatch {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     begin {
@@ -2905,6 +3049,13 @@ function Set-SfosApplicationClassificationAssignmentBatch {
     in the Applications doc tree). Its single field <ACTION>On/Off</ACTION> controls whether
     the firewall classifies newly discovered applications at all.
 
+.PARAMETER Session
+A session object returned by Connect-SfosFirewall, or the name of a session
+registered with Connect-SfosFirewall -Name. Overrides the stored default
+connection context; any of -Firewall/-Port/-Username/-Password/
+-SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -2950,6 +3101,7 @@ function Get-SfosApplicationClassification {
         [string]$Username,
         [SecureString]$Password,
         [switch]$SkipCertificateCheck,
+        [object]$Session,
 
         [switch]$AsXml
     )
@@ -3001,7 +3153,7 @@ function Get-SfosApplicationClassification {
 
 .DESCRIPTION
     Updates the undocumented ApplicationClassification singleton - no operation page exists
-    for this entity, so operation="update" is used as the sole trusted verb per CLAUDE.md SS5,
+    for this entity, so operation="update" is used as the sole trusted verb,
     and the change is confirmed with a following Get before returning.
 
     This is a device-wide switch for the application classification engine, not an access
@@ -3011,6 +3163,13 @@ function Get-SfosApplicationClassification {
 .PARAMETER ACTION
     'On' or 'Off' [measured - see fragment header; no documentation page exists for this
     entity to confirm the value set against].
+
+.PARAMETER Session
+A session object returned by Connect-SfosFirewall, or the name of a session
+registered with Connect-SfosFirewall -Name. Overrides the stored default
+connection context; any of -Firewall/-Port/-Username/-Password/
+-SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
 
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
@@ -3063,7 +3222,9 @@ function Set-SfosApplicationClassification {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     $params = Resolve-SfosParameters -BoundParameters $PSBoundParameters

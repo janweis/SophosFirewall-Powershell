@@ -1270,3 +1270,51 @@ Describe 'Import-SfosTrustedMACs' {
         { Import-SfosTrustedMACs -FilePath $path @conn } | Should -Throw '*was not found*'
     }
 }
+
+Describe 'Session parameter (multi-session support)' {
+
+    BeforeAll {
+        $cred1 = [pscredential]::new('apiuser', (ConvertTo-SecureString 'pw1' -AsPlainText -Force))
+        $cred2 = [pscredential]::new('apiuser', (ConvertTo-SecureString 'pw2' -AsPlainText -Force))
+        Connect-SfosFirewall -Firewall 'fw1.example.test' -Credential $cred1 -Name 'fw1' | Out-Null
+        Connect-SfosFirewall -Firewall 'fw2.example.test' -Credential $cred2 -Name 'fw2' -NoDefault | Out-Null
+    }
+
+    AfterAll { Disconnect-SfosFirewall -All }
+
+    BeforeEach {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.IntrusionPrevention -MockWith {
+            [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><IPSPolicy transactionid=""><Status>No. of records Zero.</Status></IPSPolicy></Response>' }
+        }
+    }
+
+    It 'Resolves the named session instead of the ambient default (direct path)' {
+        Get-SfosIPSPolicy -Session 'fw2' | Out-Null
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.IntrusionPrevention -ParameterFilter {
+            $Firewall -eq 'fw2.example.test'
+        }
+    }
+
+    It 'Uses the ambient default when -Session is omitted' {
+        Get-SfosIPSPolicy | Out-Null
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.IntrusionPrevention -ParameterFilter {
+            $Firewall -eq 'fw1.example.test'
+        }
+    }
+
+    It 'Resolves a session object on the begin-block pipeline path (New-SfosIPSPolicy)' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.IntrusionPrevention -MockWith {
+            [PSCustomObject]@{ Content = '<Response><IPSPolicy><Status code="200">Configuration applied successfully.</Status></IPSPolicy></Response>' }
+        }
+        $s2 = Get-SfosSession -Name 'fw2'
+        New-SfosIPSPolicy -Name 'CrossFwPolicy' -Session 'fw2' -Confirm:$false
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.IntrusionPrevention -ParameterFilter {
+            $Firewall -eq 'fw2.example.test' -and $InnerXml -match '<Name>CrossFwPolicy</Name>'
+        }
+    }
+
+    It 'Throws on an unknown session name without calling the API' {
+        { Get-SfosIPSPolicy -Session 'nichtda' } | Should -Throw '*No session named*'
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.IntrusionPrevention -Times 0 -Exactly
+    }
+}

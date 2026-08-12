@@ -1,4 +1,4 @@
-#requires -Version 5.1
+﻿#requires -Version 5.1
 #requires -Modules SophosFirewall.Core
 
 <#
@@ -64,6 +64,13 @@
         exactly one instance of this element per firewall. By default the cmdlet returns a
         PowerShell-friendly object. Use -AsXml to return the raw XML node.
 
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -109,8 +116,8 @@
 #>
 function Get-SfosATPSettings {
     # PSUseSingularNouns is suppressed on purpose: <ATP> settings form one singleton
-    # configuration object (Sophos X-Ops threat feeds), not a plural container - see project
-    # build rules section 3, the WebFilterSettings precedent.
+    # configuration object (Sophos X-Ops threat feeds), not a plural container - the same
+    # reasoning as the WebFilterSettings precedent.
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '')]
     [CmdletBinding()]
     param(
@@ -119,6 +126,7 @@ function Get-SfosATPSettings {
         [string]$Username,
         [SecureString]$Password,
         [switch]$SkipCertificateCheck,
+        [object]$Session,
 
         [switch]$AsXml
     )
@@ -169,8 +177,8 @@ function Get-SfosATPSettings {
         .DESCRIPTION
         Updates the device-wide ATP singleton using the Sophos Firewall XML API. Reads the
         current object first and resends every field, overriding only what the caller
-        explicitly passed (read-modify-write - SFOS replaces the whole entity on update, see
-        project build rules section 5). Supports ShouldProcess; use -WhatIf to preview.
+        explicitly passed (read-modify-write - SFOS replaces the whole entity on update).
+        Supports ShouldProcess; use -WhatIf to preview.
 
         This is a device-wide security switch (advanced threat protection / IPS threat feed
         enforcement for the whole appliance) - test any change against a maintenance window
@@ -202,6 +210,13 @@ function Get-SfosATPSettings {
         arbitrary string value is accepted here (no existing-object requirement) [measured].
         If omitted, the existing list is kept. Pass an empty array to clear the list - same
         full-replace behaviour as HostException.
+
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
 
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
@@ -262,7 +277,9 @@ function Set-SfosATPSettings {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     $params = Resolve-SfosParameters -BoundParameters $PSBoundParameters
@@ -278,7 +295,7 @@ function Set-SfosATPSettings {
     $targetInspectContent = if ($bp.ContainsKey('InspectContent')) { $InspectContent } else { $current.InspectContent }
     $targetPolicy = if ($bp.ContainsKey('Policy')) { $Policy } else { $current.Policy }
     # @() wraps the whole if/else: a one-element array from a branch unrolls to a scalar
-    # on assignment (measured on PS 5.1; two real data-loss bugs of this class were fixed 2026-08-12).
+    # on assignment (measured on PS 5.1).
     $targetHostException = @(if ($bp.ContainsKey('HostException')) { $HostException } else { $current.HostExceptionList })
     $targetThreatException = @(if ($bp.ContainsKey('ThreatException')) { $ThreatException } else { $current.ThreatExceptionList })
 
@@ -350,6 +367,13 @@ function Set-SfosATPSettings {
         pipeline input by value or by property name (aliased 'Host' so
         Get-SfosIPHost | Add-SfosATPHostException binds).
 
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -399,7 +423,9 @@ function Add-SfosATPHostException {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     begin {
@@ -445,6 +471,13 @@ function Add-SfosATPHostException {
         .PARAMETER HostName
         Name of the IPHost object to remove from the HostException list. Mandatory; accepts
         pipeline input by value or by property name (aliased 'Host').
+
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
 
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
@@ -496,7 +529,9 @@ function Remove-SfosATPHostException {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     begin {
@@ -555,6 +590,13 @@ function Remove-SfosATPHostException {
         arbitrary string is accepted here - no existing-object requirement was found
         [measured]. Mandatory; accepts pipeline input by value or by property name.
 
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -602,7 +644,9 @@ function Add-SfosATPThreatException {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     begin {
@@ -646,6 +690,13 @@ function Add-SfosATPThreatException {
         .PARAMETER Threat
         Threat identifier text to remove from the ThreatException list. Mandatory; accepts
         pipeline input by value or by property name.
+
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
 
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
@@ -693,7 +744,9 @@ function Remove-SfosATPThreatException {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     begin {
@@ -760,6 +813,13 @@ function Remove-SfosATPThreatException {
         Filters by Name, substring match. Sent as the server-side filter key and re-applied
         client-side.
 
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -820,6 +880,7 @@ function Get-SfosThirdPartyFeed {
         [string]$Username,
         [SecureString]$Password,
         [switch]$SkipCertificateCheck,
+        [object]$Session,
 
         [switch]$AsXml
     )
@@ -938,9 +999,9 @@ function Get-SfosThirdPartyFeed {
 
         .PARAMETER FeedPassword
         Password for -Authorization basicAuthentication, as a SecureString [doc]. Named
-        differently from the connection parameter -Password on purpose - this project's own
-        rule (project build rules section 9) warns that an entity secret named -Password binds
-        to the connection parameter instead and silently leaves the entity field unset.
+        differently from the connection parameter -Password on purpose: an entity secret named
+        -Password would bind to the connection parameter instead and silently leave the entity
+        field unset.
         Required when -Authorization is basicAuthentication.
 
         .PARAMETER ApiKeyName
@@ -960,7 +1021,7 @@ function Get-SfosThirdPartyFeed {
         .PARAMETER ValidateServerCertificate
         '1' or '0' [doc table - the sample XML's true/false placeholders were also accepted on
         input, but the firewall always echoes the value back as '1'/'0' regardless of which
-        form was sent, so the table wins here, per project build rules section 5]. Mandatory
+        form was sent, so the table wins here]. Mandatory
         [doc].
 
         .PARAMETER PollingInterval
@@ -971,6 +1032,13 @@ function Get-SfosThirdPartyFeed {
         '1' or '0' [doc table; sample XML's true/false was not tested for input, but the wire
         always returns '1'/'0'. Table wins here for the same reason as
         -ValidateServerCertificate]. Optional.
+
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
 
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
@@ -1025,8 +1093,8 @@ function Get-SfosThirdPartyFeed {
         successfully.".
         <Id> is server-assigned and cannot be set by the caller - not exposed as a parameter.
         <Position> is accepted here (create time) but is never returned by
-        Get-SfosThirdPartyFeed - per project build rules section 4 (a field a Get-* does not
-        expose is impossible to preserve on update), Set-SfosThirdPartyFeed therefore has no
+        Get-SfosThirdPartyFeed: since a field a Get-* does not
+        expose is impossible to preserve on update, Set-SfosThirdPartyFeed has no
         -Position parameter at all, matching the FileType/-Template precedent. Only New-* can
         set it, and only once, at creation.
         Creating a second object with a Name already in use answers a field-precise 409
@@ -1093,7 +1161,9 @@ function New-SfosThirdPartyFeed {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     $params = Resolve-SfosParameters -BoundParameters $PSBoundParameters
@@ -1244,6 +1314,13 @@ function New-SfosThirdPartyFeed {
         .PARAMETER Enabled
         '1' or '0'. If omitted, the existing value is kept.
 
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -1276,9 +1353,9 @@ function New-SfosThirdPartyFeed {
            Set-SfosSSLBookmark - makes SFOS answer HTTP 200 with a response that contains no
            <ThirdPartyFeed> element and no <Status> at all, and the update is silently
            dropped: a Description change sent in the same request was confirmed absent on a
-           follow-up Get. This is the "missing status element is not success" trap from
-           project build rules section 5, and Core's generic status check cannot catch it,
-           because there is no ThirdPartyFeed subtree in the response to look inside at all.
+           follow-up Get. This is the "missing status element is not success" trap, and Core's
+           generic status check cannot catch it, because there is no ThirdPartyFeed subtree in
+           the response to look inside at all.
         2. Omitting the Password (or Value) element entirely, while Authorization stays the
            same authenticated type, answers a normal 200 AND the previously stored password
            hash comes back completely unchanged on the next Get. This is the opposite of the
@@ -1345,7 +1422,9 @@ function Set-SfosThirdPartyFeed {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     begin {
@@ -1483,6 +1562,13 @@ function Set-SfosThirdPartyFeed {
         .PARAMETER Name
         Name of the feed to remove. Mandatory; accepts pipeline input by property name.
 
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -1533,7 +1619,9 @@ function Remove-SfosThirdPartyFeed {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     begin {

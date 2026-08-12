@@ -1,4 +1,4 @@
-#requires -Version 5.1
+﻿#requires -Version 5.1
 #requires -Modules Pester
 
 <#
@@ -328,13 +328,12 @@ Describe 'Read-Modify-Write' {
 }
 
 Describe 'UserActivity NewName safety net' {
-    # Live-verified defect: an update to UserActivity sent without <NewName> answers HTTP
-    # 200 / status code 200, but renames the object to an EMPTY name - the object becomes an
-    # unreachable orphan under its old name. Set-SfosUserActivity, Add-SfosUserActivityMember
-    # and Remove-SfosUserActivityMember all update the object internally, so all three must
+    # An update to UserActivity sent without <NewName> answers HTTP 200 / status code 200,
+    # but renames the object to an EMPTY name - the object becomes an unreachable orphan under
+    # its old name. Set-SfosUserActivity, Add-SfosUserActivityMember and
+    # Remove-SfosUserActivityMember all update the object internally, so all three must
     # always send <NewName> - the caller's new name, or the object's current name when the
-    # caller is not renaming. These tests exist to catch a regression that would silently
-    # cause data loss on a live firewall while still reporting success.
+    # caller is not renaming.
 
     BeforeAll {
         $conn = @{
@@ -615,8 +614,7 @@ Describe 'New-SfosWebFilterPolicyRule -InputObject' {
 
     # Without -InputObject every omitted parameter takes its default, so rebuilding a rule to
     # change one field also resets Schedule and the enabled flags. Editing an existing rule
-    # has to leave everything else alone - same reasoning as the NetworkPolicy subtree in
-    # SophosFirewall.Firewall (the project build rules, section 5).
+    # has to leave everything else alone.
 
     BeforeAll {
         $script:baseRule = [PSCustomObject]@{
@@ -1084,13 +1082,9 @@ Describe 'Get Parsing - WebFilterCategory' {
         @($result.DomainList) | Should -Be @('example.com')
     }
 
-    It 'Should yield an empty array for absent KeywordList/URLList (regression: bare string-array cast used to produce a one-element array)' {
-        # Regression test for a defect found while writing this suite and fixed 2026-08-12:
-        # Get-SfosWebFilterCategory used to cast the bare ExpandProperty pipeline straight
-        # to [string[]], so an absent element ($node.KeywordList is $null) produced a
-        # one-element array holding an empty string instead of the @() that CLAUDE.md
-        # section 7 guarantees. The parser now wraps in @(...) with an empty-item filter,
-        # like the sibling parsers in WebFilterURLGroup/FileType always did.
+    It 'Should yield an empty array for absent KeywordList/URLList' {
+        # An absent element ($node.KeywordList is $null) must come back as @(), not a
+        # one-element array holding an empty string.
         $result = @(Get-SfosWebFilterCategory @conn | Where-Object { $_.Name -eq 'LocalCat' })[0]
         @($result.KeywordList).Count | Should -Be 0
         @($result.URLList).Count | Should -Be 0
@@ -2268,9 +2262,8 @@ Describe 'Settings Singletons' {
         }
 
         It 'Should resend PharmingProtection unchanged when only WebCaching is toggled' {
-            # This is the exact scenario CLAUDE.md documents as a live data-loss defect on the
-            # sibling singleton WebFilterProtectionSettings: a field never mentioned in the
-            # request was silently reset to Disable. Read-modify-write must prevent it here too.
+            # On the sibling singleton WebFilterProtectionSettings, a field never mentioned in
+            # the request was silently reset to Disable. Read-modify-write must prevent it here too.
             Set-SfosWebFilterSettings -WebCaching 'Enable' @conn -Confirm:$false
 
             Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -Times 1 -Exactly -ParameterFilter {
@@ -2331,10 +2324,9 @@ Describe 'Settings Singletons' {
         }
 
         It 'Should resend PharmingProtection=Enable when only FileSizeThreshold changes' {
-            # Live-verified defect (CLAUDE.md SS5): a Set carrying only FileSizeThreshold,
-            # FTPFileSizeThreshold and AudioVideoFileScanning reset PharmingProtection from
-            # Enable to Disable with a code="200" success response. This is the test that
-            # catches a regression of exactly that defect.
+            # A Set carrying only FileSizeThreshold, FTPFileSizeThreshold and
+            # AudioVideoFileScanning reset PharmingProtection from Enable to Disable with a
+            # code="200" success response.
             Set-SfosWebFilterProtectionSettings -FileSizeThreshold 30721 @conn -Confirm:$false
 
             Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -Times 1 -Exactly -ParameterFilter {
@@ -2443,5 +2435,52 @@ Describe 'Settings Singletons' {
 
             Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -Times 1 -Exactly -ParameterFilter { $InnerXml -match '<Get>' }
         }
+    }
+}
+
+Describe 'Session parameter (multi-session support)' {
+
+    BeforeAll {
+        $cred1 = [pscredential]::new('apiuser', (ConvertTo-SecureString 'pw1' -AsPlainText -Force))
+        $cred2 = [pscredential]::new('apiuser', (ConvertTo-SecureString 'pw2' -AsPlainText -Force))
+        Connect-SfosFirewall -Firewall 'fw1.example.test' -Credential $cred1 -Name 'fw1' | Out-Null
+        Connect-SfosFirewall -Firewall 'fw2.example.test' -Credential $cred2 -Name 'fw2' -NoDefault | Out-Null
+    }
+
+    AfterAll { Disconnect-SfosFirewall -All }
+
+    BeforeEach {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -MockWith {
+            [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><WebFilterURLGroup><Status>No. of records Zero.</Status></WebFilterURLGroup></Response>' }
+        }
+    }
+
+    It 'Resolves the named session instead of the ambient default (direct path)' {
+        Get-SfosWebFilterURLGroup -Session 'fw2' | Out-Null
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -ParameterFilter {
+            $Firewall -eq 'fw2.example.test'
+        }
+    }
+
+    It 'Uses the ambient default when -Session is omitted' {
+        Get-SfosWebFilterURLGroup | Out-Null
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -ParameterFilter {
+            $Firewall -eq 'fw1.example.test'
+        }
+    }
+
+    It 'Resolves a session object on a write cmdlet (New-SfosWebFilterURLGroup)' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -MockWith {
+            [PSCustomObject]@{ Content = '<Response><WebFilterURLGroup><Status code="200">Configuration applied successfully.</Status></WebFilterURLGroup></Response>' }
+        }
+        New-SfosWebFilterURLGroup -Name 'CrossFwGroup' -Members 'example.invalid' -Session 'fw2' -Confirm:$false
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -ParameterFilter {
+            $Firewall -eq 'fw2.example.test' -and $InnerXml -match '<Name>CrossFwGroup</Name>'
+        }
+    }
+
+    It 'Throws on an unknown session name without calling the API' {
+        { Get-SfosWebFilterURLGroup -Session 'nichtda' } | Should -Throw '*No session named*'
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -Times 0 -Exactly
     }
 }

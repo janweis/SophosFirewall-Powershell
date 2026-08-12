@@ -1,4 +1,4 @@
-#requires -Version 5.1
+﻿#requires -Version 5.1
 #requires -Modules Pester
 
 <#
@@ -116,8 +116,7 @@ Describe 'Request XML Generation' {
         }
 
         # Documentation folder for this entity is "SecurityPolicy"; sending that as the
-        # wire root answers 529 "Input request module is Invalid" on a live firewall
-        # (the project build rules SS5, module header). This test locks in the measured element name.
+        # wire root answers 529 "Input request module is Invalid" on a live firewall.
         It 'Should never send SecurityPolicy as the wire root element' {
             $np = New-SfosFirewallRuleNetworkPolicy -SourceZone 'LAN' -DestinationZone 'WAN'
             New-SfosFirewallRule -Name 'Allow-LAN-to-WAN' -Status Enable -Position Bottom -PolicyType Network -NetworkPolicy $np @conn -Confirm:$false
@@ -207,11 +206,9 @@ Describe 'Request XML Generation' {
     }
 
     Context 'New-SfosSSLTLSInspectionRule Position handling' {
-        # Regression for the client-side crash fixed 2026-08-12: an unbound -Position used to be
-        # forwarded unconditionally into ConvertTo-SfosSSLTLSInspectionRuleEntityXml, whose
-        # -Position parameter carries ValidateSet('Top','Bottom') - an unbound PowerShell
-        # parameter binds as an empty string, which violates the set and the call never reached
-        # the API. This is exactly the call in the module's own README quickstart and .EXAMPLE.
+        # An unbound -Position must not be forwarded into ConvertTo-SfosSSLTLSInspectionRuleEntityXml:
+        # its -Position parameter carries ValidateSet('Top','Bottom'), and an unbound PowerShell
+        # parameter binds as an empty string, which violates the set.
         It 'Should build valid Add XML with no Position element when -Position is omitted' {
             { New-SfosSSLTLSInspectionRule -Name 'Bypass-Banking' -Enable No @conn -Confirm:$false } | Should -Not -Throw
 
@@ -260,8 +257,8 @@ Describe 'Request XML Generation' {
 }
 
 Describe 'Status is a data field, not an API status' {
-    # Live-verified collision (the project build rules module header): <Status> inside a FirewallRule node is
-    # the rule's own Enable/Disable flag, not a request status. A response carrying several
+    # <Status> inside a FirewallRule node is the rule's own Enable/Disable flag, not a
+    # request status. A response carrying several
     # <FirewallRule><Status>Enable</Status></FirewallRule> siblings must not be read as a
     # broken/erroring request - Core's Get-SfosApiStatus tells the two apart before this
     # cmdlet ever sees a status, and this test guards that boundary from this module's side.
@@ -312,7 +309,7 @@ Describe 'Read-Modify-Write' {
         BeforeEach {
             # Set-SfosFirewallRule reads the current rule before writing, so the mock has to
             # answer a <Get> with a matching, fully resolved rule - including Position/After,
-            # the single most expensive field to lose (the project build rules SS5).
+            # the single most expensive field to lose.
             Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Firewall -MockWith {
                 if ($InnerXml -match '<Get>') {
                     [PSCustomObject]@{ Content = @'
@@ -561,8 +558,7 @@ Describe 'Read-Modify-Write' {
         # This entity is on the never-write-live list (module .NOTES); verified here only
         # against a mock. Read-modify-write matters just as much on a singleton: a Set that
         # resent only the changed field would reset every other device-wide TLS setting to
-        # whatever the firewall treats as its default - the same PharmingProtection-reset class
-        # of defect documented in CLAUDE.md for WebFilterProtectionSettings.
+        # whatever the firewall treats as its default.
         BeforeEach {
             Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Firewall -MockWith {
                 if ($InnerXml -match '<Get>') {
@@ -814,12 +810,10 @@ Describe 'Error Paths' {
     }
 
     Context 'Remove-SfosFirewallRule on a non-existent rule' {
-        # Known open defect (CLAUDE.md "Still open" table, applies to all Remove-Sfos*): the
-        # raw firewall answer is passed through unchanged rather than a "was not found" message.
-        # Measured wording for this class of error on this module: 528 "Trying to update
-        # default entities which are not editable". This test locks in that the cmdlet still
-        # throws - 528 is in the documented 500-599 failure range - even though the message is
-        # misleading; it does not report a false success.
+        # The raw firewall answer is passed through unchanged rather than a "was not found"
+        # message: 528 "Trying to update default entities which are not editable". 528 is in
+        # the documented 500-599 failure range, so the cmdlet still throws rather than
+        # reporting a false success, even though the message is misleading.
         BeforeEach {
             Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Firewall -MockWith {
                 [PSCustomObject]@{ Content = @'
@@ -1101,5 +1095,72 @@ Describe 'WhatIf' {
         Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Firewall -ParameterFilter {
             $InnerXml -match '<Set operation="update">'
         } -Times 0 -Exactly
+    }
+}
+
+Describe 'Session parameter (multi-session support)' {
+
+    BeforeAll {
+        $cred1 = [pscredential]::new('apiuser', (ConvertTo-SecureString 'pw1' -AsPlainText -Force))
+        $cred2 = [pscredential]::new('apiuser', (ConvertTo-SecureString 'pw2' -AsPlainText -Force))
+        Connect-SfosFirewall -Firewall 'fw1.example.test' -Credential $cred1 -Name 'fw1' | Out-Null
+        Connect-SfosFirewall -Firewall 'fw2.example.test' -Credential $cred2 -Name 'fw2' -NoDefault | Out-Null
+    }
+
+    AfterAll { Disconnect-SfosFirewall -All }
+
+    BeforeEach {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Firewall -MockWith {
+            [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><FirewallRule transactionid=""><Status>No. of records Zero.</Status></FirewallRule></Response>' }
+        }
+    }
+
+    It 'Resolves the named session instead of the ambient default (direct path)' {
+        Get-SfosFirewallRule -Session 'fw2' | Out-Null
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Firewall -ParameterFilter {
+            $Firewall -eq 'fw2.example.test'
+        }
+    }
+
+    It 'Uses the ambient default when -Session is omitted' {
+        Get-SfosFirewallRule | Out-Null
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Firewall -ParameterFilter {
+            $Firewall -eq 'fw1.example.test'
+        }
+    }
+
+    It 'Resolves a session object on the begin-block pipeline path (Set-SfosNATRule)' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Firewall -MockWith {
+            if ($InnerXml -match '<Get>') {
+                [PSCustomObject]@{ Content = @'
+<Response>
+  <Login><status>Authentication Successful</status></Login>
+  <NATRule>
+    <Name>CrossFwNAT</Name>
+    <Description>none</Description>
+    <IPFamily>IPv4</IPFamily>
+    <Status>Enable</Status>
+    <Position>Bottom</Position>
+    <TranslatedSource>Original</TranslatedSource>
+    <TranslatedDestination>Original</TranslatedDestination>
+    <TranslatedService>Original</TranslatedService>
+  </NATRule>
+</Response>
+'@
+                }
+            }
+            else {
+                [PSCustomObject]@{ Content = '<Response><NATRule><Status code="200">OK</Status></NATRule></Response>' }
+            }
+        }
+        Set-SfosNATRule -Name 'CrossFwNAT' -Status Disable -Session 'fw2' -Confirm:$false
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Firewall -ParameterFilter {
+            $Firewall -eq 'fw2.example.test' -and $InnerXml -match '<Status>Disable</Status>'
+        }
+    }
+
+    It 'Throws on an unknown session name without calling the API' {
+        { Get-SfosFirewallRule -Session 'nichtda' } | Should -Throw '*No session named*'
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Firewall -Times 0 -Exactly
     }
 }

@@ -61,6 +61,18 @@ Import-Module -Name "C:\Path\To\SophosFirewall.Applications.psd1"
 Connect-SfosFirewall -Firewall "192.168.1.1" -Port 4444 -Credential (Get-Credential) -SkipCertificateCheck
 ```
 
+### Multi-Session: Recreate a Policy Name/Action on a Second Firewall
+
+```powershell
+Connect-SfosFirewall -Firewall "fw1.example.test" -Credential (Get-Credential) -Name fw1
+Connect-SfosFirewall -Firewall "fw2.example.test" -Credential (Get-Credential) -Name fw2 -NoDefault
+
+# Read a policy from fw1 and create it on fw2, without touching the ambient default session.
+# Name and DefaultAction bind by pipeline property name; add -Rule explicitly to also carry rules.
+Get-SfosApplicationFilterPolicy -Session fw1 -NameLike "BranchOfficeApps" |
+    New-SfosApplicationFilterPolicy -Session fw2
+```
+
 ### Application Filter Policy and Rules
 
 ```powershell

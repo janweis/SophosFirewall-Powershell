@@ -1,4 +1,4 @@
-#requires -Version 5.1
+﻿#requires -Version 5.1
 #requires -Modules Pester
 
 <#
@@ -469,15 +469,13 @@ Describe 'Pipeline Processing' {
     }
 }
 
-#region Extended per-function coverage
+#region Extended coverage
 #
-# Everything below fills in the "funktionsgenau" gap: every one of the 53 exported
-# functions gets at least one XML-generation or parsing test, every Set-*/Add-*/Remove-*
-# member cmdlet gets a read-modify-write preservation test, and every cmdlet with its own
-# error logic gets a test that triggers exactly that path. Mock response shapes are taken
-# from abnahme-hostsandservices-matrix.md (live-verified against FW1) and from the
-# CLAUDE.md rules for this module (528 passthrough on Remove, the ICMPCode '-1' regression,
-# empty-result handling).
+# Every one of the 53 exported functions gets at least one XML-generation or parsing test,
+# every Set-*/Add-*/Remove-* member cmdlet gets a read-modify-write preservation test, and
+# every cmdlet with its own error logic gets a test that triggers exactly that path. Mock
+# response shapes reflect the module's known constraints: 528 passthrough on Remove, an
+# omitted ICMPCode sending -1 on the wire, and empty-result handling.
 
 Describe 'IPHost - Extended Coverage' {
 
@@ -573,9 +571,8 @@ Describe 'IPHost - Extended Coverage' {
         }
 
         It 'Passes the raw firewall 528 message through rather than reporting "not found"' {
-            # Live-measured (abnahme-hostsandservices-matrix.md): Remove-Sfos* does not read
-            # first, so a repeat remove on an already-deleted object gets this misleading
-            # code instead of a "was not found" message. CLAUDE.md "Still open" - not fixed.
+            # Remove-Sfos* does not read first, so a repeat remove on an already-deleted object
+            # gets this misleading code instead of a "was not found" message.
             Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.HostsAndServices -MockWith {
                 [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><IPHost><Status code="528">Trying to update default entities which are not editable.</Status></IPHost></Response>' }
             }
@@ -1357,7 +1354,7 @@ Describe 'MACHost - Extended Coverage' {
         }
     }
 
-    Context 'Remove-SfosMACHost - documented 528 passthrough (live-verified)' {
+    Context 'Remove-SfosMACHost - 528 passthrough on repeat remove' {
 
         BeforeAll {
             $conn = @{
@@ -1369,9 +1366,8 @@ Describe 'MACHost - Extended Coverage' {
         }
 
         It 'Passes the raw firewall 528 message through on a second remove of the same object' {
-            # abnahme-hostsandservices-matrix.md #34: live-reproduced on FW1. Remove-SfosMACHost
-            # does not read first, so this is the exact response the firewall returns, not a
-            # "not found" message.
+            # Remove-SfosMACHost does not read first, so this is the exact response the
+            # firewall returns, not a "not found" message.
             Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.HostsAndServices -MockWith {
                 [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><MACHost><Status code="528">Trying to update default entities which are not editable.</Status></MACHost></Response>' }
             }
@@ -1593,9 +1589,8 @@ Describe 'Service - Extended Coverage' {
         }
 
         It 'Parses an ICMP service, including the text ICMPType/ICMPCode form the firewall returns' {
-            # Live-observed: Get-SfosService returns ICMPType/ICMPCode as text ('Echo',
-            # 'Any Code'), not the numeric code New-SfosService requires - the documented
-            # round-trip defect (CLAUDE.md "Still open").
+            # Get-SfosService returns ICMPType/ICMPCode as text ('Echo', 'Any Code'), not the
+            # numeric code New-SfosService requires.
             Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.HostsAndServices -MockWith {
                 [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><Services><Name>PING</Name><Type>ICMP</Type><ServiceDetails><ServiceDetail><ICMPType>Echo</ICMPType><ICMPCode>Any Code</ICMPCode></ServiceDetail></ServiceDetails></Services></Response>' }
             }
@@ -1624,7 +1619,7 @@ Describe 'Service - Extended Coverage' {
         }
     }
 
-    Context 'New-SfosService - XML per Type, including the ICMPCode regression fix' {
+    Context 'New-SfosService - XML per Type' {
 
         BeforeAll {
             $conn = @{
@@ -1649,10 +1644,10 @@ Describe 'Service - Extended Coverage' {
             }
         }
 
-        It 'REGRESSION (2026-08-12 fix): omitting -ICMPCode sends ICMPCode -1 on the wire, not an empty element' {
-            # Live-measured (abnahme-hostsandservices-matrix.md): an empty <ICMPCode></ICMPCode>
-            # is rejected by the firewall with 501. Omitting -ICMPCode must default to '-1'
-            # ("Any Code") on the wire, exactly like an existing PING service.
+        It 'Omitting -ICMPCode sends ICMPCode -1 on the wire, not an empty element' {
+            # An empty <ICMPCode></ICMPCode> is rejected by the firewall with 501. Omitting
+            # -ICMPCode must default to '-1' ("Any Code") on the wire, exactly like an existing
+            # PING service.
             New-SfosService -Name 'ICMP-Echo' -ICMPType '8' @conn -Confirm:$false
 
             Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.HostsAndServices -Times 1 -Exactly -ParameterFilter {
@@ -1791,7 +1786,7 @@ Describe 'Service - Extended Coverage' {
             }
         }
 
-        It 'Reports ICMP rows as named failures instead of attempting an import (documented, CLAUDE.md "Still open")' {
+        It 'Reports ICMP rows as named failures instead of attempting an import' {
             $csvPath = Join-Path $TestDrive 'icmp-services.csv'
             @([PSCustomObject]@{ Name = 'PING'; Description = ''; Type = 'ICMP'; Protocol = ''; SrcPort = ''; DstPort = ''; ProtocolName = ''; ICMPType = 'Echo'; ICMPCode = 'Any Code'; ICMPv6Type = ''; ICMPv6Code = '' }) |
                 Export-Csv -Path $csvPath -NoTypeInformation
@@ -2022,5 +2017,54 @@ Describe 'ServiceGroup - Extended Coverage' {
     }
 }
 
-#endregion Extended per-function coverage
+#endregion Extended coverage
 
+
+
+Describe 'Session parameter (multi-session support)' {
+
+    BeforeAll {
+        $cred1 = [pscredential]::new('apiuser', (ConvertTo-SecureString 'pw1' -AsPlainText -Force))
+        $cred2 = [pscredential]::new('apiuser', (ConvertTo-SecureString 'pw2' -AsPlainText -Force))
+        Connect-SfosFirewall -Firewall 'fw1.example.test' -Credential $cred1 -Name 'fw1' | Out-Null
+        Connect-SfosFirewall -Firewall 'fw2.example.test' -Credential $cred2 -Name 'fw2' -NoDefault | Out-Null
+    }
+
+    AfterAll { Disconnect-SfosFirewall -All }
+
+    BeforeEach {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.HostsAndServices -MockWith {
+            [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><IPHost transactionid=""><Status>No. of records Zero.</Status></IPHost></Response>' }
+        }
+    }
+
+    It 'Resolves the named session instead of the ambient default (direct path)' {
+        Get-SfosIPHost -Session 'fw2' | Out-Null
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.HostsAndServices -ParameterFilter {
+            $Firewall -eq 'fw2.example.test'
+        }
+    }
+
+    It 'Uses the ambient default when -Session is omitted' {
+        Get-SfosIPHost | Out-Null
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.HostsAndServices -ParameterFilter {
+            $Firewall -eq 'fw1.example.test'
+        }
+    }
+
+    It 'Resolves a session object on the begin-block pipeline path (New-SfosIPHost)' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.HostsAndServices -MockWith {
+            [PSCustomObject]@{ Content = '<Response><IPHost><Status code="200">Configuration applied successfully.</Status></IPHost></Response>' }
+        }
+        $s2 = Get-SfosSession -Name 'fw2'
+        New-SfosIPHost -Name 'CrossFwHost' -HostType IP -IPAddress '198.51.100.10' -Session 'fw2' -Confirm:$false
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.HostsAndServices -ParameterFilter {
+            $Firewall -eq 'fw2.example.test' -and $InnerXml -match '<Name>CrossFwHost</Name>'
+        }
+    }
+
+    It 'Throws on an unknown session name without calling the API' {
+        { Get-SfosIPHost -Session 'nichtda' } | Should -Throw '*No session named*'
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.HostsAndServices -Times 0 -Exactly
+    }
+}

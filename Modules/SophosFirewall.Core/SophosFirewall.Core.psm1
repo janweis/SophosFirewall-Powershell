@@ -15,7 +15,8 @@
     Module Name: SophosFirewall.Core
     Author: Jan Weis
     Homepage: https://www.it-explorations.de
-    Version: 1.2.0
+    Version: 1.3.0
+    Total Functions: 8
     PowerShell Version: 5.1+
     
 .LINK
@@ -29,6 +30,11 @@
 
 # Session context for connection reuse across cmdlets
 $script:SfosConnection = $null
+
+# Named session registry for Connect-SfosFirewall -Name / -Session everywhere. A plain
+# @{} hashtable literal's case sensitivity is not guaranteed across PowerShell versions,
+# so the comparer is set explicitly - session names are looked up case-insensitively.
+$script:SfosSessions = [System.Collections.Hashtable]::new([StringComparer]::OrdinalIgnoreCase)
 
 # Guards the process-wide certificate callback under PS 5.1. ServicePointManager is static,
 # so two calls in parallel runspaces could each save the other's temporary "accept all"
@@ -154,7 +160,15 @@ function Assert-SfosApiLoginSuccess {
     unreachable host used to block for the operating system's own default (around 21
     seconds under Windows) with no way for a caller to shorten it.
 .PARAMETER SkipCertificateCheck
-    Skips SSL certificate validation for self-signed certificates.
+    Skips SSL certificate validation for self-signed certificates. Part of the 'Explicit'
+    parameter set; when calling with -Session, the session's own SkipCertificateCheck value
+    is used instead.
+.PARAMETER Session
+    A registered session name or a session object returned by Connect-SfosFirewall. Resolves
+    Firewall, Port, Username, Password and SkipCertificateCheck from it instead of from the
+    individual connection parameters, for raw multi-session XML work. Mandatory in this
+    parameter set; the 'Explicit' set (Firewall/Port/Username/Password/SkipCertificateCheck)
+    remains the default and is unchanged.
 .OUTPUTS
     The response from the API as a WebResponseObject.
 .EXAMPLE
@@ -169,19 +183,25 @@ function Assert-SfosApiLoginSuccess {
     # Fail fast against a host that might be unreachable, instead of waiting out the
     # operating system's own default timeout.
     Invoke-SfosApi -Firewall "firewall.example.com" -Username "admin" -Password $securePw -InnerXml $inner -TimeoutSec 5
+.EXAMPLE
+    # Raw multi-session call against a registered session instead of individual connection
+    # parameters. 'fw2' has to be registered first, e.g. via
+    # Connect-SfosFirewall -Firewall "fw2.example.test" -Credential $cred -Name 'fw2' -NoDefault
+    Invoke-SfosApi -Session 'fw2' -InnerXml $inner
 #>
 function Invoke-SfosApi {
-    [CmdletBinding()]
+    [CmdletBinding(DefaultParameterSetName = 'Explicit')]
     param(
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory, ParameterSetName = 'Explicit')]
         [string]$Firewall,
 
+        [Parameter(ParameterSetName = 'Explicit')]
         [int]$Port = $script:DefaultSfosPort,
 
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory, ParameterSetName = 'Explicit')]
         [string]$Username,
 
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory, ParameterSetName = 'Explicit')]
         [SecureString]$Password,
 
         [Parameter(Mandatory)]
@@ -191,8 +211,24 @@ function Invoke-SfosApi {
 
         [int]$TimeoutSec = 30,
 
-        [switch]$SkipCertificateCheck
+        [Parameter(ParameterSetName = 'Explicit')]
+        [switch]$SkipCertificateCheck,
+
+        [Parameter(Mandatory, ParameterSetName = 'Session')]
+        [object]$Session
     )
+
+    if ($PSCmdlet.ParameterSetName -eq 'Session') {
+        $resolvedSession = Resolve-SfosSessionArgument -Session $Session
+        if (-not $resolvedSession) {
+            throw 'Invoke-SfosApi -Session did not resolve to a usable session. Pass a registered session name or the object returned by Connect-SfosFirewall.'
+        }
+        $Firewall = $resolvedSession.Firewall
+        $Port = $resolvedSession.Port
+        $Username = $resolvedSession.Username
+        $Password = $resolvedSession.Password
+        $SkipCertificateCheck = [bool]$resolvedSession.SkipCertificateCheck
+    }
 
     # Variables for secure handling and cleanup
     $plainPassword = $null
@@ -564,11 +600,67 @@ function Assert-SfosApiReturnSuccess {
 
 <#
 .SYNOPSIS
+    Resolves a -Session argument to a session object. Internal helper, not exported.
+
+.DESCRIPTION
+    Accepts the same shapes a domain cmdlet's -Session parameter can receive: $null (passed
+    straight through, meaning "no session"), a registered session name (looked up in the
+    named-session registry, case-insensitively), an object already tagged with the
+    PSTypeName 'SophosFirewall.Session' (the return value of Connect-SfosFirewall, passed
+    through unchanged), or - as a duck-typing fallback - any other object that at least has a
+    Firewall property, so a caller who built a compatible object by hand is not blocked.
+    Anything else throws.
+
+.PARAMETER Session
+    The raw value bound to a cmdlet's -Session parameter.
+#>
+function Resolve-SfosSessionArgument {
+    [CmdletBinding()]
+    [OutputType([object])]
+    param(
+        [AllowNull()]
+        [object]$Session
+    )
+
+    if ($null -eq $Session) {
+        return $null
+    }
+
+    if ($Session -is [string]) {
+        if ($script:SfosSessions.ContainsKey($Session)) {
+            return $script:SfosSessions[$Session]
+        }
+        throw "No session named '$Session' is registered. Use Get-SfosSession to list registered sessions, or Connect-SfosFirewall -Name '$Session' to register one."
+    }
+
+    if ($Session.PSObject.TypeNames -contains 'SophosFirewall.Session') {
+        return $Session
+    }
+
+    # Duck-typing fallback: accept anything that looks like a session object rather than
+    # requiring the exact type, so a hand-built compatible object still works.
+    if ($Session.PSObject.Properties.Match('Firewall').Count -gt 0) {
+        return $Session
+    }
+
+    throw 'The value passed to -Session is neither a registered session name nor a session object. Use Get-SfosSession to list registered sessions, or pass the object returned by Connect-SfosFirewall.'
+}
+
+<#
+.SYNOPSIS
     Resolves connection parameters from session context or explicit values.
 
 .DESCRIPTION
     Looks up connection parameters from the module session variable if not explicitly provided.
     Ensures all required parameters are available for API calls.
+
+    When the caller's bound parameters include a 'Session' key - i.e. the calling cmdlet
+    declared a -Session parameter and it was bound, even to $null - that session becomes the
+    base instead of the default session, and an explicit -Session $null disables the fallback
+    to the default session entirely rather than silently keeping it. This is the same
+    ContainsKey philosophy already used below for -Port 0 and -SkipCertificateCheck:$false.
+    Without a 'Session' key in -BoundParameters (every call site that predates -Session),
+    behaviour is unchanged: the default session set by Connect-SfosFirewall is the base.
 
 .PARAMETER BoundParameters
     Hashtable of bound parameters from calling cmdlet.
@@ -578,6 +670,11 @@ function Assert-SfosApiReturnSuccess {
 
 .EXAMPLE
     $resolved = Resolve-SfosParameters -BoundParameters $PSBoundParameters
+.EXAMPLE
+    # A cmdlet with its own -Session parameter passes $PSBoundParameters straight through;
+    # if -Session was bound, its value - a registered name or a session object - becomes the
+    # base for this resolution instead of the default session.
+    $resolved = Resolve-SfosParameters -BoundParameters $PSBoundParameters
 #>
 function Resolve-SfosParameters {
     [CmdletBinding()]
@@ -586,7 +683,14 @@ function Resolve-SfosParameters {
         [Parameter(Mandatory)]
         [hashtable]$BoundParameters
     )
-    
+
+    $base = $script:SfosConnection
+    if ($BoundParameters.ContainsKey('Session')) {
+        # ContainsKey, not a truthiness test on the value: an explicit -Session $null must
+        # switch off the default-session fallback, not be treated as "not supplied".
+        $base = Resolve-SfosSessionArgument -Session $BoundParameters['Session']
+    }
+
     $resolved = @{
         Firewall             = $BoundParameters.Firewall
         Port                 = $BoundParameters.Port
@@ -594,33 +698,33 @@ function Resolve-SfosParameters {
         Password             = $BoundParameters.Password
         SkipCertificateCheck = $BoundParameters.SkipCertificateCheck
     }
-    
-    if ($script:SfosConnection) {
+
+    if ($base) {
         if (-not $resolved.Firewall) {
-            $resolved.Firewall = $script:SfosConnection.Firewall
+            $resolved.Firewall = $base.Firewall
         }
         # ContainsKey again: 0 is falsy, so -not would treat an explicit -Port 0 as
         # "not supplied" and quietly substitute another port instead of rejecting it.
         if (-not $BoundParameters.ContainsKey('Port')) {
-            $resolved.Port = $script:SfosConnection.Port
+            $resolved.Port = $base.Port
         }
         if (-not $resolved.Username) {
-            $resolved.Username = $script:SfosConnection.Username
+            $resolved.Username = $base.Username
         }
         if (-not $resolved.Password) {
-            $resolved.Password = $script:SfosConnection.Password
+            $resolved.Password = $base.Password
         }
         # ContainsKey, not -not: an explicit -SkipCertificateCheck:$false must win over
         # a session that was opened with the switch enabled.
         if (-not $BoundParameters.ContainsKey('SkipCertificateCheck')) {
-            $resolved.SkipCertificateCheck = $script:SfosConnection.SkipCertificateCheck
+            $resolved.SkipCertificateCheck = $base.SkipCertificateCheck
         }
     }
-    
+
     if (-not $resolved.Firewall -or -not $resolved.Username -or -not $resolved.Password) {
-        throw 'No active Sophos Firewall connection found. Use Connect-SfosFirewall to establish a connection or provide Firewall, Username, and Password explicitly.'
+        throw 'No active Sophos Firewall connection found. Use Connect-SfosFirewall to establish a connection, pass -Session, or provide Firewall, Username, and Password explicitly.'
     }
-    
+
     if (-not $BoundParameters.ContainsKey('Port') -and -not $resolved.Port) {
         $resolved.Port = $script:DefaultSfosPort
     }
@@ -654,12 +758,36 @@ function Resolve-SfosParameters {
 .PARAMETER SkipCertificateCheck
     Skips SSL certificate validation for self-signed certificates.
 
+.PARAMETER Name
+    Registers this connection under a name in the session registry, so it can be referenced
+    later as -Session '<Name>' from any cmdlet, or listed with Get-SfosSession, without
+    holding a reference to the returned object. Lookup is case-insensitive. Optional; a
+    connection made without -Name still becomes the default session exactly as before, just
+    without a registry entry.
+
+.PARAMETER NoDefault
+    Keeps the current default session (the one used when no -Session is passed anywhere)
+    unchanged instead of replacing it with this connection. Only meaningful together with
+    -Name - without -Name there would be no other way to reach this connection again, so
+    -NoDefault alone is a no-op and this connection still becomes the default, exactly like
+    calling Connect-SfosFirewall without -NoDefault at all.
+
 .OUTPUTS
-    PSCustomObject with connection details.
+    PSCustomObject with connection details (PSTypeName 'SophosFirewall.Session'). The object
+    shape is unchanged from earlier versions - Firewall, Port, Username, Password,
+    SkipCertificateCheck - and carries no Name property, so it can still be splatted directly
+    (@session) without colliding with a domain cmdlet's own -Name parameter. The
+    Name-to-session mapping lives only in the session registry, queried via Get-SfosSession.
 
 .EXAMPLE
     $cred = Get-Credential -Message "Sophos Firewall Admin"
     Connect-SfosFirewall -Firewall "192.168.1.1" -Port 4444 -Credential $cred -SkipCertificateCheck
+.EXAMPLE
+    # Hold two connections at once: fw1 becomes the default session (used by any call with
+    # no -Session), fw2 is registered but does not replace it.
+    Connect-SfosFirewall -Firewall "fw1.example.test" -Credential $cred -Name 'fw1'
+    Connect-SfosFirewall -Firewall "fw2.example.test" -Credential $cred -Name 'fw2' -NoDefault
+    Get-SfosSession
 #>
 function Connect-SfosFirewall {
     [CmdletBinding()]
@@ -668,46 +796,209 @@ function Connect-SfosFirewall {
         [Parameter(Mandatory)]
         [ValidateNotNullOrEmpty()]
         [string]$Firewall,
-        
+
         [ValidateRange(1, 65535)]
         [int]$Port = $script:DefaultSfosPort,
-        
+
         [Parameter(Mandatory)]
         [ValidateNotNull()]
         [pscredential]$Credential,
-        
-        [switch]$SkipCertificateCheck
+
+        [switch]$SkipCertificateCheck,
+
+        [ValidateNotNullOrEmpty()]
+        [string]$Name,
+
+        [switch]$NoDefault
     )
-    
-    $script:SfosConnection = [PSCustomObject]@{
+
+    $session = [PSCustomObject]@{
         Firewall             = $Firewall
         Port                 = $Port
         Username             = $Credential.UserName
         Password             = $Credential.Password
         SkipCertificateCheck = [bool]$SkipCertificateCheck
     }
-    
+    $session.PSObject.TypeNames.Insert(0, 'SophosFirewall.Session')
+
+    if ($Name) {
+        $script:SfosSessions[$Name] = $session
+    }
+
+    # -NoDefault only has an effect together with -Name: without a registered name there is
+    # no other way to reach this connection again, so treating a bare -NoDefault as "make no
+    # default at all" would just lose the session. See .PARAMETER NoDefault.
+    if (-not ($NoDefault -and $Name)) {
+        $script:SfosConnection = $session
+    }
+
     Write-Verbose "Connected to Sophos Firewall at $Firewall`:$Port as $($Credential.UserName)"
-    return $script:SfosConnection
+    return $session
 }
 
 <#
 .SYNOPSIS
-    Disconnects from the Sophos Firewall.
+    Disconnects from one, several, or all Sophos Firewall sessions.
 
 .DESCRIPTION
-    Clears the module session variable, removing stored credentials.
+    Four mutually exclusive ways to select what to disconnect:
+    - no parameter (the default parameter set): clears the default session exactly as
+      before - byte-identical behaviour for every existing caller.
+    - -Name: removes the one named session from the registry, and also clears the default
+      session if that named session happens to be the current default.
+    - -Session: same as -Name, but takes the session object itself (or a name, resolved the
+      same way -Session is resolved everywhere else) - accepts pipeline input, so
+      Get-SfosSession | Disconnect-SfosFirewall works.
+    - -All: clears the default session and empties the entire registry.
+
+.PARAMETER Name
+    The registered name of the session to remove.
+
+.PARAMETER Session
+    A registered session name or a session object returned by Connect-SfosFirewall.
+
+.PARAMETER All
+    Disconnects the default session and every registered named session.
 
 .EXAMPLE
     Disconnect-SfosFirewall
+.EXAMPLE
+    Disconnect-SfosFirewall -Name 'fw2'
+.EXAMPLE
+    Get-SfosSession -Name 'fw2' | Disconnect-SfosFirewall
+.EXAMPLE
+    Disconnect-SfosFirewall -All
 #>
 function Disconnect-SfosFirewall {
+    # PSReviewUnusedParameter: -All only selects the 'All' parameter set; $PSCmdlet.ParameterSetName
+    # drives the body, so the switch's value itself is never read once it has done that job.
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'All')]
+    [CmdletBinding(DefaultParameterSetName = 'Default')]
+    param(
+        [Parameter(Mandatory, ParameterSetName = 'Name')]
+        [string]$Name,
+
+        [Parameter(Mandatory, ParameterSetName = 'Session', ValueFromPipeline)]
+        [object]$Session,
+
+        [Parameter(ParameterSetName = 'All')]
+        [switch]$All
+    )
+
+    process {
+        switch ($PSCmdlet.ParameterSetName) {
+            'Default' {
+                if ($script:SfosConnection) {
+                    Write-Verbose "Disconnected from Sophos Firewall at $($script:SfosConnection.Firewall)"
+                    $script:SfosConnection = $null
+                }
+            }
+            'Name' {
+                if (-not $script:SfosSessions.ContainsKey($Name)) {
+                    throw "No session named '$Name' is registered. Use Get-SfosSession to list registered sessions."
+                }
+                $removed = $script:SfosSessions[$Name]
+                $script:SfosSessions.Remove($Name)
+                if ($script:SfosConnection -and $script:SfosConnection -eq $removed) {
+                    $script:SfosConnection = $null
+                }
+                Write-Verbose "Disconnected session '$Name' from Sophos Firewall at $($removed.Firewall)"
+            }
+            'Session' {
+                # Get-SfosSession's own view object (Name/Firewall/Port/Username/
+                # SkipCertificateCheck/IsDefault, deliberately without Password) is not the
+                # same object reference as the registry entry and carries no
+                # 'SophosFirewall.Session' PSTypeName, so Resolve-SfosSessionArgument's
+                # duck-typing fallback would pass it through unchanged - and the reference
+                # match below would then find nothing and silently disconnect nothing, the
+                # exact "answers success, changes nothing" failure this project's rules
+                # single out as the worst outcome available. Route it through its own Name
+                # instead so 'Get-SfosSession -Name x | Disconnect-SfosFirewall' resolves to
+                # the actual registered object.
+                $target = $Session
+                if ($target -isnot [string] -and
+                    $target.PSObject.TypeNames -notcontains 'SophosFirewall.Session' -and
+                    $target.PSObject.Properties.Match('Name').Count -gt 0) {
+                    $target = [string]$target.Name
+                }
+
+                $resolved = Resolve-SfosSessionArgument -Session $target
+                if ($resolved) {
+                    foreach ($key in @($script:SfosSessions.Keys)) {
+                        if ($script:SfosSessions[$key] -eq $resolved) {
+                            $script:SfosSessions.Remove($key)
+                        }
+                    }
+                    if ($script:SfosConnection -and $script:SfosConnection -eq $resolved) {
+                        $script:SfosConnection = $null
+                    }
+                    Write-Verbose "Disconnected session from Sophos Firewall at $($resolved.Firewall)"
+                }
+            }
+            'All' {
+                $script:SfosConnection = $null
+                $script:SfosSessions.Clear()
+                Write-Verbose 'Disconnected all Sophos Firewall sessions.'
+            }
+        }
+    }
+}
+
+<#
+.SYNOPSIS
+    Lists registered Sophos Firewall sessions, or one specific session by name.
+
+.DESCRIPTION
+    Returns a view of the session registry populated by Connect-SfosFirewall -Name -
+    Firewall, Port, Username, SkipCertificateCheck and whether the session is the current
+    default. The Password is deliberately not included in the view.
+
+.PARAMETER Name
+    Return only the session registered under this name. Throws if no session with that name
+    is registered.
+
+.OUTPUTS
+    PSCustomObject with Name, Firewall, Port, Username, SkipCertificateCheck, IsDefault.
+
+.EXAMPLE
+    Get-SfosSession
+.EXAMPLE
+    Get-SfosSession -Name 'fw2'
+#>
+function Get-SfosSession {
+    # PSUseSingularNouns: 'Session' is already singular - this cmdlet returns either every
+    # registered session (no -Name) or exactly one (-Name), same as every other Get-Sfos*.
     [CmdletBinding()]
-    param()
-    
-    if ($script:SfosConnection) {
-        Write-Verbose "Disconnected from Sophos Firewall at $($script:SfosConnection.Firewall)"
-        $script:SfosConnection = $null
+    [OutputType([PSCustomObject])]
+    param(
+        [string]$Name
+    )
+
+    if ($Name) {
+        if (-not $script:SfosSessions.ContainsKey($Name)) {
+            throw "No session named '$Name' is registered. Use Connect-SfosFirewall -Name '$Name' to register one."
+        }
+        $entry = $script:SfosSessions[$Name]
+        return [PSCustomObject]@{
+            Name                 = $Name
+            Firewall             = $entry.Firewall
+            Port                 = $entry.Port
+            Username             = $entry.Username
+            SkipCertificateCheck = $entry.SkipCertificateCheck
+            IsDefault            = [bool]($script:SfosConnection -and $script:SfosConnection -eq $entry)
+        }
+    }
+
+    foreach ($key in @($script:SfosSessions.Keys | Sort-Object)) {
+        $entry = $script:SfosSessions[$key]
+        [PSCustomObject]@{
+            Name                 = $key
+            Firewall             = $entry.Firewall
+            Port                 = $entry.Port
+            Username             = $entry.Username
+            SkipCertificateCheck = $entry.SkipCertificateCheck
+            IsDefault            = [bool]($script:SfosConnection -and $script:SfosConnection -eq $entry)
+        }
     }
 }
 
@@ -718,6 +1009,7 @@ function Disconnect-SfosFirewall {
 Export-ModuleMember -Function @(
     'Connect-SfosFirewall',
     'Disconnect-SfosFirewall',
+    'Get-SfosSession',
     'Invoke-SfosApi',
     'Get-SfosApiStatus',
     'Assert-SfosApiReturnSuccess',

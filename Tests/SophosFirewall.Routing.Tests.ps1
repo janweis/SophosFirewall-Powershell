@@ -597,12 +597,9 @@ Describe 'Read-Modify-Write' {
             }
         }
 
-        # Regression test for a defect found by this suite and fixed 2026-08-12: assigning
-        # straight from `if (...) { A } else { B }` unwraps a one-element array to a scalar
-        # even when the branch wraps in @() - the fix wraps the WHOLE if/else in @(). With
-        # exactly ONE preserved destination interface (the common case), the old code
-        # character-indexed the collapsed string and sent 'P'/'G' instead of 'Port2'/'GRE'.
-        It 'preserves a single DestinationInterface/TunnelType intact (regression: single-element array unwrap)' {
+        # @() must wrap the whole if/else: assigning straight from `if (...) { A } else { B }`
+        # unwraps a one-element array to a scalar even when the branch itself wraps in @().
+        It 'preserves a single DestinationInterface/TunnelType intact' {
             Set-SfosMulticastRoute -SourceIPAddress '198.51.100.70' -MulticastAddress '239.1.1.7' -SourceInterface 'Port3' @conn -Confirm:$false
 
             Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Routing -Times 1 -Exactly -ParameterFilter {
@@ -696,13 +693,10 @@ Describe 'Measured special-case behaviours' {
     }
 
     Context 'Set-SfosUnicastRoute updates a route whose Blackhole was never set (the common case)' {
-        # Regression test for a defect this suite found: Get-SfosUnicastRoute reads a route
-        # with no <Blackhole> element as Blackhole = ''. The read-modify-write preserve path
-        # used to carry that '' straight into New-SfosUnicastRoute -Blackhole '', whose
-        # [ValidateSet('Enable','Disable')] has no empty-string member - parameter binding
-        # rejected it before the function body ever ran, so any route never explicitly
-        # configured as a blackhole route could not be updated at all. The fix passes
-        # -Blackhole only when the preserved value is non-empty.
+        # Get-SfosUnicastRoute reads a route with no <Blackhole> element as Blackhole = ''.
+        # -Blackhole '' fails [ValidateSet('Enable','Disable')], which has no empty-string
+        # member, so the read-modify-write preserve path must pass -Blackhole only when the
+        # preserved value is non-empty.
         BeforeEach {
             # Stateful mock: after the Remove that Set-SfosUnicastRoute issues, the follow-up
             # Get inside New-SfosUnicastRoute's duplicate guard has to see an empty table -
@@ -1210,5 +1204,57 @@ Describe 'ShouldProcess - -WhatIf prevents every write cmdlet from sending a wri
     It 'Set-SfosPIMDynamicRouting sends no write request under -WhatIf' {
         Set-SfosPIMDynamicRouting -ManagePIM Enable @conn -WhatIf
         Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Routing -Times 0 -Exactly -ParameterFilter { $InnerXml -match '<Set operation=' -or $InnerXml -match '<Remove>' }
+    }
+}
+
+Describe 'Session parameter (multi-session support)' {
+
+    BeforeAll {
+        $cred1 = [pscredential]::new('apiuser', (ConvertTo-SecureString 'pw1' -AsPlainText -Force))
+        $cred2 = [pscredential]::new('apiuser', (ConvertTo-SecureString 'pw2' -AsPlainText -Force))
+        Connect-SfosFirewall -Firewall 'fw1.example.test' -Credential $cred1 -Name 'fw1' | Out-Null
+        Connect-SfosFirewall -Firewall 'fw2.example.test' -Credential $cred2 -Name 'fw2' -NoDefault | Out-Null
+    }
+
+    AfterAll { Disconnect-SfosFirewall -All }
+
+    BeforeEach {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Routing -MockWith {
+            [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><GatewayHost transactionid=""><Status>No. of records Zero.</Status></GatewayHost></Response>' }
+        }
+    }
+
+    It 'Resolves the named session instead of the ambient default (direct path)' {
+        Get-SfosGatewayHost -Session 'fw2' | Out-Null
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Routing -ParameterFilter {
+            $Firewall -eq 'fw2.example.test'
+        }
+    }
+
+    It 'Uses the ambient default when -Session is omitted' {
+        Get-SfosGatewayHost | Out-Null
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Routing -ParameterFilter {
+            $Firewall -eq 'fw1.example.test'
+        }
+    }
+
+    It 'Resolves a session object on the begin-block pipeline path (New-SfosUnicastRoute)' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Routing -MockWith {
+            if ($InnerXml -match '<Get>') {
+                [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><UnicastRoute transactionid=""><Status>No. of records Zero.</Status></UnicastRoute></Response>' }
+            }
+            else {
+                [PSCustomObject]@{ Content = '<Response><UnicastRoute><Status code="200">Configuration applied successfully.</Status></UnicastRoute></Response>' }
+            }
+        }
+        New-SfosUnicastRoute -DestinationIP '198.51.100.70' -Netmask '255.255.255.0' -Interface 'Port1' -Session 'fw2' -Confirm:$false
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Routing -ParameterFilter {
+            $Firewall -eq 'fw2.example.test' -and $InnerXml -match '<Netmask>255\.255\.255\.0</Netmask>'
+        }
+    }
+
+    It 'Throws on an unknown session name without calling the API' {
+        { Get-SfosGatewayHost -Session 'nichtda' } | Should -Throw '*No session named*'
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Routing -Times 0 -Exactly
     }
 }

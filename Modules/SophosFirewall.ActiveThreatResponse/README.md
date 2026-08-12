@@ -105,6 +105,22 @@ Set-SfosThirdPartyFeed -Name 'AbuseChIPFeed' -Enabled 0
 Remove-SfosThirdPartyFeed -Name 'AbuseChIPFeed'
 ```
 
+### Multi-Session Usage
+
+Every cmdlet accepts `-Session`, either a session object or a name registered with
+`Connect-SfosFirewall -Name`. This lets a single script hold connections to more than one
+firewall and pipe objects between them.
+
+```powershell
+Connect-SfosFirewall -Firewall "fw1.example.test" -Credential (Get-Credential) -Name fw1
+Connect-SfosFirewall -Firewall "fw2.example.test" -Credential (Get-Credential) -Name fw2 -NoDefault
+
+# Copy the ATP host exceptions configured on fw1 onto fw2
+Get-SfosATPSettings -Session fw1 |
+    Select-Object -ExpandProperty HostExceptionList |
+    Add-SfosATPHostException -Session fw2
+```
+
 ## Available Cmdlets (10 total)
 
 ### ATP (Sophos X-Ops threat feeds) (6 functions)

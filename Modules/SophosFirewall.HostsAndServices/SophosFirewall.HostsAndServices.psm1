@@ -1,4 +1,4 @@
-#requires -Version 5.1
+﻿#requires -Version 5.1
 #requires -Modules @{ ModuleName = 'SophosFirewall.Core'; ModuleVersion = '1.1.0' }
 <#
         .SYNOPSIS
@@ -107,6 +107,13 @@
     
         Note: Sophos GET responses can be inconsistent regarding status elements. This cmdlet is designed to return an empty result when no records are found.
 
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -187,6 +194,7 @@ function Get-SfosIPHost {
         [string]$Username,
         [SecureString]$Password,
         [switch]$SkipCertificateCheck,
+        [object]$Session,
         
         # Output parameters
         [switch]$AsXml
@@ -348,6 +356,13 @@ Assert-SfosApiReturnSuccess -Xml $XmlResponse -ObjectName 'IPHost' -Action 'get'
 
         # Connection parameters (optional - use stored context if not provided)
         
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, uses stored connection context.
 
@@ -451,7 +466,9 @@ function New-SfosIPHost {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     # Preparations
@@ -573,6 +590,13 @@ function New-SfosIPHost {
         the caller does not explicitly pass (Description, IPFamily, HostGroupList). To clear
         a field, pass it explicitly with an empty value.
 
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -688,7 +712,9 @@ function Set-SfosIPHost {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
     begin {
         $params = Resolve-SfosParameters -BoundParameters $PSBoundParameters
@@ -864,6 +890,13 @@ function Set-SfosIPHost {
         .DESCRIPTION
         Removes a IPHost object using the Sophos Firewall XML API. This cmdlet supports ShouldProcess; use -WhatIf to preview the change.
 
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -913,7 +946,9 @@ function Remove-SfosIPHost {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     begin {
@@ -971,6 +1006,13 @@ function Remove-SfosIPHost {
         .PARAMETER Overwrite
         Optional switch to overwrite the file if it already exists.
 
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, uses the stored connection context.
 
@@ -1023,7 +1065,9 @@ function Export-SfosIPHosts {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     # Check if file exists
@@ -1083,6 +1127,13 @@ function Export-SfosIPHosts {
         .PARAMETER Format
         Import format: 'AsCSV' (default) or 'AsJSON'.
 
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, uses the stored connection context.
 
@@ -1127,7 +1178,9 @@ function Import-SfosIPHosts {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
     
     if (-not (Test-Path -Path $FilePath)) {
@@ -1245,6 +1298,13 @@ function Import-SfosIPHosts {
     
         Note: Sophos GET responses can be inconsistent regarding status elements. This cmdlet is designed to return an empty result when no records are found.
 
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -1304,6 +1364,7 @@ function Get-SfosIPHostGroup {
         [string]$Username,
         [SecureString]$Password,
         [switch]$SkipCertificateCheck,
+        [object]$Session,
         
         # Output parameters
         [switch]$AsXml
@@ -1402,6 +1463,13 @@ Assert-SfosApiReturnSuccess -Xml $XmlResponse -ObjectName 'IPHostGroup' -Action 
 
         # Connection parameters (optional - use stored context if not provided)
         
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, uses stored connection context.
 
@@ -1466,7 +1534,9 @@ function New-SfosIPHostGroup {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     $params = Resolve-SfosParameters -BoundParameters $PSBoundParameters
@@ -1537,6 +1607,13 @@ function New-SfosIPHostGroup {
         the caller does not explicitly pass (Description, IPFamily, Members). To clear a
         field, pass it explicitly with an empty value.
 
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -1606,7 +1683,9 @@ function Set-SfosIPHostGroup {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     begin {
@@ -1717,6 +1796,13 @@ function Set-SfosIPHostGroup {
         .DESCRIPTION
         Removes a IPHostGroup object using the Sophos Firewall XML API. This cmdlet supports ShouldProcess; use -WhatIf to preview the change.
 
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -1766,7 +1852,9 @@ function Remove-SfosIPHostGroup {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     begin {
@@ -1814,6 +1902,13 @@ function Remove-SfosIPHostGroup {
 
         .DESCRIPTION
         Adds members to a IPHostGroup object using the Sophos Firewall XML API. The cmdlet validates input where possible and escapes user input for XML safety.
+
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
 
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
@@ -1867,7 +1962,9 @@ function Add-SfosIPHostGroupMember {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     begin {
@@ -1978,6 +2075,13 @@ if ($ipHostGroup.IPFamily) {
         .DESCRIPTION
         Removes members from a IPHostGroup object using the Sophos Firewall XML API. The cmdlet validates input where possible and escapes user input for XML safety.
 
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -2030,7 +2134,9 @@ function Remove-SfosIPHostGroupMember {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     begin {
@@ -2163,6 +2269,13 @@ if ($ipHostGroup.IPFamily) {
         .PARAMETER Overwrite
         If specified, overwrite the file if it already exists. Without this switch, the function throws an error if the file exists.
 
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, uses the stored connection context.
 
@@ -2225,7 +2338,9 @@ function Export-SfosIPHostGroups {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     # Check if file exists
@@ -2301,6 +2416,13 @@ function Export-SfosIPHostGroups {
         .PARAMETER Format
         Import format: 'AsCSV' (default) or 'AsJSON'. Must match the file format.
 
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, uses the stored connection context.
 
@@ -2362,7 +2484,9 @@ function Import-SfosIPHostGroups {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     # Check if file exists
@@ -2448,6 +2572,13 @@ function Import-SfosIPHostGroups {
     
         Note: Sophos GET responses can be inconsistent regarding status elements. This cmdlet is designed to return an empty result when no records are found.
 
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -2511,6 +2642,7 @@ function Get-SfosFQDNHost {
         [string]$Username,
         [SecureString]$Password,
         [switch]$SkipCertificateCheck,
+        [object]$Session,
         
         # Output parameters
         [switch]$AsXml
@@ -2617,6 +2749,13 @@ Assert-SfosApiReturnSuccess -Xml $XmlResponse -ObjectName 'FQDNHost' -Action 'ge
 
         # Connection parameters (optional - use stored context if not provided)
         
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, uses stored connection context.
 
@@ -2689,7 +2828,9 @@ function New-SfosFQDNHost {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     $params = Resolve-SfosParameters -BoundParameters $PSBoundParameters
@@ -2767,6 +2908,13 @@ function New-SfosFQDNHost {
         .DESCRIPTION
         Updates a FQDNHost object using the Sophos Firewall XML API. You can supply the target object name directly or via the pipeline (when supported by the function's parameters).
 
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -2836,7 +2984,9 @@ function Set-SfosFQDNHost {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     begin {
@@ -2954,6 +3104,13 @@ if ($existing.Count -eq 0) {
         .DESCRIPTION
         Removes a FQDNHost object using the Sophos Firewall XML API. This cmdlet supports ShouldProcess; use -WhatIf to preview the change.
 
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -3003,7 +3160,9 @@ function Remove-SfosFQDNHost {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     begin {
@@ -3058,6 +3217,13 @@ function Remove-SfosFQDNHost {
         .PARAMETER Names
         One or more FQDNHost object names to remove.
 
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -3103,7 +3269,9 @@ function Remove-SfosFQDNHostMass {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     begin {
@@ -3168,6 +3336,13 @@ function Remove-SfosFQDNHostMass {
         .PARAMETER Overwrite
         If specified, overwrite the file if it already exists. Without this switch, the function throws an error if the file exists.
 
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, uses the stored connection context.
 
@@ -3229,7 +3404,9 @@ function Export-SfosFQDNHosts {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     # Check if file exists
@@ -3307,6 +3484,13 @@ function Export-SfosFQDNHosts {
         .PARAMETER Format
         Import format: 'AsCSV' (default) or 'AsJSON'. Must match the file format.
 
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, uses the stored connection context.
 
@@ -3367,7 +3551,9 @@ function Import-SfosFQDNHosts {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     # Check if file exists
@@ -3456,6 +3642,13 @@ function Import-SfosFQDNHosts {
     
         Note: Sophos GET responses can be inconsistent regarding status elements. This cmdlet is designed to return an empty result when no records are found.
 
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -3515,6 +3708,7 @@ function Get-SfosFQDNHostGroup {
         [string]$Username,
         [SecureString]$Password,
         [switch]$SkipCertificateCheck,
+        [object]$Session,
         
         # Output parameters
         [switch]$AsXml
@@ -3596,6 +3790,13 @@ Assert-SfosApiReturnSuccess -Xml $XmlResponse -ObjectName 'FQDNHostGroup' -Actio
         .DESCRIPTION
         Creates a FQDNHostGroup object using the Sophos Firewall XML API. The cmdlet validates input where possible and escapes user input for XML safety.
 
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -3652,7 +3853,9 @@ function New-SfosFQDNHostGroup {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     $params = Resolve-SfosParameters -BoundParameters $PSBoundParameters
@@ -3721,6 +3924,13 @@ function New-SfosFQDNHostGroup {
         .DESCRIPTION
         Updates a FQDNHostGroup object using the Sophos Firewall XML API. You can supply the target object name directly or via the pipeline (when supported by the function's parameters).
 
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -3785,7 +3995,9 @@ function Set-SfosFQDNHostGroup {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     begin {
@@ -3888,6 +4100,13 @@ function Set-SfosFQDNHostGroup {
         .DESCRIPTION
         Removes a FQDNHostGroup object using the Sophos Firewall XML API. This cmdlet supports ShouldProcess; use -WhatIf to preview the change.
 
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -3937,7 +4156,9 @@ function Remove-SfosFQDNHostGroup {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     begin {
@@ -3985,6 +4206,13 @@ function Remove-SfosFQDNHostGroup {
 
         .DESCRIPTION
         Adds members to a FQDNHostGroup object using the Sophos Firewall XML API. The cmdlet validates input where possible and escapes user input for XML safety.
+
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
 
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
@@ -4038,7 +4266,9 @@ function Add-SfosFQDNHostGroupMember {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
     begin {
         $params = Resolve-SfosParameters -BoundParameters $PSBoundParameters
@@ -4134,6 +4364,13 @@ function Add-SfosFQDNHostGroupMember {
         .DESCRIPTION
         Removes members from a FQDNHostGroup object using the Sophos Firewall XML API. The cmdlet validates input where possible and escapes user input for XML safety.
 
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -4186,7 +4423,9 @@ function Remove-SfosFQDNHostGroupMember {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
     begin {
         $params = Resolve-SfosParameters -BoundParameters $PSBoundParameters
@@ -4297,6 +4536,13 @@ function Remove-SfosFQDNHostGroupMember {
         .PARAMETER Overwrite
         If specified, overwrite the file if it already exists. Without this switch, the function throws an error if the file exists.
 
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, uses the stored connection context.
 
@@ -4359,7 +4605,9 @@ function Export-SfosFQDNHostGroups {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     # Check if file exists
@@ -4440,6 +4688,13 @@ function Export-SfosFQDNHostGroups {
         .PARAMETER Format
         Import format: 'AsCSV' (default) or 'AsJSON'. Must match the file format.
 
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, uses the stored connection context.
 
@@ -4501,7 +4756,9 @@ function Import-SfosFQDNHostGroups {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     # Check if file exists
@@ -4595,6 +4852,13 @@ function Import-SfosFQDNHostGroups {
     
         Note: Sophos GET responses can be inconsistent regarding status elements. This cmdlet is designed to return an empty result when no records are found.
 
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -4658,6 +4922,7 @@ function Get-SfosMACHost {
         [string]$Username,
         [SecureString]$Password,
         [switch]$SkipCertificateCheck,
+        [object]$Session,
         
         # Output parameters
         [switch]$AsXml
@@ -4764,6 +5029,13 @@ Assert-SfosApiReturnSuccess -Xml $XmlResponse -ObjectName 'MACHost' -Action 'get
 
         # Connection parameters (optional - use stored context if not provided)
         
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, uses stored connection context.
 
@@ -4833,7 +5105,9 @@ function New-SfosMACHost {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     $params = Resolve-SfosParameters -BoundParameters $PSBoundParameters
@@ -4913,6 +5187,13 @@ function New-SfosMACHost {
         existing description unless the caller explicitly passes one. To clear the
         description, pass it explicitly with an empty value.
 
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -4977,7 +5258,9 @@ function Set-SfosMACHost {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     begin {
@@ -5080,6 +5363,13 @@ if ($existing.Count -eq 0) {
         .DESCRIPTION
         Removes a MACHost object using the Sophos Firewall XML API. This cmdlet supports ShouldProcess; use -WhatIf to preview the change.
 
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -5129,7 +5419,9 @@ function Remove-SfosMACHost {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     begin {
@@ -5187,6 +5479,13 @@ function Remove-SfosMACHost {
 
         .PARAMETER Overwrite
         If specified, overwrite the file if it already exists. Without this switch, the function throws an error if the file exists.
+
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
 
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, uses the stored connection context.
@@ -5249,7 +5548,9 @@ function Export-SfosMACHosts {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     # Check if file exists
@@ -5330,6 +5631,13 @@ function Export-SfosMACHosts {
         .PARAMETER Format
         Import format: 'AsCSV' (default) or 'AsJSON'. Must match the file format.
 
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, uses the stored connection context.
 
@@ -5390,7 +5698,9 @@ function Import-SfosMACHosts {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     # Check if file exists
@@ -5474,6 +5784,13 @@ function Import-SfosMACHosts {
     
         Note: Sophos GET responses can be inconsistent regarding status elements. This cmdlet is designed to return an empty result when no records are found.
 
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -5533,6 +5850,7 @@ function Get-SfosCountryGroup {
         [string]$Username,
         [SecureString]$Password,
         [switch]$SkipCertificateCheck,
+        [object]$Session,
         
         # Output parameters
         [switch]$AsXml
@@ -5636,6 +5954,13 @@ Assert-SfosApiReturnSuccess -Xml $XmlResponse -ObjectName 'CountryGroup' -Action
 
         # Connection parameters (optional - use stored context if not provided)
         
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, uses stored connection context.
 
@@ -5705,7 +6030,9 @@ function New-SfosCountryGroup {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     $params = Resolve-SfosParameters -BoundParameters $PSBoundParameters
@@ -5778,6 +6105,13 @@ function New-SfosCountryGroup {
         .DESCRIPTION
         Updates a CountryGroup object using the Sophos Firewall XML API. You can supply the target object name directly or via the pipeline (when supported by the function's parameters).
 
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -5842,7 +6176,9 @@ function Set-SfosCountryGroup {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     begin {
@@ -5943,6 +6279,13 @@ if ($existing.Count -eq 0) {
         .DESCRIPTION
         Removes a CountryGroup object using the Sophos Firewall XML API. This cmdlet supports ShouldProcess; use -WhatIf to preview the change.
 
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -5992,7 +6335,9 @@ function Remove-SfosCountryGroup {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     begin {
@@ -6074,6 +6419,13 @@ function Remove-SfosCountryGroup {
 
         # Connection parameters (optional - use stored context if not provided)
         
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, uses stored connection context.
 
@@ -6167,6 +6519,7 @@ function Get-SfosService {
         [string]$Username,
         [SecureString]$Password,
         [switch]$SkipCertificateCheck,
+        [object]$Session,
         
         # Output parameters
         [switch]$AsXml
@@ -6354,6 +6707,13 @@ function Get-SfosService {
 
         # Connection parameters (optional - use stored context if not provided)
         
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, uses stored connection context.
 
@@ -6470,7 +6830,9 @@ function New-SfosService {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     # Initialisierung des Service-Details basierend auf dem Parameter-Set
@@ -6486,7 +6848,7 @@ function New-SfosService {
         'ICMP' {
             $Type = 'ICMP'
             # An omitted code must go on the wire as -1 ("Any Code"): an empty <ICMPCode/>
-            # is rejected with 501 by the firewall (measured 2026-08-12).
+            # is rejected with 501 by the firewall.
             $codeWire = if ($PSBoundParameters.ContainsKey('ICMPCode')) { $ICMPCode -join ',' } else { '-1' }
             $detailXml = "<ICMPType>$($ICMPType -join ',')</ICMPType><ICMPCode>$codeWire</ICMPCode>"
         }
@@ -6580,6 +6942,13 @@ function New-SfosService {
         .PARAMETER Description
         Optional description (max 255 characters). If omitted, the existing description is kept.
 
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, uses stored connection context.
 
@@ -6666,7 +7035,9 @@ function Set-SfosService {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     begin {
@@ -6772,6 +7143,13 @@ function Set-SfosService {
         .DESCRIPTION
         Removes a Service object using the Sophos Firewall XML API. This cmdlet supports ShouldProcess; use -WhatIf to preview the change.
 
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -6821,7 +7199,9 @@ function Remove-SfosService {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     begin {
@@ -6880,6 +7260,13 @@ function Remove-SfosService {
 
         .PARAMETER Overwrite
         If specified, overwrite the file if it already exists. Without this switch, the function throws an error if the file exists.
+
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
 
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, uses the stored connection context.
@@ -6942,7 +7329,9 @@ function Export-SfosServices {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     # Check if file exists
@@ -7042,6 +7431,13 @@ function Export-SfosServices {
         .PARAMETER Format
         Import format: 'AsCSV' (default) or 'AsJSON'. Must match the file format.
 
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, uses the stored connection context.
 
@@ -7102,7 +7498,9 @@ function Import-SfosServices {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     # Check if file exists
@@ -7218,6 +7616,13 @@ function Import-SfosServices {
     
         Note: Sophos GET responses can be inconsistent regarding status elements. This cmdlet is designed to return an empty result when no records are found.
 
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -7277,6 +7682,7 @@ function Get-SfosServiceGroup {
         [string]$Username,
         [SecureString]$Password,
         [switch]$SkipCertificateCheck,
+        [object]$Session,
         
         # Output parameters
         [switch]$AsXml
@@ -7369,6 +7775,13 @@ Assert-SfosApiReturnSuccess -Xml $XmlResponse -ObjectName 'ServiceGroup' -Action
 
         # Connection parameters (optional - use stored context if not provided)
         
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, uses stored connection context.
 
@@ -7450,7 +7863,9 @@ function New-SfosServiceGroup {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     $params = Resolve-SfosParameters -BoundParameters $PSBoundParameters
@@ -7527,6 +7942,13 @@ function New-SfosServiceGroup {
         .DESCRIPTION
         Updates a ServiceGroup object using the Sophos Firewall XML API. You can supply the target object name directly or via the pipeline (when supported by the function's parameters).
 
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -7591,7 +8013,9 @@ function Set-SfosServiceGroup {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     begin {
@@ -7697,6 +8121,13 @@ if ($existing.Count -eq 0) {
         .DESCRIPTION
         Removes a ServiceGroup object using the Sophos Firewall XML API. This cmdlet supports ShouldProcess; use -WhatIf to preview the change.
 
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -7746,7 +8177,9 @@ function Remove-SfosServiceGroup {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     begin {
@@ -7793,6 +8226,13 @@ function Remove-SfosServiceGroup {
 
         .DESCRIPTION
         Adds one or more members to a ServiceGroup using the Sophos Firewall XML API.
+
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
 
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
@@ -7847,7 +8287,9 @@ function Add-SfosServiceGroupMember {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
     begin {
         $params = Resolve-SfosParameters -BoundParameters $PSBoundParameters
@@ -7940,6 +8382,13 @@ function Add-SfosServiceGroupMember {
         .DESCRIPTION
         Removes one or more members from a ServiceGroup using the Sophos Firewall XML API.
 
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -7992,7 +8441,9 @@ function Remove-SfosServiceGroupMember {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
     begin {
         $params = Resolve-SfosParameters -BoundParameters $PSBoundParameters
@@ -8107,6 +8558,13 @@ function Remove-SfosServiceGroupMember {
         .PARAMETER Overwrite
         If specified, overwrite the file if it already exists. Without this switch, the function throws an error if the file exists.
 
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, uses the stored connection context.
 
@@ -8169,7 +8627,9 @@ function Export-SfosServiceGroups {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     # Check if file exists
@@ -8245,6 +8705,13 @@ function Export-SfosServiceGroups {
         .PARAMETER Format
         Import format: 'AsCSV' (default) or 'AsJSON'. Must match the file format.
 
+        .PARAMETER Session
+        A session object returned by Connect-SfosFirewall, or the name of a session
+        registered with Connect-SfosFirewall -Name. Overrides the stored default
+        connection context; any of -Firewall/-Port/-Username/-Password/
+        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
         .PARAMETER Firewall
         Sophos Firewall hostname or IP address. If omitted, uses the stored connection context.
 
@@ -8306,7 +8773,9 @@ function Import-SfosServiceGroups {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     # Check if file exists

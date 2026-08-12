@@ -1,6 +1,6 @@
 @{
     RootModule           = 'SophosFirewall.Applications.psm1'
-    ModuleVersion        = '1.0.1'
+    ModuleVersion        = '1.1.0'
     GUID                 = 'ebbadd35-0d7a-45a6-a2ad-15f0609e65c3'
     Author               = 'Jan Weis'
     Description          = 'PowerShell module for managing application control on Sophos XGS / SFOS 22.0 firewalls via API: application filter policies and rules, application objects, application categories with QoS assignment, application classification.'
@@ -10,7 +10,7 @@
     RequiredModules      = @(
         @{
             ModuleName    = 'SophosFirewall.Core'
-            ModuleVersion = '1.0.0'
+            ModuleVersion = '1.3.0'
         }
     )
 
@@ -46,7 +46,7 @@
             Tags         = @('Sophos', 'Firewall', 'API', 'XGS', 'SFOS', 'Applications', 'AppControl', 'QoS')
             LicenseUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/blob/main/Modules/SophosFirewall.Applications/LICENSE.txt'
             ProjectUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/tree/main/Modules/SophosFirewall.Applications'
-            ReleaseNotes = '1.0.1: Add-SfosApplicationFilterCategoryMember refuses the silent-no-op QoSPolicy None; first per-app override no longer lost on Windows PowerShell 5.1.'
+            ReleaseNotes = '1.0.1: Add-SfosApplicationFilterCategoryMember refuses the silent-no-op QoSPolicy None; first per-app override no longer lost on Windows PowerShell 5.1. 1.1.0: Adds the -Session parameter to all 19 cmdlets for multi-session use (requires SophosFirewall.Core 1.3.0).'
         }
     }
 }

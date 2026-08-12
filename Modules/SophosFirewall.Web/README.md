@@ -49,6 +49,19 @@ Import-Module -Path "C:\Path\To\SophosFirewall.Web.psd1"
 Connect-SfosFirewall -Firewall "192.168.1.1" -Port 4444 -Credential (Get-Credential) -SkipCertificateCheck
 ```
 
+### Multiple Firewalls at Once
+
+Register named sessions to work with more than one firewall in the same script,
+and pipe an object read from one straight into a write against the other:
+
+```powershell
+Connect-SfosFirewall -Firewall "fw1.example.test" -Credential (Get-Credential) -Name fw1
+Connect-SfosFirewall -Firewall "fw2.example.test" -Credential (Get-Credential) -Name fw2 -NoDefault
+
+Get-SfosWebFilterURLGroup -Session fw1 -NameLike "Blocked-Sites" |
+    ForEach-Object { New-SfosWebFilterURLGroup -Name $_.Name -Members $_.URLlist -Session fw2 }
+```
+
 ### URL Group Management
 
 ```powershell

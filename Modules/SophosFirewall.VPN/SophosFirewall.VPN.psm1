@@ -1,4 +1,4 @@
-#requires -Version 5.1
+﻿#requires -Version 5.1
 #requires -Modules @{ ModuleName = 'SophosFirewall.Core'; ModuleVersion = '1.1.0' }
 
 <#
@@ -110,19 +110,17 @@
 #
 # 2. VPNIPSecConnection cannot be created live in this lab, and this blocks three things
 #    documented in detail on New-SfosIPsecConnection: the connection itself, VPNFailoverGroup
-#    (its mandatory Connection member has nothing valid to reference), and the PSK question
-#    mandated for this task. See New-SfosIPsecConnection's .NOTES for the full account and
-#    the exhausted list of values tried for the blocking field (AliasLocalWANPort). Because no
-#    VPNIPSecConnection object could ever be created, Get-SfosIPsecConnection - the only way
-#    to learn whether the firewall returns PresharedKey/Username/Password on read - was never
-#    exercised against a real object either. The task's mandated PSK experiment (create a
-#    disabled test connection with a test PSK, then check whether Get returns it) could
-#    therefore not be run. Per the task's own fallback instruction, Set-SfosIPsecConnection
-#    ships the FileType/-Template pattern: -PresharedKey exists on New- (the field is
-#    documented and the firewall's field-level validator accepted it in isolation - see the
-#    New- .NOTES) but is NOT accepted on Set-, since read-modify-write cannot be shown to
-#    preserve a value nothing ever confirmed Get returns. This is reported as an open finding,
-#    not a confirmed answer - see the task report.
+#    (its mandatory Connection member has nothing valid to reference), and whether the
+#    firewall returns PresharedKey/Username/Password on read. See New-SfosIPsecConnection's
+#    .NOTES for the full account and the values tried for the blocking field
+#    (AliasLocalWANPort). Because no VPNIPSecConnection object could ever be created,
+#    Get-SfosIPsecConnection - the only way to learn whether the firewall returns
+#    PresharedKey/Username/Password on read - was never exercised against a real object
+#    either. Set-SfosIPsecConnection therefore follows the FileType/-Template pattern:
+#    -PresharedKey exists on New- (the field is documented and the firewall's field-level
+#    validator accepted it in isolation - see the New- .NOTES) but is NOT accepted on Set-,
+#    since read-modify-write cannot be shown to preserve a value nothing ever confirmed Get
+#    returns.
 
 #region VPNIPSecConnection
 
@@ -148,6 +146,13 @@
 
 .PARAMETER RemoteHostLike
     Filters by RemoteHost, substring match. Client-side only.
+
+.PARAMETER Session
+A session object returned by Connect-SfosFirewall, or the name of a session
+registered with Connect-SfosFirewall -Name. Overrides the stored default
+connection context; any of -Firewall/-Port/-Username/-Password/
+-SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
 
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
@@ -212,6 +217,7 @@ function Get-SfosIPsecConnection {
         [string]$Username,
         [SecureString]$Password,
         [switch]$SkipCertificateCheck,
+        [object]$Session,
 
         [switch]$AsXml
     )
@@ -446,6 +452,13 @@ function Get-SfosIPsecConnection {
     disabled unless the caller explicitly asks for 'Active', matching this project's
     fail-safe default pattern (compare -Healthcheck OFF on GatewayHost).
 
+.PARAMETER Session
+A session object returned by Connect-SfosFirewall, or the name of a session
+registered with Connect-SfosFirewall -Name. Overrides the stored default
+connection context; any of -Firewall/-Port/-Username/-Password/
+-SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -579,7 +592,9 @@ function New-SfosIPsecConnection {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     $params = Resolve-SfosParameters -BoundParameters $PSBoundParameters
@@ -776,6 +791,13 @@ function New-SfosIPsecConnection {
     enable/disable toggle described in .NOTES is only sent when -Status is explicitly bound -
     see .NOTES for why this cmdlet cannot preserve that toggle's state on its own.
 
+.PARAMETER Session
+A session object returned by Connect-SfosFirewall, or the name of a session
+registered with Connect-SfosFirewall -Name. Overrides the stored default
+connection context; any of -Firewall/-Port/-Username/-Password/
+-SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -859,7 +881,9 @@ function Set-SfosIPsecConnection {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     begin {
@@ -1046,6 +1070,13 @@ function Set-SfosIPsecConnection {
 .PARAMETER Name
     Name of the connection to remove. Mandatory; accepts pipeline input by property name.
 
+.PARAMETER Session
+A session object returned by Connect-SfosFirewall, or the name of a session
+registered with Connect-SfosFirewall -Name. Overrides the stored default
+connection context; any of -Firewall/-Port/-Username/-Password/
+-SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -1090,7 +1121,9 @@ function Remove-SfosIPsecConnection {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     begin {
@@ -1184,6 +1217,13 @@ function Remove-SfosIPsecConnection {
     Filters by Name, substring match. Sent as the server-side filter key and re-applied
     client-side.
 
+.PARAMETER Session
+A session object returned by Connect-SfosFirewall, or the name of a session
+registered with Connect-SfosFirewall -Name. Overrides the stored default
+connection context; any of -Firewall/-Port/-Username/-Password/
+-SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -1214,7 +1254,7 @@ function Remove-SfosIPsecConnection {
 .NOTES
     Minimum supported PowerShell version: 5.1
     Verified live against all 9 predefined profiles and a temporary test profile (created,
-    read, updated, removed, cleaned up). The 9 predefined profiles are TABU per this task -
+    read, updated, removed, cleaned up). The 9 predefined profiles should not be modified -
     'Default Profile', 'DefaultHeadOffice', 'DefaultRemoteAccess', 'DefaultBranchOffice',
     'IKEv2', 'DefaultL2TP', 'Branch office (IKEv2)', 'Head office (IKEv2)',
     'Microsoft Azure (IKEv2)'.
@@ -1228,9 +1268,8 @@ function Remove-SfosIPsecConnection {
 
     DHGroupList is populated on the 9 predefined profiles and, once New-SfosVPNProfile's full
     field set (in particular DeadPeerDetection/CheckPeerAfterEvery/WaitForResponseUpto/
-    ActionWhenPeerUnreachable) is sent, on profiles this session created too - see
-    New-SfosVPNProfile's .NOTES for the earlier, incomplete request shapes that produced a
-    misleading result on this exact point.
+    ActionWhenPeerUnreachable) is sent, on created profiles too - an incomplete request shape
+    produces a misleading empty DHGroupList, see New-SfosVPNProfile's .NOTES.
 
 .LINK
     https://docs.sophos.com/nsg/sophos-firewall/22.0/API/CONFIGURE/VPN/VPNProfile/VPNProfile.html
@@ -1248,6 +1287,7 @@ function Get-SfosVPNProfile {
         [string]$Username,
         [SecureString]$Password,
         [switch]$SkipCertificateCheck,
+        [object]$Session,
 
         [switch]$AsXml
     )
@@ -1456,6 +1496,13 @@ function Get-SfosVPNProfile {
     'ikev1' or 'ikev2' [doc]. Optional; the firewall defaults to 'ikev2' when omitted
     [measured].
 
+.PARAMETER Session
+A session object returned by Connect-SfosFirewall, or the name of a session
+registered with Connect-SfosFirewall -Name. Overrides the stored default
+connection context; any of -Firewall/-Port/-Username/-Password/
+-SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -1483,19 +1530,18 @@ function Get-SfosVPNProfile {
 
 .NOTES
     Minimum supported PowerShell version: 5.1
-    Verified live end to end, 4 times in this session (created, read back with
-    Get-SfosVPNProfile, updated, removed - see Set-SfosVPNProfile/Remove-SfosVPNProfile
-    .NOTES). Every create answers code 201 ("partially successful"), never a clean 200, with
-    no field named as the cause - this is expected and is treated as success per the project's
-    own status table (201 = success with warning). DHGroupList round-trips correctly through
-    Get-SfosVPNProfile as long as this cmdlet's complete field set is sent, confirmed 3
-    consecutive times. This corrects an earlier finding from mid-session, incomplete manual
-    probes (missing PFSGroup and/or the DeadPeerDetection/CheckPeerAfterEvery/
-    WaitForResponseUpto/ActionWhenPeerUnreachable quartet - all four now required parameters,
-    see their own .PARAMETER entries) that looked like SupportedDHGroups was silently dropped;
-    it is not, once the request is actually complete. Kept here as a caution against
-    reintroducing a partial request shape, since the 400 that quartet produces when missing
-    contradicts the documentation table, which marks all four "No" (optional).
+    Verified live end to end, 4 times (created, read back with Get-SfosVPNProfile, updated,
+    removed - see Set-SfosVPNProfile/Remove-SfosVPNProfile .NOTES). Every create answers code
+    201 ("partially successful"), never a clean 200, with no field named as the cause - this
+    is expected and treated as success (201 = success with warning). DHGroupList round-trips
+    correctly through Get-SfosVPNProfile as long as this cmdlet's complete field set is sent,
+    confirmed 3 consecutive times. An incomplete request - missing PFSGroup and/or the
+    DeadPeerDetection/CheckPeerAfterEvery/WaitForResponseUpto/ActionWhenPeerUnreachable
+    quartet - all four now required parameters, see their own .PARAMETER entries - makes
+    SupportedDHGroups look silently dropped; it is not, once the request is actually complete.
+    Kept here as a caution against reintroducing a partial request shape, since the 400 that
+    quartet produces when missing contradicts the documentation table, which marks all four
+    "No" (optional).
 
 .LINK
     https://docs.sophos.com/nsg/sophos-firewall/22.0/API/CONFIGURE/VPN/VPNProfile/operations/AddVPNPolicy%26EditVPNPolicy.html
@@ -1577,7 +1623,9 @@ function New-SfosVPNProfile {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     $params = Resolve-SfosParameters -BoundParameters $PSBoundParameters
@@ -1731,6 +1779,13 @@ function New-SfosVPNProfile {
 .PARAMETER Phase2KeyLife
     Phase 2 key life in seconds. If omitted, the existing value is kept.
 
+.PARAMETER Session
+A session object returned by Connect-SfosFirewall, or the name of a session
+registered with Connect-SfosFirewall -Name. Overrides the stored default
+connection context; any of -Firewall/-Port/-Username/-Password/
+-SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -1802,7 +1857,9 @@ function Set-SfosVPNProfile {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     begin {
@@ -1927,6 +1984,13 @@ function Set-SfosVPNProfile {
 .PARAMETER Name
     Name of the profile to remove. Mandatory; accepts pipeline input by property name.
 
+.PARAMETER Session
+A session object returned by Connect-SfosFirewall, or the name of a session
+registered with Connect-SfosFirewall -Name. Overrides the stored default
+connection context; any of -Firewall/-Port/-Username/-Password/
+-SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -1950,9 +2014,8 @@ function Set-SfosVPNProfile {
 
 .NOTES
     Minimum supported PowerShell version: 5.1
-    Verified live: removed two temporary test profiles created for this session's tests,
-    confirmed gone with a follow-up Get, then confirmed the "not found" error path against a
-    name that never existed. No test objects remain in the lab.
+    Verified live: removed two temporary test profiles, confirmed gone with a follow-up Get,
+    then confirmed the "not found" error path against a name that never existed.
 
 .LINK
     https://docs.sophos.com/nsg/sophos-firewall/22.0/API/CONFIGURE/VPN/VPNProfile/operations/Delete%20VPN%20Policy.html
@@ -1970,7 +2033,9 @@ function Remove-SfosVPNProfile {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     begin {
@@ -2040,6 +2105,13 @@ function Remove-SfosVPNProfile {
     Filters by Name, substring match. Sent as the server-side filter key and re-applied
     client-side.
 
+.PARAMETER Session
+A session object returned by Connect-SfosFirewall, or the name of a session
+registered with Connect-SfosFirewall -Name. Overrides the stored default
+connection context; any of -Firewall/-Port/-Username/-Password/
+-SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -2090,6 +2162,7 @@ function Get-SfosVPNFailoverGroup {
         [string]$Username,
         [SecureString]$Password,
         [switch]$SkipCertificateCheck,
+        [object]$Session,
 
         [switch]$AsXml
     )
@@ -2194,6 +2267,13 @@ function Get-SfosVPNFailoverGroup {
     One or more failover conditions, each a PSCustomObject with Protocol ('PING' or 'TCP')
     and optionally Port [doc]. Optional.
 
+.PARAMETER Session
+A session object returned by Connect-SfosFirewall, or the name of a session
+registered with Connect-SfosFirewall -Name. Overrides the stored default
+connection context; any of -Firewall/-Port/-Username/-Password/
+-SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -2256,7 +2336,9 @@ function New-SfosVPNFailoverGroup {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     $params = Resolve-SfosParameters -BoundParameters $PSBoundParameters
@@ -2340,6 +2422,13 @@ function New-SfosVPNFailoverGroup {
     Complete replacement list of failover conditions (PSCustomObject with Protocol,
     optionally Port). If omitted, the existing list is kept.
 
+.PARAMETER Session
+A session object returned by Connect-SfosFirewall, or the name of a session
+registered with Connect-SfosFirewall -Name. Overrides the stored default
+connection context; any of -Firewall/-Port/-Username/-Password/
+-SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -2390,7 +2479,9 @@ function Set-SfosVPNFailoverGroup {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     begin {
@@ -2483,6 +2574,13 @@ function Set-SfosVPNFailoverGroup {
 .PARAMETER Name
     Name of the failover group to remove. Mandatory; accepts pipeline input by property name.
 
+.PARAMETER Session
+A session object returned by Connect-SfosFirewall, or the name of a session
+registered with Connect-SfosFirewall -Name. Overrides the stored default
+connection context; any of -Firewall/-Port/-Username/-Password/
+-SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -2527,7 +2625,9 @@ function Remove-SfosVPNFailoverGroup {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     begin {
@@ -2596,6 +2696,13 @@ function Remove-SfosVPNFailoverGroup {
 .PARAMETER Connection
     Name of the VPNIPSecConnection to add. Mandatory.
 
+.PARAMETER Session
+A session object returned by Connect-SfosFirewall, or the name of a session
+registered with Connect-SfosFirewall -Name. Overrides the stored default
+connection context; any of -Firewall/-Port/-Username/-Password/
+-SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -2640,7 +2747,9 @@ function Add-SfosVPNFailoverGroupMember {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     begin {
@@ -2681,10 +2790,10 @@ function Add-SfosVPNFailoverGroupMember {
 .DESCRIPTION
     Reads the current VPNFailoverGroup, removes the given connection name from its member
     list, and writes the reduced list back via Set-SfosVPNFailoverGroup (read-modify-write).
-    Since the entity requires at least one member, throws if this call would empty the list -
-    per section 5, a cmdlet that promises removal must not silently do nothing, and here the
-    firewall's own doc marks Connection "Mandatory: Yes" so an empty list would be rejected at
-    the API too; this cmdlet fails fast client-side instead. Supports ShouldProcess; use
+    Since the entity requires at least one member, throws if this call would empty the list:
+    the firewall's own doc marks Connection "Mandatory: Yes" so an empty list would be
+    rejected at the API too; this cmdlet fails fast client-side instead. Supports
+    ShouldProcess; use
     -WhatIf to preview.
 
     UNCONFIRMED live - transitively blocked, see Set-SfosVPNFailoverGroup's .NOTES.
@@ -2694,6 +2803,13 @@ function Add-SfosVPNFailoverGroupMember {
 
 .PARAMETER Connection
     Name of the VPNIPSecConnection to remove. Mandatory.
+
+.PARAMETER Session
+A session object returned by Connect-SfosFirewall, or the name of a session
+registered with Connect-SfosFirewall -Name. Overrides the stored default
+connection context; any of -Firewall/-Port/-Username/-Password/
+-SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
 
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
@@ -2739,7 +2855,9 @@ function Remove-SfosVPNFailoverGroupMember {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     begin {
@@ -2803,6 +2921,13 @@ function Remove-SfosVPNFailoverGroupMember {
     Connect client). Only Get is implemented for this entity - see .NOTES for why New-/Set-
     are deliberately not implemented in this fragment.
 
+.PARAMETER Session
+A session object returned by Connect-SfosFirewall, or the name of a session
+registered with Connect-SfosFirewall -Name. Overrides the stored default
+connection context; any of -Firewall/-Port/-Username/-Password/
+-SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -2829,21 +2954,17 @@ function Remove-SfosVPNFailoverGroupMember {
 
 .NOTES
     Minimum supported PowerShell version: 5.1
-    Verified live (twice, in separate calls this session): the firewall answers HTTP 200 with
+    Verified live (twice, in separate calls): the firewall answers HTTP 200 with
     '<SophosConnectClient><Reset>Yes</Reset></SophosConnectClient>' - no field from the
     documented Configure sample XML (Name, AliasInterface, AuthenticationType, PresharedKey,
     LocalIDType, LocalID, RemoteIDType, RemoteID, ...) is present. 'Reset' matches no
-    documented parameter either. This is why New-/Set-SfosSophosConnectClient are NOT
-    implemented in this fragment: the task explicitly forbids testing the documented Configure
-    operation as a write, and unlike the Set-SfosGuestUserSettings precedent this project
-    otherwise follows for untested settings singletons, there is no live Get shape at all here
-    to build a documentation-consistent Set- against - not even an error response, since
-    provoking one would itself be a write attempt on this entity, which the task prohibits. A
-    doc-only Set- would be guessing at both the field set AND the wire shape simultaneously,
-    which is a materially worse position than every other "unconfirmed" cmdlet in this
-    fragment (those at least confirmed live field validation via provoked 501s). Building it
-    anyway was assessed as pretending to more confidence than exists; leaving it out is the
-    accurate representation of what could be verified in this lab.
+    documented parameter either. New-/Set-SfosSophosConnectClient are NOT implemented in this
+    fragment: writing to the documented Configure operation was deliberately not tested, and
+    unlike the Set-SfosGuestUserSettings precedent this project otherwise follows for
+    untested settings singletons, there is no live Get shape at all here to build a
+    documentation-consistent Set- against, since provoking even an error response would
+    itself be a write attempt. A doc-only Set- would be guessing at both the field set AND
+    the wire shape simultaneously.
 
 .LINK
     https://docs.sophos.com/nsg/sophos-firewall/22.0/API/CONFIGURE/VPN/Cisco/Cisco.html
@@ -2856,6 +2977,7 @@ function Get-SfosSophosConnectClient {
         [string]$Username,
         [SecureString]$Password,
         [switch]$SkipCertificateCheck,
+        [object]$Session,
 
         [switch]$AsXml
     )
@@ -2911,13 +3033,9 @@ function Get-SfosSophosConnectClient {
 #    entity, all measured live and used exactly as observed below.
 # 2. SSLVPNPolicy.PolicyMembers writes back onto the referenced UserGroup: adding a group as
 #    a policy member sets that group's own <SSLVPNPolicy>/<ClientlessPolicy> fields to the
-#    policy's name as a side effect - confirmed live by reading the group back afterwards. A
-#    production group (a UI default, not a test object) was referenced once during this
-#    module's development and came back with those two fields overwritten from empty to the
-#    test policy names; it was restored field-for-field before continuing, and every
-#    verification after that point uses a dedicated Portal-Grp created and removed for this
-#    purpose. New-/Set-SfosSSLVPNPolicy document this prominently - never pass a production
-#    group name to -Member.
+#    policy's name as a side effect - confirmed live by reading the group back afterwards.
+#    Treat every group reference as a write to that group. New-/Set-SfosSSLVPNPolicy document
+#    this prominently - never pass a production group name to -Member.
 # 3. Deleting a TunnelPolicy/ClientlessPolicy that a group still references answers 504
 #    ("Deleting entity referred by another entity") or 500 ("Deleted some configurations.
 #    Couldn't delete all.") and deletes nothing; the group's own policy reference has to be
@@ -2928,13 +3046,11 @@ function Get-SfosSophosConnectClient {
 # 4. Remove on SSLBookmark is a confirmed no-op on this firmware: every shape tried - bare
 #    <Name>, <Name> plus <Type>, the full object, and even the undocumented
 #    <Set operation="remove"> - answers code 200 "Configuration applied successfully" and the
-#    object is still present on the very next Get. Reproduced four times. This is the same
-#    class of defect as Remove-SfosFileType (the project build rules, "Still open"): documented delete
-#    operation, used exactly as specified, silently does nothing. Remove-SfosSSLBookmark reads
-#    the object back after the call and throws if it is still there, rather than reporting the
-#    firewall's false success. Two SSLBookmark test objects created during this module's
-#    development (Portal-Bookmark1, Portal-Bookmark2) could not be removed through the API
-#    for this reason and remain on the lab appliance - see the task report.
+#    object is still present on the very next Get. Documented delete operation, used exactly
+#    as specified, silently does nothing. Remove-SfosSSLBookmark reads the object back after
+#    the call and throws if it is still there, rather than reporting the firewall's false
+#    success. Removal of an existing SSLBookmark is therefore only possible through the web
+#    admin.
 # 5. SSLBookmark.Password comes back from Get in hashed form
 #    (<Password hashform="mode1">$sfos$7$0$...</Password>), never in plaintext - but unlike
 #    SophosConnectClient/FileType-Template, the update resends that hash together with its hashform
@@ -2948,17 +3064,13 @@ function Get-SfosSophosConnectClient {
 #    field - the doc sample itself says so. Every attempt to create a SiteToSiteClient through
 #    this module's urlencoded reqxml transport failed with a field-less 500: with no
 #    ServerConfigurationFile element, with an empty element, and with a base64 placeholder
-#    string in it. Core has no multipart transport (see the project build rules, section 5). New-/Set-/Get-/Remove-SfosSiteToSiteClient are
-#    implemented documentation-faithful and marked unconfirmed; because Add never succeeds,
-#    whether FilePassword/the proxy Password survive a read-modify-write could not be measured
-#    - Set-SfosSiteToSiteClient does not attempt to preserve them (see its .NOTES), the same
-#    stance as FileType/-Template.
+#    string in it. Core has no multipart transport. New-/Set-/Get-/Remove-SfosSiteToSiteClient
+#    are implemented documentation-faithful and marked unconfirmed; because Add never
+#    succeeds, whether FilePassword/the proxy Password survive a read-modify-write could not
+#    be measured - Set-SfosSiteToSiteClient does not attempt to preserve them (see its .NOTES).
 # 7. SiteToSiteServer.Name rejects a hyphen: <Set operation="add"> with
 #    Name=Portal-S2SServer1 answered 501 naming /SiteToSiteServer/Name; the same request
-#    with the hyphen removed (PortalS2SServer1) succeeded. This conflicts with this task's
-#    mandated Portal- prefix the same way 203.0.113.0/24 conflicted with GatewayIP in the
-#    Routing module - flagged here and in the task report; test objects for this entity use
-#    Portal<Suffix> without a hyphen.
+#    with the hyphen removed (PortalS2SServer1) succeeded.
 
 #region SSLTunnelAccessSettings
 
@@ -2970,6 +3082,13 @@ function Get-SfosSophosConnectClient {
     Queries the Sophos Firewall XML API for SSLTunnelAccessSettings (VPN > SSL VPN (Remote
     Access) > Tunnel access control), a device-wide singleton - there is exactly one object
     and it has no Name. Use -AsXml to return the raw XML node.
+
+.PARAMETER Session
+A session object returned by Connect-SfosFirewall, or the name of a session
+registered with Connect-SfosFirewall -Name. Overrides the stored default
+connection context; any of -Firewall/-Port/-Username/-Password/
+-SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
 
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
@@ -3000,14 +3119,14 @@ function Get-SfosSophosConnectClient {
     Measured live: the sample XML on the Configure operation page also shows
     <CompressSSLVPNTraffic>, but the live object never returns it - not even as an empty
     element - regardless of configuration. Because Get cannot confirm its value,
-    Set-SfosSSLTunnelAccessSettings has no -CompressSSLVPNTraffic parameter, the same stance
-    as FileType/-Template (the project build rules, section 5): a field this module cannot read back is not offered
-    for write, so a read-modify-write update can never silently clear it.
+    Set-SfosSSLTunnelAccessSettings has no -CompressSSLVPNTraffic parameter: a field this
+    module cannot read back is not offered for write, so a read-modify-write update can never
+    silently clear it.
     Verified live end-to-end as a singleton round trip: read the object, flip -DebugMode from
     Disable to Enable, re-read and confirmed only DebugMode differed from the baseline, set it
     back to Disable, re-read and confirmed an exact field-for-field match to the original
     baseline. No other field (including SSLServerCertificate and the management-adjacent
-    fields) was written during this task.
+    fields) was written for verification.
 
 .LINK
     https://docs.sophos.com/nsg/sophos-firewall/22.0/API/CONFIGURE/VPN/SSLVPNTunnel/SSLVPNTunnel.html
@@ -3017,8 +3136,7 @@ function Get-SfosSophosConnectClient {
 #>
 function Get-SfosSSLTunnelAccessSettings {
     # PSUseSingularNouns is suppressed on purpose: <SSLTunnelAccessSettings> is the entity's
-    # own singleton name, not a plural container - it has no singular child element. The
-    # project build rules, section 3 gives the Sophos wire spelling precedence here.
+    # own singleton name, not a plural container - it has no singular child element.
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '')]
     [CmdletBinding()]
     param(
@@ -3027,6 +3145,7 @@ function Get-SfosSSLTunnelAccessSettings {
         [string]$Username,
         [SecureString]$Password,
         [switch]$SkipCertificateCheck,
+        [object]$Session,
 
         [switch]$AsXml
     )
@@ -3198,6 +3317,13 @@ function Get-SfosSSLTunnelAccessSettings {
 .PARAMETER StaticIPAddresses
     'Enable' or 'Disable'. If omitted, the existing value is kept.
 
+.PARAMETER Session
+A session object returned by Connect-SfosFirewall, or the name of a session
+registered with Connect-SfosFirewall -Name. Overrides the stored default
+connection context; any of -Firewall/-Port/-Username/-Password/
+-SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -3225,12 +3351,12 @@ function Get-SfosSSLTunnelAccessSettings {
     No -CompressSSLVPNTraffic parameter: Get-SfosSSLTunnelAccessSettings never returns this
     field even though the Configure operation page's sample XML includes it, so its current
     value can never be confirmed and a read-modify-write could silently clear it - see
-    Get-SfosSSLTunnelAccessSettings's .NOTES and the FileType/-Template precedent (the project build rules, section 5).
+    Get-SfosSSLTunnelAccessSettings's .NOTES.
     Verified live: flipped -DebugMode from Disable to Enable, confirmed every other field
     (including SSLServerCertificate, Port, IPLeaseRange, EncryptionAlgorithm and all others)
     was byte-for-byte unchanged from the pre-test baseline, then set -DebugMode back to
-    Disable and confirmed an exact match to the original baseline. No other field was written
-    to the live appliance during this task, per the task's safety scope for this singleton.
+    Disable and confirmed an exact match to the original baseline. No other field of this
+    singleton was written to the live appliance during verification.
 
 .LINK
     https://docs.sophos.com/nsg/sophos-firewall/22.0/API/CONFIGURE/VPN/SSLVPNTunnel/operations/ConfigureSSLVPNTunnelAccess.html
@@ -3240,8 +3366,7 @@ function Get-SfosSSLTunnelAccessSettings {
 #>
 function Set-SfosSSLTunnelAccessSettings {
     # PSUseSingularNouns is suppressed on purpose: <SSLTunnelAccessSettings> is the entity's
-    # own singleton name, not a plural container - it has no singular child element. The
-    # project build rules, section 3 gives the Sophos wire spelling precedence here.
+    # own singleton name, not a plural container - it has no singular child element.
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '')]
     # PSAvoidUsingPlainTextForPassword on -SaveCredential is a false positive: it is an
     # Enable/Disable policy toggle controlling whether the SSL VPN client is allowed to save
@@ -3317,7 +3442,9 @@ function Set-SfosSSLTunnelAccessSettings {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     $params = Resolve-SfosParameters -BoundParameters $PSBoundParameters
@@ -3433,6 +3560,13 @@ function Set-SfosSSLTunnelAccessSettings {
 .PARAMETER PolicyType
     'Tunnel', 'Clientless', or omitted for both. Client-side filter.
 
+.PARAMETER Session
+A session object returned by Connect-SfosFirewall, or the name of a session
+registered with Connect-SfosFirewall -Name. Overrides the stored default
+connection context; any of -Firewall/-Port/-Username/-Password/
+-SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -3486,6 +3620,7 @@ function Get-SfosSSLVPNPolicy {
         [string]$Username,
         [SecureString]$Password,
         [switch]$SkipCertificateCheck,
+        [object]$Session,
 
         [switch]$AsXml
     )
@@ -3622,6 +3757,13 @@ function Get-SfosSSLVPNPolicy {
 .PARAMETER Bookmark
     Clientless only. One or more SSLBookmark names accessible in web mode [doc].
 
+.PARAMETER Session
+A session object returned by Connect-SfosFirewall, or the name of a session
+registered with Connect-SfosFirewall -Name. Overrides the stored default
+connection context; any of -Firewall/-Port/-Username/-Password/
+-SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -3649,12 +3791,12 @@ function Get-SfosSSLVPNPolicy {
     Minimum supported PowerShell version: 5.1
     The "Web Access" field (values 1 or 6) in the documentation's Attribute/Parameter table has
     no corresponding element anywhere in the sample XML and never appeared on any live object -
-    it is a table/sample mismatch (the project build rules, section 5) and is not implemented.
-    Verified live end-to-end for both sub-types, against a dedicated throwaway test group created and
-    removed for this purpose (not a production group - see the .DESCRIPTION security note):
-    created a Tunnel policy (code 201) and a Clientless policy (code 200) referencing that
-    group, confirmed both via Get-SfosSSLVPNPolicy with the expected fields, then removed them
-    (see Remove-SfosSSLVPNPolicy).
+    it is a table/sample mismatch and is not implemented.
+    Verified live end-to-end for both sub-types, against a dedicated throwaway test group
+    (not a production group - see the .DESCRIPTION security note): created a Tunnel policy
+    (code 201) and a Clientless policy (code 200) referencing that group, confirmed both via
+    Get-SfosSSLVPNPolicy with the expected fields, then removed them (see
+    Remove-SfosSSLVPNPolicy).
 
 .LINK
     https://docs.sophos.com/nsg/sophos-firewall/22.0/API/CONFIGURE/VPN/SSLVPNPolicy/operations/AddSSLVPNPolicy%26EditSSLVPNPolicy.html
@@ -3699,7 +3841,9 @@ function New-SfosSSLVPNPolicy {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     $params = Resolve-SfosParameters -BoundParameters $PSBoundParameters
@@ -3821,6 +3965,13 @@ function New-SfosSSLVPNPolicy {
 .PARAMETER Bookmark
     Clientless only. Complete replacement list. If omitted, the existing list is kept.
 
+.PARAMETER Session
+A session object returned by Connect-SfosFirewall, or the name of a session
+registered with Connect-SfosFirewall -Name. Overrides the stored default
+connection context; any of -Firewall/-Port/-Username/-Password/
+-SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -3890,7 +4041,9 @@ function Set-SfosSSLVPNPolicy {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     begin {
@@ -4022,6 +4175,13 @@ function Set-SfosSSLVPNPolicy {
 .PARAMETER PolicyType
     'Tunnel' or 'Clientless'. If omitted, resolved from the existing object.
 
+.PARAMETER Session
+A session object returned by Connect-SfosFirewall, or the name of a session
+registered with Connect-SfosFirewall -Name. Overrides the stored default
+connection context; any of -Firewall/-Port/-Username/-Password/
+-SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -4070,7 +4230,9 @@ function Remove-SfosSSLVPNPolicy {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     begin {
@@ -4135,6 +4297,13 @@ function Remove-SfosSSLVPNPolicy {
 .PARAMETER TypeLike
     Filters by Type, substring match. Client-side only.
 
+.PARAMETER Session
+A session object returned by Connect-SfosFirewall, or the name of a session
+registered with Connect-SfosFirewall -Name. Overrides the stored default
+connection context; any of -Firewall/-Port/-Username/-Password/
+-SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -4183,6 +4352,7 @@ function Get-SfosSSLBookmark {
         [string]$Username,
         [SecureString]$Password,
         [switch]$SkipCertificateCheck,
+        [object]$Session,
 
         [switch]$AsXml
     )
@@ -4325,6 +4495,13 @@ function Get-SfosSSLBookmark {
 .PARAMETER PublicHostKey
     SSH/FTPS/SFTP only: public host key text [doc]. Optional.
 
+.PARAMETER Session
+A session object returned by Connect-SfosFirewall, or the name of a session
+registered with Connect-SfosFirewall -Name. Overrides the stored default
+connection context; any of -Firewall/-Port/-Username/-Password/
+-SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -4403,7 +4580,9 @@ function New-SfosSSLBookmark {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     $params = Resolve-SfosParameters -BoundParameters $PSBoundParameters
@@ -4533,6 +4712,13 @@ function New-SfosSSLBookmark {
 .PARAMETER PublicHostKey
     If omitted, the existing value is kept.
 
+.PARAMETER Session
+A session object returned by Connect-SfosFirewall, or the name of a session
+registered with Connect-SfosFirewall -Name. Overrides the stored default
+connection context; any of -Firewall/-Port/-Username/-Password/
+-SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -4608,7 +4794,9 @@ function Set-SfosSSLBookmark {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     begin {
@@ -4745,6 +4933,13 @@ function Set-SfosSSLBookmark {
 .PARAMETER Name
     Name of the bookmark to remove. Mandatory; accepts pipeline input by property name.
 
+.PARAMETER Session
+A session object returned by Connect-SfosFirewall, or the name of a session
+registered with Connect-SfosFirewall -Name. Overrides the stored default
+connection context; any of -Firewall/-Port/-Username/-Password/
+-SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -4773,8 +4968,8 @@ function Set-SfosSSLBookmark {
     code 200 every time, and Get-SfosSSLBookmark found the object present immediately
     afterwards each time, including after a 5-second wait (ruling out an async apply delay)
     and after trying an undocumented <Set operation="remove"> instead of <Remove> (rejected
-    with 501, confirming only add/update are valid operations here per the project build rules.
-    defect class as Remove-SfosFileType (the project build rules, "Still open").
+    with 501, confirming only add/update are valid operations here). Documented delete
+    operation, used exactly as specified, silently does nothing.
 
 .LINK
     https://docs.sophos.com/nsg/sophos-firewall/22.0/API/CONFIGURE/VPN/SSLVPNBookmark/operations/Delete%20SSLVPN%20Bookmark.html
@@ -4792,7 +4987,9 @@ function Remove-SfosSSLBookmark {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     begin {
@@ -4865,6 +5062,13 @@ function Remove-SfosSSLBookmark {
     Filters by Name, substring match. Sent as the server-side filter key and re-applied
     client-side.
 
+.PARAMETER Session
+A session object returned by Connect-SfosFirewall, or the name of a session
+registered with Connect-SfosFirewall -Name. Overrides the stored default
+connection context; any of -Firewall/-Port/-Username/-Password/
+-SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -4905,6 +5109,7 @@ function Get-SfosSSLBookmarkGroup {
         [string]$Username,
         [SecureString]$Password,
         [switch]$SkipCertificateCheck,
+        [object]$Session,
 
         [switch]$AsXml
     )
@@ -4976,11 +5181,18 @@ function Get-SfosSSLBookmarkGroup {
 
 .PARAMETER Bookmark
     One or more existing SSLBookmark names [doc]. Mandatory - a group needs at least one
-    member the same way a ServiceGroup does (the project build rules, section 5); an empty <BookmarkList/> is
-    rejected by the firewall with 501 naming BookmarkList/Bookmark (measured).
+    member; an empty BookmarkList is rejected by the firewall with 501 naming
+    BookmarkList/Bookmark (measured).
 
 .PARAMETER Description
     Free-text description [doc]. Optional.
+
+.PARAMETER Session
+A session object returned by Connect-SfosFirewall, or the name of a session
+registered with Connect-SfosFirewall -Name. Overrides the stored default
+connection context; any of -Firewall/-Port/-Username/-Password/
+-SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
 
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
@@ -5031,7 +5243,9 @@ function New-SfosSSLBookmarkGroup {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     $params = Resolve-SfosParameters -BoundParameters $PSBoundParameters
@@ -5089,6 +5303,13 @@ function New-SfosSSLBookmarkGroup {
 .PARAMETER Description
     If omitted, the existing value is kept.
 
+.PARAMETER Session
+A session object returned by Connect-SfosFirewall, or the name of a session
+registered with Connect-SfosFirewall -Name. Overrides the stored default
+connection context; any of -Firewall/-Port/-Username/-Password/
+-SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -5114,9 +5335,9 @@ function New-SfosSSLBookmarkGroup {
     Minimum supported PowerShell version: 5.1
     Verified live: created a group with two members, updated it with a one-member list, and
     Get afterwards showed exactly one member - list replacement genuinely shrinks here, unlike
-    the append-only WebFilterCategory.URLList / FirewallRuleGroup.SecurityPolicyList precedent
-    in the project build rules 5. Sending an empty list is rejected outright by the firewall (501 naming
-    BookmarkList/Bookmark) rather than silently ignored - a safe failure mode, so
+    the append-only WebFilterCategory.URLList / FirewallRuleGroup.SecurityPolicyList. Sending
+    an empty list is rejected outright by the firewall (501 naming BookmarkList/Bookmark)
+    rather than silently ignored - a safe failure mode, so
     Remove-SfosSSLBookmarkGroupMember does not need the read-back-and-throw guard that
     Remove-SfosFirewallRuleGroupMember needs.
 
@@ -5139,7 +5360,9 @@ function Set-SfosSSLBookmarkGroup {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     begin {
@@ -5211,6 +5434,13 @@ function Set-SfosSSLBookmarkGroup {
 .PARAMETER Name
     Name of the group to remove. Mandatory; accepts pipeline input by property name.
 
+.PARAMETER Session
+A session object returned by Connect-SfosFirewall, or the name of a session
+registered with Connect-SfosFirewall -Name. Overrides the stored default
+connection context; any of -Firewall/-Port/-Username/-Password/
+-SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -5253,7 +5483,9 @@ function Remove-SfosSSLBookmarkGroup {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     begin {
@@ -5311,6 +5543,13 @@ function Remove-SfosSSLBookmarkGroup {
 .PARAMETER Bookmark
     Name of the SSLBookmark to add. Mandatory; accepts pipeline input by property name.
 
+.PARAMETER Session
+A session object returned by Connect-SfosFirewall, or the name of a session
+registered with Connect-SfosFirewall -Name. Overrides the stored default
+connection context; any of -Firewall/-Port/-Username/-Password/
+-SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -5356,7 +5595,9 @@ function Add-SfosSSLBookmarkGroupMember {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     begin {
@@ -5404,6 +5645,13 @@ function Add-SfosSSLBookmarkGroupMember {
 
 .PARAMETER Bookmark
     Name of the SSLBookmark to remove. Mandatory; accepts pipeline input by property name.
+
+.PARAMETER Session
+A session object returned by Connect-SfosFirewall, or the name of a session
+registered with Connect-SfosFirewall -Name. Overrides the stored default
+connection context; any of -Firewall/-Port/-Username/-Password/
+-SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
 
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
@@ -5453,7 +5701,9 @@ function Remove-SfosSSLBookmarkGroupMember {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     begin {
@@ -5510,6 +5760,13 @@ function Remove-SfosSSLBookmarkGroupMember {
     client-side, per this project's usual pattern - not independently confirmed for this
     entity since no live object could be created to filter for.
 
+.PARAMETER Session
+A session object returned by Connect-SfosFirewall, or the name of a session
+registered with Connect-SfosFirewall -Name. Overrides the stored default
+connection context; any of -Firewall/-Port/-Username/-Password/
+-SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -5555,6 +5812,7 @@ function Get-SfosSiteToSiteClient {
         [string]$Username,
         [SecureString]$Password,
         [switch]$SkipCertificateCheck,
+        [object]$Session,
 
         [switch]$AsXml
     )
@@ -5633,8 +5891,7 @@ function Get-SfosSiteToSiteClient {
     POST failed with a field-less 500 - with no ServerConfigurationFile element, with an empty
     element, and with a base64 placeholder string in it (see the region header comment). Core
     has no multipart transport, so this cmdlet cannot be verified end-to-end here; it is
-    implemented per the documented field set and marked unconfirmed, the same stance this
-    project takes for New-SfosSSLTLSInspectionRule (the project build rules, "Still open").
+    implemented per the documented field set and marked unconfirmed.
 
 .PARAMETER Name
     Name of the connection [doc]. Mandatory. Max 50 characters. First character A-Za-z, rest
@@ -5685,6 +5942,13 @@ function Get-SfosSiteToSiteClient {
 .PARAMETER Status
     'On' or 'Off' [doc]. Optional.
 
+.PARAMETER Session
+A session object returned by Connect-SfosFirewall, or the name of a session
+registered with Connect-SfosFirewall -Name. Overrides the stored default
+connection context; any of -Firewall/-Port/-Username/-Password/
+-SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -5712,9 +5976,8 @@ function Get-SfosSiteToSiteClient {
     Minimum supported PowerShell version: 5.1
     Measured live: three variants all answered code 500 with no <InvalidParams> detail -
     omitting -ServerConfigurationFile entirely, passing an empty string, and passing a base64
-    placeholder string. No variant succeeded, so no object of this type exists anywhere in
-    this task's verification and the FilePassword/proxy-Password secret question from the task
-    brief could not be measured either way.
+    placeholder string. No variant succeeded, so whether FilePassword/proxy-Password survive
+    could not be measured either way.
 
 .LINK
     https://docs.sophos.com/nsg/sophos-firewall/22.0/api/configure/vpn/sslvpn%20client%20connection/operations/addsslvpnclientconnection%26editsslvpnclientconnection.html
@@ -5762,7 +6025,9 @@ function New-SfosSiteToSiteClient {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     $params = Resolve-SfosParameters -BoundParameters $PSBoundParameters
@@ -5869,9 +6134,9 @@ function New-SfosSiteToSiteClient {
 
 .PARAMETER FilePassword
     SecureString; converted to plain text only at the point the wire XML is built. If omitted,
-    not resent. Get-SfosSiteToSiteClient never confirmed to return this field
-    (the project build rules, section 5) - unlike SSLBookmark's Password, there is no
-    live evidence either way for this one, so it is treated conservatively as not preservable:
+    not resent. Get-SfosSiteToSiteClient never confirmed to return this field - unlike
+    SSLBookmark's Password, there is no live evidence either way for this one, so it is
+    treated conservatively as not preservable:
     omitting it here does not clear a value this cmdlet cannot see, but it also cannot
     guarantee an existing password survives an update that touches other fields.
 
@@ -5905,6 +6170,13 @@ function New-SfosSiteToSiteClient {
 
 .PARAMETER Status
     If omitted, the existing value is kept.
+
+.PARAMETER Session
+A session object returned by Connect-SfosFirewall, or the name of a session
+registered with Connect-SfosFirewall -Name. Overrides the stored default
+connection context; any of -Firewall/-Port/-Username/-Password/
+-SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
 
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
@@ -5974,7 +6246,9 @@ function Set-SfosSiteToSiteClient {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     begin {
@@ -6093,6 +6367,13 @@ function Set-SfosSiteToSiteClient {
 .PARAMETER Name
     Name of the connection to remove. Mandatory; accepts pipeline input by property name.
 
+.PARAMETER Session
+A session object returned by Connect-SfosFirewall, or the name of a session
+registered with Connect-SfosFirewall -Name. Overrides the stored default
+connection context; any of -Firewall/-Port/-Username/-Password/
+-SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -6136,7 +6417,9 @@ function Remove-SfosSiteToSiteClient {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     begin {
@@ -6196,6 +6479,13 @@ function Remove-SfosSiteToSiteClient {
     tested live and confirmed working - a filtered Get on this entity's Name field returned
     the expected single object) and re-applied client-side.
 
+.PARAMETER Session
+A session object returned by Connect-SfosFirewall, or the name of a session
+registered with Connect-SfosFirewall -Name. Overrides the stored default
+connection context; any of -Firewall/-Port/-Username/-Password/
+-SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -6242,6 +6532,7 @@ function Get-SfosSiteToSiteServer {
         [string]$Username,
         [SecureString]$Password,
         [switch]$SkipCertificateCheck,
+        [object]$Session,
 
         [switch]$AsXml
     )
@@ -6341,6 +6632,13 @@ function Get-SfosSiteToSiteServer {
 .PARAMETER Status
     'On' or 'Off' [doc]. Optional.
 
+.PARAMETER Session
+A session object returned by Connect-SfosFirewall, or the name of a session
+registered with Connect-SfosFirewall -Name. Overrides the stored default
+connection context; any of -Firewall/-Port/-Username/-Password/
+-SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -6410,7 +6708,9 @@ function New-SfosSiteToSiteServer {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     $params = Resolve-SfosParameters -BoundParameters $PSBoundParameters
@@ -6490,6 +6790,13 @@ function New-SfosSiteToSiteServer {
 .PARAMETER Status
     If omitted, the existing value is kept.
 
+.PARAMETER Session
+A session object returned by Connect-SfosFirewall, or the name of a session
+registered with Connect-SfosFirewall -Name. Overrides the stored default
+connection context; any of -Firewall/-Port/-Username/-Password/
+-SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -6544,7 +6851,9 @@ function Set-SfosSiteToSiteServer {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     begin {
@@ -6632,6 +6941,13 @@ function Set-SfosSiteToSiteServer {
 .PARAMETER Name
     Name of the connection to remove. Mandatory; accepts pipeline input by property name.
 
+.PARAMETER Session
+A session object returned by Connect-SfosFirewall, or the name of a session
+registered with Connect-SfosFirewall -Name. Overrides the stored default
+connection context; any of -Firewall/-Port/-Username/-Password/
+-SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -6677,7 +6993,9 @@ function Remove-SfosSiteToSiteServer {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     begin {
@@ -6758,7 +7076,7 @@ function Remove-SfosSiteToSiteServer {
 #    response echoes back - uses <PPTPSettings>, mirroring L2TPConfiguration's own
 #    <L2TPSettings> naming. <Configuration> was tried and produces the same "did not even
 #    validate" symptom as any other wrong element name; <PPTPSettings> is what this fragment
-#    sends. Sample-vs-wire disagreement, per the project build rules.
+#    sends.
 #
 # 3. StartIP, EndIP and PrimaryDNSServer are mandatory on EVERY Set of *Settings, including a
 #    ple that changes nothing at all: echoing the lab's own unconfigured baseline
@@ -6769,12 +7087,11 @@ function Remove-SfosSiteToSiteServer {
 #    factory/never-configured state cannot be round-tripped through Set at all without
 #    introducing a real IP range and DNS server, and once introduced there is no value that
 #    clears them back to "absent" again (the same three elements are demanded on every
-#    subsequent Set too). Because this task requires an EXACT revert of anything changed on
-#    either singleton, and this field is a one-way structural ratchet with no path back to
-#    "unset", Set-SfosL2TPConfiguration/Set-SfosPPTPConfiguration were deliberately NOT
-#    write-tested end-to-end in this session - seebeide functions' .NOTES. The *Members
-#    sub-object has no such dependency (confirmed - see finding 4) and WAS write-tested
-#    end-to-end, including the field-toggle-and-revert this task asked for.
+#    subsequent Set too). Because this field is a one-way structural ratchet with no path
+#    back to "unset", Set-SfosL2TPConfiguration/Set-SfosPPTPConfiguration were deliberately
+#    NOT write-tested end-to-end - see both functions' .NOTES. The *Members sub-object has no
+#    such dependency (confirmed - see finding 4) and WAS write-tested end-to-end, including a
+#    full field-toggle-and-revert.
 #
 # 4. L2TPMembers/PPTPMembers is independent of *Settings validation (a Set touching only the
 #    member list succeeds even while the mandatory IP-range fields above remain unset) and is
@@ -6806,6 +7123,13 @@ function Remove-SfosSiteToSiteServer {
     Queries the Sophos Firewall XML API for the L2TPConfiguration object (VPN > L2TP). This
     is a singleton - there is exactly one on the firewall, with no name to filter by. Use
     -AsXml to return the raw XML node.
+
+.PARAMETER Session
+A session object returned by Connect-SfosFirewall, or the name of a session
+registered with Connect-SfosFirewall -Name. Overrides the stored default
+connection context; any of -Firewall/-Port/-Username/-Password/
+-SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
 
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
@@ -6854,6 +7178,7 @@ function Get-SfosL2TPConfiguration {
         [string]$Username,
         [SecureString]$Password,
         [switch]$SkipCertificateCheck,
+        [object]$Session,
 
         [switch]$AsXml
     )
@@ -6941,6 +7266,13 @@ function Get-SfosL2TPConfiguration {
     Secondary WINS server handed to L2TP clients [doc]. Optional; if omitted, the existing
     value is kept.
 
+.PARAMETER Session
+A session object returned by Connect-SfosFirewall, or the name of a session
+registered with Connect-SfosFirewall -Name. Overrides the stored default
+connection context; any of -Firewall/-Port/-Username/-Password/
+-SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -6966,25 +7298,23 @@ function Get-SfosL2TPConfiguration {
 
 .NOTES
     Minimum supported PowerShell version: 5.1
-    NOT write-tested end-to-end live in this session, deliberately. Measured instead via the
-    firewall's own field validation: sending the current object back completely unchanged
-    (L2TPGeneralSettings=Disable, LeaseIPFromRadiusServer=Disable, the only two fields the lab
-    singleton had ever had) was rejected with code 501, naming
-    /L2TPConfiguration/L2TPSettings/AssignIPFrom/StartIP,
+    Not write-tested against a live full toggle-and-revert, deliberately: once StartIP, EndIP
+    and PrimaryDNSServer are supplied, there is no value that clears them back to "not
+    configured" again, so a genuine test would leave the firewall in a state that cannot be
+    undone through the API. Measured instead via the firewall's own field validation: sending
+    the current object back completely unchanged (L2TPGeneralSettings=Disable,
+    LeaseIPFromRadiusServer=Disable, an otherwise unconfigured singleton) was rejected with
+    code 501, naming /L2TPConfiguration/L2TPSettings/AssignIPFrom/StartIP,
     /L2TPConfiguration/L2TPSettings/AssignIPFrom/EndIP and
     /L2TPConfiguration/L2TPSettings/PrimaryDNSServer as missing. That confirms the request
     shape and the -ObjectName 'L2TPSettings' status path used by this cmdlet (the error
     response's root element IS <L2TPSettings>, not <L2TPConfiguration>), but it also means
     those three fields are unconditionally mandatory on every update - including one that
-    changes nothing - and, once supplied, there is no value that clears them back to "not
-    configured" again on a later call (the same three elements are demanded every time).
-    Given that, a genuine field-toggle-and-revert test on this singleton would have left the
-    lab firewall in a state this session could not fully undo (an IP range would remain set
-    where none had been before), which conflicts with this task's requirement to restore both
-    singletons exactly. The Members sub-object has no such constraint and WAS tested
-    end-to-end with a full revert - see Add-/Remove-SfosL2TPConfigurationMember.
-    ConfirmImpact High since 2026-08-12: the original empty state is unrecoverable through the
-    API once any value has been written (measured); automation must pass -Confirm:$false.
+    changes nothing - and, once supplied, the same three elements are demanded on every later
+    call as well. The Members sub-object has no such constraint and WAS tested end-to-end with
+    a full revert - see Add-/Remove-SfosL2TPConfigurationMember.
+    ConfirmImpact is High: the original empty state is unrecoverable through the API once any
+    value has been written (measured); automation must pass -Confirm:$false.
 
 .LINK
     https://docs.sophos.com/nsg/sophos-firewall/22.0/API/CONFIGURE/VPN/L2TPConfiguration/operations/ConfigureL2TP.html
@@ -7013,7 +7343,9 @@ function Set-SfosL2TPConfiguration {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     $params = Resolve-SfosParameters -BoundParameters $PSBoundParameters
@@ -7104,6 +7436,13 @@ function Set-SfosL2TPConfiguration {
     the plain strings from Get-SfosL2TPConfiguration's MemberList works via
     ValueFromPipeline; a custom object would need a property actually named MemberName.
 
+.PARAMETER Session
+A session object returned by Connect-SfosFirewall, or the name of a session
+registered with Connect-SfosFirewall -Name. Overrides the stored default
+connection context; any of -Firewall/-Port/-Username/-Password/
+-SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -7151,7 +7490,9 @@ function Add-SfosL2TPConfigurationMember {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     begin {
@@ -7204,6 +7545,13 @@ function Add-SfosL2TPConfigurationMember {
     pipeline input by property name. See Add-SfosL2TPConfigurationMember's .PARAMETER
     MemberName for why this is not named -UserName.
 
+.PARAMETER Session
+A session object returned by Connect-SfosFirewall, or the name of a session
+registered with Connect-SfosFirewall -Name. Overrides the stored default
+connection context; any of -Firewall/-Port/-Username/-Password/
+-SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -7249,7 +7597,9 @@ function Remove-SfosL2TPConfigurationMember {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     begin {
@@ -7312,6 +7662,13 @@ function Remove-SfosL2TPConfigurationMember {
     entity in this project and a filtered empty-result call answered cleanly (a bare
     self-closing '<L2TPConnection/>', no error).
 
+.PARAMETER Session
+A session object returned by Connect-SfosFirewall, or the name of a session
+registered with Connect-SfosFirewall -Name. Overrides the stored default
+connection context; any of -Firewall/-Port/-Username/-Password/
+-SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -7370,6 +7727,7 @@ function Get-SfosL2TPConnection {
         [string]$Username,
         [SecureString]$Password,
         [switch]$SkipCertificateCheck,
+        [object]$Session,
 
         [switch]$AsXml
     )
@@ -7522,6 +7880,13 @@ function Get-SfosL2TPConnection {
     left out of the request entirely rather than sent as the documented default of 0 - see the
     Notes section below for why.
 
+.PARAMETER Session
+A session object returned by Connect-SfosFirewall, or the name of a session
+registered with Connect-SfosFirewall -Name. Overrides the stored default
+connection context; any of -Firewall/-Port/-Username/-Password/
+-SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -7545,31 +7910,23 @@ function Get-SfosL2TPConnection {
 
 .NOTES
     Minimum supported PowerShell version: 5.1
-    NOT confirmed to succeed end-to-end live - implemented documentation-faithful. What WAS
-    measured, field by field, against this lab:
-      - -Name rejects a hyphen (501, field-specific) - a hyphenated test name
-        convention does not fit this field; the test object used during this session was
-        named with an underscore instead.
-      - -RemoteLANNetwork rejects a name with no matching IPHost object (501, field-specific)
-        and accepts the name of a real HostType-Network IPHost, cleared once one was created
-        for the test and removed again afterward.
-      - -AliasLocalWANPort rejected the lab's LAN-zone interface ('Port1', the interface this
-        task approved for testing) and the system pseudo-host '#Port1' with a field-specific
-        501 in every combination tried, with or without -LocalWANPort also present. The lab's
-        only WAN-zone interface ('Port2', the production uplink - tabu for this task) passed
-        this field's own validation but then every request failed with an opaque, field-less
-        code 545 ('Operation failed...'), with -RemoteHost as both a specific address and
-        '*', with and without -LocalWANPort. A full create could therefore not be completed
-        within this task's safety scope - the only interface accepted by this field is one
-        this task must not use. This mirrors the project's existing pattern for
-        hardware/environment-limited entities (see the project build rules's SophosFirewall.Network list).
+    NOT confirmed to succeed end-to-end live - implemented documentation-faithful. Field-level
+    findings:
+      - -Name rejects a hyphen (501, field-specific).
+      - -RemoteLANNetwork requires the name of an existing HostType-Network IPHost; a name
+        with no matching object is rejected (501, field-specific).
+      - -AliasLocalWANPort rejects a LAN-zone interface and the system pseudo-host '#Port1'
+        with a field-specific 501 in every combination tried, with or without -LocalWANPort
+        also present. A WAN-zone interface passes this field's own validation, but the
+        request then fails with an opaque, field-less code 545 ('Operation failed...'),
+        whether -RemoteHost is a specific address or '*', with and without -LocalWANPort. A
+        full create could therefore not be completed.
       - Because no object was ever successfully created, whether Get-SfosL2TPConnection
         returns -PresharedKey (or -LocalCertificate) was never observed - see
         Set-SfosL2TPConnection's .NOTES for how that uncertainty is handled there.
       - -DisconnectOnIdleInterval: the documented default (0) is itself outside the documented
-        valid range (120-999) and was confirmed live to be rejected as invalid when sent
-        explicitly; omitting the element entirely was accepted (cleared that field from
-        <InvalidParams>). This is a doc self-contradiction, not a mistake in this cmdlet.
+        valid range (120-999) and is rejected when sent explicitly; omitting the element
+        entirely is accepted. This is a doc self-contradiction, not a defect in this cmdlet.
 
 .LINK
     https://docs.sophos.com/nsg/sophos-firewall/22.0/API/CONFIGURE/VPN/L2TPConnection/operations/AddL2TPConnection%26EditL2TPConnection.html
@@ -7640,7 +7997,9 @@ function New-SfosL2TPConnection {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     $params = Resolve-SfosParameters -BoundParameters $PSBoundParameters
@@ -7727,10 +8086,10 @@ function New-SfosL2TPConnection {
     }
 
     $XmlResponse = [xml]$response.Content
-    # Measured 2026-08-12 (acceptance run): the write status for L2TPConnection lands FLAT
-    # at /Response/Configuration/Status for create and update - NOT nested under
-    # L2TPConnection like Get and Remove report. The nested path here made a 500/501 answer
-    # invisible and the cmdlet fail-open (reported success, created nothing).
+    # The write status for L2TPConnection lands FLAT at /Response/Configuration/Status for
+    # create and update - NOT nested under L2TPConnection like Get and Remove report. The
+    # nested path here made a 500/501 answer invisible and the cmdlet fail-open (reported
+    # success, created nothing).
     Assert-SfosApiReturnSuccess -Xml $XmlResponse -ObjectName 'Configuration' -Action 'create' -Target $Name
 }
 
@@ -7810,6 +8169,13 @@ function New-SfosL2TPConnection {
     Idle disconnect timer in seconds, 120-999. If omitted, the existing value is kept when
     present; otherwise the element is left out - see New-SfosL2TPConnection's .NOTES on why 0
     is never sent.
+
+.PARAMETER Session
+A session object returned by Connect-SfosFirewall, or the name of a session
+registered with Connect-SfosFirewall -Name. Overrides the stored default
+connection context; any of -Firewall/-Port/-Username/-Password/
+-SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
 
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
@@ -7898,7 +8264,9 @@ function Set-SfosL2TPConnection {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     begin {
@@ -8021,7 +8389,7 @@ function Set-SfosL2TPConnection {
         }
 
         $XmlResponse = [xml]$response.Content
-        # Same measured flat path as create - see the comment there (2026-08-12).
+        # Same measured flat path as create - see the comment there.
         Assert-SfosApiReturnSuccess -Xml $XmlResponse -ObjectName 'Configuration' -Action 'update' -Target $Name
     }
 }
@@ -8040,6 +8408,13 @@ function Set-SfosL2TPConnection {
 
 .PARAMETER Name
     Name of the connection to remove. Mandatory; accepts pipeline input by property name.
+
+.PARAMETER Session
+A session object returned by Connect-SfosFirewall, or the name of a session
+registered with Connect-SfosFirewall -Name. Overrides the stored default
+connection context; any of -Firewall/-Port/-Username/-Password/
+-SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
 
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
@@ -8093,7 +8468,9 @@ function Remove-SfosL2TPConnection {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     begin {
@@ -8158,6 +8535,13 @@ function Remove-SfosL2TPConnection {
     is a singleton - there is exactly one on the firewall, with no name to filter by. Use
     -AsXml to return the raw XML node.
 
+.PARAMETER Session
+A session object returned by Connect-SfosFirewall, or the name of a session
+registered with Connect-SfosFirewall -Name. Overrides the stored default
+connection context; any of -Firewall/-Port/-Username/-Password/
+-SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -8203,6 +8587,7 @@ function Get-SfosPPTPConfiguration {
         [string]$Username,
         [SecureString]$Password,
         [switch]$SkipCertificateCheck,
+        [object]$Session,
 
         [switch]$AsXml
     )
@@ -8290,6 +8675,13 @@ function Get-SfosPPTPConfiguration {
     Secondary WINS server handed to PPTP clients [doc]. Optional; if omitted, the existing
     value is kept.
 
+.PARAMETER Session
+A session object returned by Connect-SfosFirewall, or the name of a session
+registered with Connect-SfosFirewall -Name. Overrides the stored default
+connection context; any of -Firewall/-Port/-Username/-Password/
+-SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -8313,8 +8705,8 @@ function Get-SfosPPTPConfiguration {
 
 .NOTES
     Minimum supported PowerShell version: 5.1
-    NOT write-tested end-to-end live in this session, for the same reason and with the same
-    measured evidence as Set-SfosL2TPConfiguration - see that cmdlet's .NOTES. The equivalent
+    Not write-tested against a live full toggle-and-revert, for the same reason and with the
+    same measured evidence as Set-SfosL2TPConfiguration - see that cmdlet's .NOTES. The equivalent
     validation response for this entity named
     /PPTPConfiguration/PPTPSettings/AssignIPFrom/StartIP,
     /PPTPConfiguration/PPTPSettings/AssignIPFrom/EndIP and
@@ -8323,7 +8715,7 @@ function Get-SfosPPTPConfiguration {
     both the -ObjectName 'PPTPSettings' status path and the same unconditional-mandatory
     behaviour. The Members sub-object has no such constraint and WAS tested end-to-end with a
     full revert - see Add-/Remove-SfosPPTPConfigurationMember.
-    ConfirmImpact High since 2026-08-12: the original empty state is unrecoverable through the
+    ConfirmImpact is High: the original empty state is unrecoverable through the
     API once any value has been written (measured); automation must pass -Confirm:$false.
 
 .LINK
@@ -8353,7 +8745,9 @@ function Set-SfosPPTPConfiguration {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     $params = Resolve-SfosParameters -BoundParameters $PSBoundParameters
@@ -8440,6 +8834,13 @@ function Set-SfosPPTPConfiguration {
     input by property name. See Add-SfosL2TPConfigurationMember's .PARAMETER MemberName for
     why this is not named -UserName.
 
+.PARAMETER Session
+A session object returned by Connect-SfosFirewall, or the name of a session
+registered with Connect-SfosFirewall -Name. Overrides the stored default
+connection context; any of -Firewall/-Port/-Username/-Password/
+-SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -8486,7 +8887,9 @@ function Add-SfosPPTPConfigurationMember {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     begin {
@@ -8539,6 +8942,13 @@ function Add-SfosPPTPConfigurationMember {
     pipeline input by property name. See Add-SfosL2TPConfigurationMember's .PARAMETER
     MemberName for why this is not named -UserName.
 
+.PARAMETER Session
+A session object returned by Connect-SfosFirewall, or the name of a session
+registered with Connect-SfosFirewall -Name. Overrides the stored default
+connection context; any of -Firewall/-Port/-Username/-Password/
+-SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
 
@@ -8584,7 +8994,9 @@ function Remove-SfosPPTPConfigurationMember {
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
-        [switch]$SkipCertificateCheck
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
     )
 
     begin {

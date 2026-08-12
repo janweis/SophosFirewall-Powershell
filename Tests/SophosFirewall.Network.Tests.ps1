@@ -10,8 +10,8 @@
     Invoke-SfosApi is always mocked; no test touches a real firewall.
 
     With 100 exported functions, exhaustive per-cmdlet coverage is neither achievable nor
-    useful. Coverage here is weighted towards the failure modes the project build rules and the module's own
-    .NOTES call out as measured, expensive defects: the eight wire element names that differ
+    useful. Coverage here is weighted towards the failure modes the module's own .NOTES call
+    out as measured, expensive defects: the eight wire element names that differ
     from their documentation folder (a wrong root element answers 529 and fails silently for
     every caller who does not inspect the raw response), the read-modify-write cmdlets whose
     omitted fields are silently cleared by the firewall (Interface, Zone, GatewayConfiguration,
@@ -56,8 +56,7 @@ Describe 'Module Loading' {
         # These build entity XML internally (ConvertTo-Sfos*Xml) or resolve one Gateway field's
         # merge precedence (Resolve-SfosGatewayFieldValue). If FunctionsToExport ever grew to
         # include one of these by accident, a caller could bypass the read-modify-write logic
-        # in the matching Set-* and send an incomplete entity that silently drops fields
-        # (the project build rules, section 5).
+        # in the matching Set-* and send an incomplete entity that silently drops fields.
         It 'None of the 17 private helpers should be visible' {
             $privateHelpers = @(
                 'ConvertTo-SfosInterfaceXml',
@@ -86,8 +85,8 @@ Describe 'Module Loading' {
 }
 
 Describe 'Wire Element Names (doc folder differs from API element)' {
-    # the project build rules, section 3 / module header: eight documentation folders carry a different name
-    # than the XML element they describe. A wrong root element answers 529 "Input request
+    # Eight documentation folders carry a different name than the XML element they describe.
+    # A wrong root element answers 529 "Input request
     # module is Invalid" - or, for GreTunnel/GreRoute, silently hits a same-named-but-wrong-case
     # element instead, since the two only differ in capitalisation from their doc folders
     # (GRETunnel/GreTunnel, GRERoute/GreRoute).
@@ -246,8 +245,8 @@ Describe 'Read-Modify-Write' {
 
     Context 'Set-SfosInterface' {
         BeforeEach {
-            # Set-SfosInterface reads the current interface first (the project build rules, section 5). The
-            # mocked Get answers with a fully populated interface so a partial -MTU-only update
+            # Set-SfosInterface reads the current interface first. The mocked Get answers with
+            # a fully populated interface so a partial -MTU-only update
             # can be checked against it: IPAddress/Netmask/NetworkZone/IPv4Assignment are the
             # fields whose loss would be most expensive (dropping the session's own IP or zone).
             Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Network -MockWith {
@@ -288,8 +287,8 @@ Describe 'Read-Modify-Write' {
         }
 
         It 'Should resend IPAddress, Netmask, NetworkZone and IPv4Assignment unchanged on an MTU-only update' {
-            # Omitting any of these on a live update would silently clear the field
-            # (the project build rules, section 5) - on a physical port this can drop the session's own IP.
+            # Omitting any of these on a live update would silently clear the field - on a
+            # physical port this can drop the session's own IP.
             Set-SfosInterface -Hardware 'Port9' -MTU 9000 @conn -Confirm:$false
 
             Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Network -Times 1 -Exactly -ParameterFilter {
@@ -931,9 +930,8 @@ Describe 'LAG builder, Get/New/Set/Remove' {
     }
 
     Context 'Get-SfosLAG parsing with a single member interface' {
-        # Regression guard for the one-element-array unroll defect class (found and fixed today
-        # in SophosFirewall.Routing's MulticastRoute cmdlets): a LAG with exactly one member must
-        # still come back as a one-element array, not an unrolled bare string.
+        # A LAG with exactly one member must still come back as a one-element array, not an
+        # unrolled bare string.
         BeforeEach {
             Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Network -MockWith {
                 [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><LAG><Name>Bond9</Name><Hardware>LAG9</Hardware><MemberInterface><Interface>Port4</Interface></MemberInterface><Mode>ActiveBackup</Mode><NetworkZone>LAN</NetworkZone></LAG></Response>' }
@@ -1035,7 +1033,7 @@ Describe 'BridgePair builder, Get/New/Set/Remove' {
     }
 
     Context 'Get-SfosBridgePair parsing with a single member/VLAN/EtherType' {
-        # Same one-element-array regression guard as Get-SfosLAG above.
+        # A single member/VLAN/EtherType must still come back as a one-element array.
         BeforeEach {
             Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Network -MockWith {
                 [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><BridgePair><Name>Br9</Name><Hardware>Bridge9</Hardware><BridgeMembers><Member><Interface>Port4</Interface><Zone>LAN</Zone></Member></BridgeMembers><PermittedVlansList><PermittedVLAN>100</PermittedVLAN></PermittedVlansList><EtherTypeList><EtherType>0x0800</EtherType></EtherTypeList></BridgePair></Response>' }
@@ -1239,8 +1237,8 @@ Describe 'CellularWAN Get/Set' {
     }
 
     Context 'Set-SfosCellularWAN read-modify-write' {
-        # Never exercised against a real firewall (module NOTES: -Action Enable would activate the
-        # cellular modem). Mocked only, as CLAUDE.md's own "measured vs. mocked" caveat requires.
+        # Never exercised against a real firewall: -Action Enable would activate the cellular
+        # modem. Mocked only.
         BeforeEach {
             Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Network -MockWith {
                 if ($InnerXml -match '<Get>') {
@@ -1866,8 +1864,7 @@ Describe 'GatewayConfiguration Get with a single-entry Gateway/FailOverRule list
     }
 
     Context 'Get-SfosGatewayConfiguration parsing' {
-        # One Gateway with one FailOverRule - regression guard for the one-element-array unroll
-        # defect class (see the LAG/BridgePair Get tests above).
+        # One Gateway with one FailOverRule must still come back as a one-element array.
         BeforeEach {
             Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Network -MockWith {
                 [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><GatewayConfiguration><GatewayFailoverTimeout>60</GatewayFailoverTimeout><Gateway><Name>WAN-GW9</Name><IPFamily>IPv4</IPFamily><IPAddress>10.0.9.1</IPAddress><Type>Active</Type><Weight>8</Weight><FailOverRules><Rule><Protocol>PING</Protocol><IPAddress>198.51.100.9</IPAddress><Port>*</Port><Condition>AND</Condition></Rule></FailOverRules></Gateway></GatewayConfiguration></Response>' }
@@ -2327,7 +2324,7 @@ Describe 'DNSRequestRoute Get/New/Set/Remove/Members' {
     }
 
     Context 'Get-SfosDNSRequestRoute parsing with a single TargetServers entry' {
-        # Same one-element-array regression guard as Get-SfosLAG/Get-SfosBridgePair above.
+        # A single TargetServers entry must still come back as a one-element array.
         BeforeEach {
             Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Network -MockWith {
                 [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><DNSRequestRoute><DomainName>corp.example.invalid</DomainName><TargetServers><Host>DnsForwarder</Host></TargetServers></DNSRequestRoute></Response>' }
@@ -2550,7 +2547,7 @@ Describe 'DynamicDNS Get/New/Set/Remove (XML level only - never sent to a real D
 # Section: DHCPServer / DHCPServerStatus / DHCPServerIpv6 / DHCPRelay
 # All four RISK: red - none was ever exercised against a real firewall (a productive scope on
 # a live segment). The mocked XML-generation tests below are the only verification layer that
-# exists for these cmdlets, per the project build rules, section 10.
+# exists for these cmdlets.
 # ---------------------------------------------------------------------------
 
 Describe 'DHCPServer Get/New/Set/Remove (XML level only)' {
@@ -2836,5 +2833,53 @@ Describe 'DHCPRelay Get/New/Set/Remove (XML level only)' {
                 $InnerXml -match '<Remove>' -and $InnerXml -match '<Name>Relay9</Name>'
             }
         }
+    }
+}
+
+Describe 'Session parameter (multi-session support)' {
+
+    BeforeAll {
+        $cred1 = [pscredential]::new('apiuser', (ConvertTo-SecureString 'pw1' -AsPlainText -Force))
+        $cred2 = [pscredential]::new('apiuser', (ConvertTo-SecureString 'pw2' -AsPlainText -Force))
+        Connect-SfosFirewall -Firewall 'fw1.example.test' -Credential $cred1 -Name 'fw1' | Out-Null
+        Connect-SfosFirewall -Firewall 'fw2.example.test' -Credential $cred2 -Name 'fw2' -NoDefault | Out-Null
+    }
+
+    AfterAll { Disconnect-SfosFirewall -All }
+
+    BeforeEach {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Network -MockWith {
+            [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><VLAN><Status>No. of records Zero.</Status></VLAN></Response>' }
+        }
+    }
+
+    It 'Resolves the named session instead of the ambient default (direct path)' {
+        Get-SfosVLAN -Session 'fw2' | Out-Null
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Network -ParameterFilter {
+            $Firewall -eq 'fw2.example.test'
+        }
+    }
+
+    It 'Uses the ambient default when -Session is omitted' {
+        Get-SfosVLAN | Out-Null
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Network -ParameterFilter {
+            $Firewall -eq 'fw1.example.test'
+        }
+    }
+
+    It 'Resolves a session object on the begin-block pipeline path (New-SfosDNSHostEntry)' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Network -MockWith {
+            [PSCustomObject]@{ Content = '<Response><DNSHostEntry><Status code="200">OK</Status></DNSHostEntry></Response>' }
+        }
+        $addr = New-SfosDNSHostEntryAddress -IPAddress '203.0.113.10'
+        New-SfosDNSHostEntry -HostName 'crossfw.example.invalid' -Address $addr -Session 'fw2' -Confirm:$false
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Network -ParameterFilter {
+            $Firewall -eq 'fw2.example.test' -and $InnerXml -match '<HostName>crossfw\.example\.invalid</HostName>'
+        }
+    }
+
+    It 'Throws on an unknown session name without calling the API' {
+        { Get-SfosVLAN -Session 'nichtda' } | Should -Throw '*No session named*'
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Network -Times 0 -Exactly
     }
 }

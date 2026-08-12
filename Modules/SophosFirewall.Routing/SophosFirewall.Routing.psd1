@@ -1,6 +1,6 @@
 @{
     RootModule           = 'SophosFirewall.Routing.psm1'
-    ModuleVersion        = '1.0.1'
+    ModuleVersion        = '1.1.0'
     GUID                 = '6baa7e3d-24b6-46b1-b49c-9f0f71e04bc4'
     Author               = 'Jan Weis'
     Description          = 'PowerShell module for managing routing on Sophos XGS / SFOS 22.0 firewalls via API: gateways, health checks, SD-WAN profiles and routes, unicast and multicast routing.'
@@ -10,7 +10,7 @@
     RequiredModules      = @(
         @{
             ModuleName    = 'SophosFirewall.Core'
-            ModuleVersion = '1.0.0'
+            ModuleVersion = '1.3.0'
         }
     )
 
@@ -57,7 +57,7 @@
             Tags         = @('Sophos', 'Firewall', 'API', 'XGS', 'SFOS', 'Routing', 'SDWAN', 'Gateway', 'Multicast')
             LicenseUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/blob/main/Modules/SophosFirewall.Routing/LICENSE.txt'
             ProjectUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/tree/main/Modules/SophosFirewall.Routing'
-            ReleaseNotes = '1.0.1: Set-SfosMulticastRoute no longer truncates a single preserved destination interface; GatewayHost on-link requirement documented; if/else array-unwrap hardening.'
+            ReleaseNotes = '1.1.0: Adds the -Session parameter to all 31 cmdlets for multi-session use (requires SophosFirewall.Core 1.3.0).'
         }
     }
 }

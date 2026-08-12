@@ -61,6 +61,20 @@ Import-Module -Name "C:\Path\To\SophosFirewall.VPN.psd1"
 Connect-SfosFirewall -Firewall "fw.example.invalid" -Port 4444 -Credential (Get-Credential) -SkipCertificateCheck
 ```
 
+### Multi-Session: Clean Up a Stale Profile on a Second Firewall
+
+```powershell
+Connect-SfosFirewall -Firewall "fw1.example.test" -Credential (Get-Credential) -Name fw1
+Connect-SfosFirewall -Firewall "fw2.example.test" -Credential (Get-Credential) -Name fw2 -NoDefault
+
+# Read the name of a decommissioned profile from fw1's inventory and remove the same-named
+# leftover on fw2, without touching the ambient default session. New-SfosVPNProfile is a
+# builder with 11 mandatory Phase1/Phase2 fields that do not bind from the pipeline, so
+# Remove is the cmdlet that actually demonstrates the cross-firewall pipe here.
+Get-SfosVPNProfile -Session fw1 -NameLike "Branch-IKEv2" |
+    Remove-SfosVPNProfile -Session fw2 -Confirm:$false
+```
+
 ### IPsec, VPN Profiles, Failover Groups and Sophos Connect Client
 
 ```powershell

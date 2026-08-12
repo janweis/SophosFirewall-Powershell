@@ -52,6 +52,20 @@ Import-Module -Name "C:\Path\To\SophosFirewall.Firewall.psd1"
 Connect-SfosFirewall -Firewall "192.168.1.1" -Port 4444 -Credential (Get-Credential) -SkipCertificateCheck
 ```
 
+### Multi-Session Use
+
+Every cmdlet accepts `-Session`, a session object or a registered name, to target a
+specific firewall without switching the stored default connection:
+
+```powershell
+Connect-SfosFirewall -Firewall "fw1.example.test" -Credential (Get-Credential) -Name fw1
+Connect-SfosFirewall -Firewall "fw2.example.test" -Credential (Get-Credential) -Name fw2 -NoDefault
+
+# Read a NAT rule's current fields from fw1, then apply the same fields on fw2
+Get-SfosNATRule -Session fw1 -NameLike "SNAT-LAN-to-WAN" |
+    Set-SfosNATRule -Session fw2 -Confirm:$false
+```
+
 ### Firewall Rule Management
 
 ```powershell

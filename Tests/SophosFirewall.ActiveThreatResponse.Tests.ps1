@@ -741,3 +741,53 @@ Describe 'ShouldProcess - -WhatIf prevents every write cmdlet from sending a wri
         Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.ActiveThreatResponse -Times 0 -Exactly -ParameterFilter { $InnerXml -match '<Set operation=' -or $InnerXml -match '<Remove>' }
     }
 }
+
+Describe 'Session parameter (multi-session support)' {
+
+    BeforeAll {
+        $cred1 = [pscredential]::new('apiuser', (ConvertTo-SecureString 'pw1' -AsPlainText -Force))
+        $cred2 = [pscredential]::new('apiuser', (ConvertTo-SecureString 'pw2' -AsPlainText -Force))
+        Connect-SfosFirewall -Firewall 'fw1.example.test' -Credential $cred1 -Name 'fw1' | Out-Null
+        Connect-SfosFirewall -Firewall 'fw2.example.test' -Credential $cred2 -Name 'fw2' -NoDefault | Out-Null
+    }
+
+    AfterAll { Disconnect-SfosFirewall -All }
+
+    BeforeEach {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.ActiveThreatResponse -MockWith {
+            [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><ThirdPartyFeed transactionid=""><Status>No. of records Zero.</Status></ThirdPartyFeed></Response>' }
+        }
+    }
+
+    It 'Resolves the named session instead of the ambient default (direct path)' {
+        Get-SfosThirdPartyFeed -Session 'fw2' | Out-Null
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.ActiveThreatResponse -ParameterFilter {
+            $Firewall -eq 'fw2.example.test'
+        }
+    }
+
+    It 'Uses the ambient default when -Session is omitted' {
+        Get-SfosThirdPartyFeed | Out-Null
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.ActiveThreatResponse -ParameterFilter {
+            $Firewall -eq 'fw1.example.test'
+        }
+    }
+
+    It 'Resolves a session object on the begin-block pipeline path (Set-SfosATPSettings)' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.ActiveThreatResponse -MockWith {
+            if ($InnerXml -match '<Get>') {
+                return [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><ATP transactionid=""><ThreatProtectionStatus>Enable</ThreatProtectionStatus><InspectContent>untrusted</InspectContent><Policy>Log and Drop</Policy></ATP></Response>' }
+            }
+            [PSCustomObject]@{ Content = '<Response><ATP><Status code="200">Configuration applied successfully.</Status></ATP></Response>' }
+        }
+        Set-SfosATPSettings -InspectContent all -Session 'fw2' -Confirm:$false
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.ActiveThreatResponse -ParameterFilter {
+            $Firewall -eq 'fw2.example.test' -and $InnerXml -match '<InspectContent>all</InspectContent>'
+        }
+    }
+
+    It 'Throws on an unknown session name without calling the API' {
+        { Get-SfosThirdPartyFeed -Session 'nichtda' } | Should -Throw '*No session named*'
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.ActiveThreatResponse -Times 0 -Exactly
+    }
+}

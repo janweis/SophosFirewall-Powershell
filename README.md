@@ -18,6 +18,31 @@ Get-SfosIPHost
 New-SfosIPHost -Name "Server1" -HostType IP -IPAddress "10.0.0.5"
 ```
 
+### Multiple firewalls at once
+
+Every cmdlet accepts `-Session` — a session object returned by `Connect-SfosFirewall`
+or the name of a session registered with `-Name`. That makes piping between two
+firewalls a one-liner:
+
+```powershell
+$fw1 = Connect-SfosFirewall -Firewall "fw1.example.test" -Credential $cred1 -Name fw1
+$fw2 = Connect-SfosFirewall -Firewall "fw2.example.test" -Credential $cred2 -Name fw2 -NoDefault
+
+# Copy a host object from fw1 to fw2. New-SfosIPHost takes no pipeline input
+# (its parameter sets need an explicit -HostType), so map the fields explicitly;
+# cmdlets whose New-* does bind from the pipeline (for example
+# New-SfosApplicationFilterPolicy) work as a direct Get | New pipe.
+Get-SfosIPHost -Session $fw1 -NameLike "Server1" | ForEach-Object {
+    New-SfosIPHost -Name $_.Name -HostType $_.HostType -IPAddress $_.IPAddress -Session fw2
+}
+
+Get-SfosSession                  # list registered sessions (IsDefault marks the ambient one)
+Disconnect-SfosFirewall -All     # drop everything
+```
+
+Cmdlets called without `-Session` keep using the ambient default session, exactly as
+before — existing scripts are unaffected.
+
 ## Available Modules
 
 ### Shipped

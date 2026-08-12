@@ -56,6 +56,17 @@ Import-Module -Name "C:\Path\To\SophosFirewall.Authentication.psd1"
 Connect-SfosFirewall -Firewall "192.168.1.1" -Port 4444 -Credential (Get-Credential) -SkipCertificateCheck
 ```
 
+### Multi-Session Usage
+
+```powershell
+# Register two connections without disturbing the default session
+Connect-SfosFirewall -Firewall "fw1.example.test" -Credential (Get-Credential) -Name "fw1"
+Connect-SfosFirewall -Firewall "fw2.example.test" -Credential (Get-Credential) -Name "fw2" -NoDefault
+
+# Read a group's policy assignment from fw1 and apply it to the same-named group on fw2
+Get-SfosUserGroup -Session "fw1" -NameLike "Sales" | Set-SfosUserGroup -Session "fw2" -QoSPolicy "High"
+```
+
 ### Authentication Server Management
 
 ```powershell

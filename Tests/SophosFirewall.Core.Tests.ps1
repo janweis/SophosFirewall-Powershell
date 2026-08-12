@@ -46,6 +46,7 @@ Describe 'SophosFirewall.Core Module' {
             $requiredFunctions = @(
                 'Connect-SfosFirewall',
                 'Disconnect-SfosFirewall',
+                'Get-SfosSession',
                 'Invoke-SfosApi',
                 'Get-SfosApiStatus',
                 'Assert-SfosApiReturnSuccess',
@@ -447,8 +448,8 @@ Describe 'Resolve-SfosParameters - Explicit Values Win' {
 
 Describe 'Assert-SfosApiReturnSuccess - Full status code table' {
 
-    # CLAUDE.md SS5 status table: 200/216 success, 201/203/211-215 warn, 204-210 fail,
-    # 217/222 warn (measured, undocumented), the rest of 217-499 throws, 500-599 throws.
+    # Status table: 200/216 success, 201/203/211-215 warn, 204-210 fail, 217/222 warn
+    # (measured, undocumented), the rest of 217-499 throws, 500-599 throws.
     # No 202 anywhere (covered separately above).
 
     Context 'Warn-but-succeed codes (201, 203, 211-215)' {
@@ -624,6 +625,302 @@ Describe 'Assert-SfosApiReturnSuccess - Fail-open guard for a status at an unexp
         $xml = [xml]'<Response><Login><status>Authentication Successful</status></Login><IPHost><Status code="200">OK</Status></IPHost></Response>'
         Assert-SfosApiReturnSuccess -Xml $xml -ObjectName 'IPHost' -Action 'create' -WarningVariable warnings -WarningAction SilentlyContinue
         $warnings.Count | Should -Be 0
+    }
+}
+
+Describe 'Multi-Session Support' {
+
+    AfterEach {
+        # Every block below registers named sessions on top of whatever Connect-SfosFirewall
+        # left behind - clear both the registry and the default session so tests cannot leak
+        # into each other.
+        Disconnect-SfosFirewall -All
+    }
+
+    Context 'Get-SfosSession - Registry CRUD' {
+        It 'Should return nothing when no session is registered' {
+            @(Get-SfosSession).Count | Should -Be 0
+        }
+
+        It 'Should list a session registered via Connect-SfosFirewall -Name' {
+            $cred = New-Object System.Management.Automation.PSCredential('u1', (ConvertTo-SecureString 'p1' -AsPlainText -Force))
+            Connect-SfosFirewall -Firewall 'fw1.example.test' -Port 4444 -Credential $cred -Name 'fw1' | Out-Null
+
+            $sessions = @(Get-SfosSession)
+            $sessions.Count | Should -Be 1
+            $sessions[0].Name | Should -Be 'fw1'
+            $sessions[0].Firewall | Should -Be 'fw1.example.test'
+            $sessions[0].Port | Should -Be 4444
+            $sessions[0].Username | Should -Be 'u1'
+        }
+
+        It 'Should not expose a Password property in the session view' {
+            $cred = New-Object System.Management.Automation.PSCredential('u1', (ConvertTo-SecureString 'p1' -AsPlainText -Force))
+            Connect-SfosFirewall -Firewall 'fw1.example.test' -Credential $cred -Name 'fw1' | Out-Null
+
+            (Get-SfosSession -Name 'fw1').PSObject.Properties.Name | Should -Not -Contain 'Password'
+        }
+
+        It 'Should list several registered sessions' {
+            $cred = New-Object System.Management.Automation.PSCredential('u1', (ConvertTo-SecureString 'p1' -AsPlainText -Force))
+            Connect-SfosFirewall -Firewall 'fw1.example.test' -Credential $cred -Name 'fw1' | Out-Null
+            Connect-SfosFirewall -Firewall 'fw2.example.test' -Credential $cred -Name 'fw2' -NoDefault | Out-Null
+
+            (Get-SfosSession).Name | Sort-Object | Should -Be @('fw1', 'fw2')
+        }
+
+        It 'Should throw for an unknown session name' {
+            { Get-SfosSession -Name 'does-not-exist' } | Should -Throw '*does-not-exist*'
+        }
+
+        It 'Should look up a registered name case-insensitively' {
+            $cred = New-Object System.Management.Automation.PSCredential('u1', (ConvertTo-SecureString 'p1' -AsPlainText -Force))
+            Connect-SfosFirewall -Firewall 'fw1.example.test' -Credential $cred -Name 'FW1' | Out-Null
+
+            { Get-SfosSession -Name 'fw1' } | Should -Not -Throw
+            (Get-SfosSession -Name 'fw1').Firewall | Should -Be 'fw1.example.test'
+        }
+    }
+
+    Context 'Connect-SfosFirewall -NoDefault' {
+        It 'Should not replace the default session when -Name and -NoDefault are both given' {
+            $cred = New-Object System.Management.Automation.PSCredential('u1', (ConvertTo-SecureString 'p1' -AsPlainText -Force))
+            Connect-SfosFirewall -Firewall 'fw1.example.test' -Credential $cred -Name 'fw1' | Out-Null
+            Connect-SfosFirewall -Firewall 'fw2.example.test' -Credential $cred -Name 'fw2' -NoDefault | Out-Null
+
+            (Get-SfosSession -Name 'fw1').IsDefault | Should -BeTrue
+            (Get-SfosSession -Name 'fw2').IsDefault | Should -BeFalse
+
+            # The bare (no -Session) resolution path still has to see fw1 - the default
+            # session is unaffected by registering fw2 on top of it.
+            $resolved = Resolve-SfosParameters -BoundParameters @{}
+            $resolved.Firewall | Should -Be 'fw1.example.test'
+        }
+
+        It 'Should still become the default session when -NoDefault is given without -Name' {
+            # -NoDefault alone (no -Name) would strand the connection with no way to reach it
+            # again, so it is documented and tested as a no-op in that case.
+            $cred = New-Object System.Management.Automation.PSCredential('u1', (ConvertTo-SecureString 'p1' -AsPlainText -Force))
+            Connect-SfosFirewall -Firewall 'fw1.example.test' -Credential $cred -NoDefault | Out-Null
+
+            $resolved = Resolve-SfosParameters -BoundParameters @{}
+            $resolved.Firewall | Should -Be 'fw1.example.test'
+        }
+    }
+
+    Context 'Resolve-SfosParameters - Session base selection' {
+        It 'Should resolve a session by registered name' {
+            $cred1 = New-Object System.Management.Automation.PSCredential('u1', (ConvertTo-SecureString 'p1' -AsPlainText -Force))
+            $cred2 = New-Object System.Management.Automation.PSCredential('u2', (ConvertTo-SecureString 'p2' -AsPlainText -Force))
+            Connect-SfosFirewall -Firewall 'fw1.example.test' -Credential $cred1 -Name 'fw1' | Out-Null
+            Connect-SfosFirewall -Firewall 'fw2.example.test' -Port 8443 -Credential $cred2 -Name 'fw2' -NoDefault | Out-Null
+
+            $resolved = Resolve-SfosParameters -BoundParameters @{ Session = 'fw2' }
+            $resolved.Firewall | Should -Be 'fw2.example.test'
+            $resolved.Port | Should -Be 8443
+            $resolved.Username | Should -Be 'u2'
+        }
+
+        It 'Should resolve a session passed as the object returned by Connect-SfosFirewall identically to passing its name' {
+            $cred = New-Object System.Management.Automation.PSCredential('u2', (ConvertTo-SecureString 'p2' -AsPlainText -Force))
+            $fw2 = Connect-SfosFirewall -Firewall 'fw2.example.test' -Credential $cred -Name 'fw2' -NoDefault
+
+            $byName = Resolve-SfosParameters -BoundParameters @{ Session = 'fw2' }
+            $byObject = Resolve-SfosParameters -BoundParameters @{ Session = $fw2 }
+
+            $byObject.Firewall | Should -Be $byName.Firewall
+            $byObject.Port | Should -Be $byName.Port
+            $byObject.Username | Should -Be $byName.Username
+        }
+
+        It 'Should let an explicit connection parameter still win over the chosen -Session base' {
+            $cred = New-Object System.Management.Automation.PSCredential('u2', (ConvertTo-SecureString 'p2' -AsPlainText -Force))
+            Connect-SfosFirewall -Firewall 'fw2.example.test' -Port 4444 -Credential $cred -Name 'fw2' -NoDefault | Out-Null
+
+            $resolved = Resolve-SfosParameters -BoundParameters @{ Session = 'fw2'; Port = 9999 }
+            $resolved.Firewall | Should -Be 'fw2.example.test'
+            $resolved.Port | Should -Be 9999
+        }
+
+        It 'Should throw for an unregistered session name' {
+            { Resolve-SfosParameters -BoundParameters @{ Session = 'no-such-session' } } | Should -Throw '*no-such-session*'
+        }
+
+        It 'Should throw for an explicit -Session $null even while a default session is active' {
+            $cred = New-Object System.Management.Automation.PSCredential('u1', (ConvertTo-SecureString 'p1' -AsPlainText -Force))
+            Connect-SfosFirewall -Firewall 'fw1.example.test' -Credential $cred | Out-Null
+
+            # ContainsKey is true here even though the value is $null - this is the case the
+            # ContainsKey philosophy exists for: an explicit -Session $null disables the
+            # default-session fallback rather than being read as "not supplied".
+            { Resolve-SfosParameters -BoundParameters @{ Session = $null } } | Should -Throw '*No active Sophos Firewall connection*'
+        }
+
+        It 'Should throw for a duck-typing object with no Firewall property' {
+            { Resolve-SfosParameters -BoundParameters @{ Session = [PSCustomObject]@{ NotFirewall = 'x' } } } | Should -Throw
+        }
+
+        It 'Should accept a duck-typed object that has a Firewall property' {
+            $duckSession = [PSCustomObject]@{
+                Firewall             = 'duck.example.test'
+                Port                 = 4444
+                Username             = 'duckuser'
+                Password             = (ConvertTo-SecureString 'duckpw' -AsPlainText -Force)
+                SkipCertificateCheck = $false
+            }
+
+            $resolved = Resolve-SfosParameters -BoundParameters @{ Session = $duckSession }
+            $resolved.Firewall | Should -Be 'duck.example.test'
+        }
+
+        It 'Should behave exactly as before when the calling cmdlet has no -Session parameter at all' {
+            # Connect (no -Name) -> Resolve (no Session key in BoundParameters) -> Disconnect,
+            # the call shape used by every cmdlet without a -Session parameter.
+            $cred = New-Object System.Management.Automation.PSCredential('bareuser', (ConvertTo-SecureString 'barepw' -AsPlainText -Force))
+            Connect-SfosFirewall -Firewall 'bare.example.test' -Port 4444 -Credential $cred -SkipCertificateCheck | Out-Null
+
+            $resolved = Resolve-SfosParameters -BoundParameters @{}
+            $resolved.Firewall | Should -Be 'bare.example.test'
+            $resolved.Port | Should -Be 4444
+            $resolved.Username | Should -Be 'bareuser'
+            $resolved.SkipCertificateCheck | Should -BeTrue
+
+            Disconnect-SfosFirewall
+            { Resolve-SfosParameters -BoundParameters @{} } | Should -Throw '*No active Sophos Firewall connection*'
+        }
+    }
+
+    Context 'Disconnect-SfosFirewall - Name, Session and All' {
+        It 'Should remove only the named session with -Name, leaving others intact' {
+            $cred = New-Object System.Management.Automation.PSCredential('u1', (ConvertTo-SecureString 'p1' -AsPlainText -Force))
+            Connect-SfosFirewall -Firewall 'fw1.example.test' -Credential $cred -Name 'fw1' | Out-Null
+            Connect-SfosFirewall -Firewall 'fw2.example.test' -Credential $cred -Name 'fw2' -NoDefault | Out-Null
+
+            Disconnect-SfosFirewall -Name 'fw2'
+
+            (Get-SfosSession).Name | Should -Be @('fw1')
+            { Resolve-SfosParameters -BoundParameters @{ Session = 'fw2' } } | Should -Throw '*fw2*'
+        }
+
+        It 'Should also clear the default session when the removed name is the current default' {
+            $cred = New-Object System.Management.Automation.PSCredential('u1', (ConvertTo-SecureString 'p1' -AsPlainText -Force))
+            Connect-SfosFirewall -Firewall 'fw1.example.test' -Credential $cred -Name 'fw1' | Out-Null
+
+            Disconnect-SfosFirewall -Name 'fw1'
+
+            { Resolve-SfosParameters -BoundParameters @{} } | Should -Throw '*No active Sophos Firewall connection*'
+        }
+
+        It 'Should throw when -Name does not match a registered session' {
+            { Disconnect-SfosFirewall -Name 'does-not-exist' } | Should -Throw '*does-not-exist*'
+        }
+
+        It 'Should accept a session object via -Session, including from the pipeline' {
+            $cred = New-Object System.Management.Automation.PSCredential('u1', (ConvertTo-SecureString 'p1' -AsPlainText -Force))
+            $fw1 = Connect-SfosFirewall -Firewall 'fw1.example.test' -Credential $cred -Name 'fw1'
+
+            $fw1 | Disconnect-SfosFirewall
+
+            @(Get-SfosSession).Count | Should -Be 0
+        }
+
+        It 'Should actually remove the registered session when piped the Get-SfosSession view, not silently do nothing' {
+            # Get-SfosSession's view is a different object (no Password, no PSTypeName tag)
+            # than what is stored in the registry, so a naive reference match would find
+            # nothing here and this would be a silent no-op.
+            $cred = New-Object System.Management.Automation.PSCredential('u1', (ConvertTo-SecureString 'p1' -AsPlainText -Force))
+            Connect-SfosFirewall -Firewall 'fw1.example.test' -Credential $cred -Name 'fw1' | Out-Null
+            Connect-SfosFirewall -Firewall 'fw2.example.test' -Credential $cred -Name 'fw2' -NoDefault | Out-Null
+
+            Get-SfosSession -Name 'fw2' | Disconnect-SfosFirewall
+
+            (Get-SfosSession).Name | Should -Be @('fw1')
+        }
+
+        It 'Should remove the matching session when a bare registered name is piped in' {
+            $cred = New-Object System.Management.Automation.PSCredential('u1', (ConvertTo-SecureString 'p1' -AsPlainText -Force))
+            Connect-SfosFirewall -Firewall 'fw1.example.test' -Credential $cred -Name 'fw1' | Out-Null
+
+            'fw1' | Disconnect-SfosFirewall
+
+            @(Get-SfosSession).Count | Should -Be 0
+        }
+
+        It 'Should remove every registered session and the default session with -All' {
+            $cred = New-Object System.Management.Automation.PSCredential('u1', (ConvertTo-SecureString 'p1' -AsPlainText -Force))
+            Connect-SfosFirewall -Firewall 'fw1.example.test' -Credential $cred -Name 'fw1' | Out-Null
+            Connect-SfosFirewall -Firewall 'fw2.example.test' -Credential $cred -Name 'fw2' -NoDefault | Out-Null
+
+            Disconnect-SfosFirewall -All
+
+            @(Get-SfosSession).Count | Should -Be 0
+            { Resolve-SfosParameters -BoundParameters @{} } | Should -Throw '*No active Sophos Firewall connection*'
+        }
+
+        It 'Should still clear the default session with no parameters, exactly as before' {
+            $cred = New-Object System.Management.Automation.PSCredential('u1', (ConvertTo-SecureString 'p1' -AsPlainText -Force))
+            Connect-SfosFirewall -Firewall 'fw1.example.test' -Credential $cred | Out-Null
+
+            { Disconnect-SfosFirewall } | Should -Not -Throw
+            { Resolve-SfosParameters -BoundParameters @{} } | Should -Throw '*No active Sophos Firewall connection*'
+        }
+    }
+}
+
+Describe 'Invoke-SfosApi - Session Parameter Set' {
+
+    BeforeEach {
+        Mock -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -MockWith {
+            [PSCustomObject]@{
+                StatusCode = 200
+                Content    = '<Response APIVersion="2200.1"><Login><status>Authentication Successful</status></Login></Response>'
+            }
+        }
+    }
+
+    AfterEach {
+        Disconnect-SfosFirewall -All
+    }
+
+    It 'Should send the same request as the explicit parameter set when resolved via a registered session name' {
+        $cred = New-Object System.Management.Automation.PSCredential('sessuser', (ConvertTo-SecureString 'sesspw' -AsPlainText -Force))
+        Connect-SfosFirewall -Firewall 'fw2.example.test' -Port 4444 -Credential $cred -Name 'fw2' -NoDefault | Out-Null
+
+        Invoke-SfosApi -Session 'fw2' -InnerXml '<Get><IPHost/></Get>' | Out-Null
+
+        Should -Invoke -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -Times 1 -Exactly -ParameterFilter {
+            $decoded = [uri]::UnescapeDataString($Body)
+            $Uri -eq 'https://fw2.example.test:4444/webconsole/APIController' -and
+            $decoded -like '*<Username>sessuser</Username>*' -and
+            $decoded -like '*<Password>sesspw</Password>*' -and
+            $decoded -like '*<Get><IPHost/></Get>*'
+        }
+    }
+
+    It 'Should resolve a session passed as an object the same way as by name' {
+        $cred = New-Object System.Management.Automation.PSCredential('sessuser', (ConvertTo-SecureString 'sesspw' -AsPlainText -Force))
+        $fw2 = Connect-SfosFirewall -Firewall 'fw2.example.test' -Port 4444 -Credential $cred -Name 'fw2' -NoDefault
+
+        Invoke-SfosApi -Session $fw2 -InnerXml '<Get><IPHost/></Get>' | Out-Null
+
+        Should -Invoke -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -Times 1 -Exactly -ParameterFilter {
+            $Uri -eq 'https://fw2.example.test:4444/webconsole/APIController'
+        }
+    }
+
+    It 'Should throw for an unregistered session name and never call Invoke-WebRequest' {
+        { Invoke-SfosApi -Session 'no-such-session' -InnerXml '<Get/>' } | Should -Throw '*no-such-session*'
+
+        Should -Invoke -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -Times 0 -Exactly
+    }
+
+    It 'Should still support the explicit parameter set unchanged when -Session is not used' {
+        Invoke-SfosApi -Firewall 'fw.example.test' -Port 4444 -Username 'apiuser' `
+            -Password (ConvertTo-SecureString 'pw' -AsPlainText -Force) -InnerXml '<Get><IPHost/></Get>' | Out-Null
+
+        Should -Invoke -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -Times 1 -Exactly -ParameterFilter {
+            $Uri -eq 'https://fw.example.test:4444/webconsole/APIController'
+        }
     }
 }
 

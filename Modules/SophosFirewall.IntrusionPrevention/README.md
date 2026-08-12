@@ -103,6 +103,19 @@ Remove-SfosIPSPolicyRule -Name "BranchOfficeIPS" -Index 0
 Remove-SfosIPSPolicy -Name "BranchOffice"
 ```
 
+### Multi-Session
+
+Hold connections to more than one firewall at once with `Connect-SfosFirewall -Name`,
+and move an object from one to the other by piping across sessions:
+
+```powershell
+Connect-SfosFirewall -Firewall "fw1.example.test" -Credential (Get-Credential) -Name "fw1"
+Connect-SfosFirewall -Firewall "fw2.example.test" -Credential (Get-Credential) -Name "fw2" -NoDefault
+
+Get-SfosIPSPolicy -Session "fw1" -NameLike "BranchOfficeIPS" |
+    New-SfosIPSPolicy -Session "fw2"
+```
+
 ### IPS Custom Signature
 
 ```powershell

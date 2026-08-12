@@ -1,6 +1,6 @@
 @{
     RootModule           = 'SophosFirewall.Core.psm1'
-    ModuleVersion        = '1.2.0'
+    ModuleVersion        = '1.3.0'
     GUID                 = 'cf0350d0-30af-4cd9-ae9e-8eb43356718d'
     Author               = 'Jan Weis'
     Description          = 'Core helper functions for Sophos Firewall API modules. Provides session management, API communication, XML escaping, and response validation.'
@@ -11,6 +11,7 @@
     FunctionsToExport    = @(
         'Connect-SfosFirewall',
         'Disconnect-SfosFirewall',
+        'Get-SfosSession',
         'Invoke-SfosApi',
         'Get-SfosApiStatus',
         'Assert-SfosApiReturnSuccess',
@@ -28,6 +29,32 @@
             LicenseUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/blob/main/Modules/SophosFirewall.Core/LICENSE.txt'
             ProjectUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/tree/main/Modules/SophosFirewall.Core'
             ReleaseNotes = @'
+Version 1.3.0 (2026-08-12)
+Multi-session support. The exported surface grows by one function; every existing
+call site is unaffected.
+
+- New Get-SfosSession cmdlet lists registered named sessions (Firewall, Port,
+  Username, SkipCertificateCheck, IsDefault - the Password is not exposed), or
+  one specific session with -Name.
+- Connect-SfosFirewall gains -Name (registers the connection in a session
+  registry, case-insensitive lookup) and -NoDefault (keeps the current default
+  session instead of replacing it with this one; a no-op without -Name, since
+  there would be no other way to reach the connection again). The returned
+  object's shape is unchanged - still Firewall/Port/Username/Password/
+  SkipCertificateCheck, no Name property, so it still splats cleanly - and now
+  carries the PSTypeName 'SophosFirewall.Session'.
+- Disconnect-SfosFirewall gains -Name, -Session (pipeline-capable) and -All.
+  Called with no parameters it behaves exactly as before.
+- Resolve-SfosParameters recognises a 'Session' key in -BoundParameters: when a
+  calling cmdlet has its own -Session parameter and it was bound - even to
+  $null - that session becomes the base for parameter resolution instead of the
+  default session, and an explicit -Session $null disables the fallback to the
+  default session rather than silently keeping it. Callers that do not pass a
+  'Session' key are unaffected.
+- Invoke-SfosApi gains an additional 'Session' parameter set for raw
+  multi-session work; the existing explicit-parameter set is unchanged and
+  stays the default.
+
 Version 1.2.0 (2026-08-12)
 Hardening for production use. The exported surface is unchanged.
 

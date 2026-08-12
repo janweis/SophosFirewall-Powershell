@@ -63,6 +63,20 @@ Import-Module -Name "C:\Path\To\SophosFirewall.Network.psd1"
 Connect-SfosFirewall -Firewall "192.168.1.1" -Port 4444 -Credential (Get-Credential) -SkipCertificateCheck
 ```
 
+### Multi-Session Usage
+
+```powershell
+# Register two connections without disturbing the default session
+Connect-SfosFirewall -Firewall "fw1.example.test" -Credential (Get-Credential) -Name "fw1"
+Connect-SfosFirewall -Firewall "fw2.example.test" -Credential (Get-Credential) -Name "fw2" -NoDefault
+
+# Read a DNS host entry from fw1 and recreate it on fw2, without touching the ambient
+# default session - HostName binds from the pipeline, Address is passed explicitly
+# because it is not a pipeline-bound parameter
+$entry = Get-SfosDNSHostEntry -Session "fw1" -HostNameLike "server.example.com"
+$entry | New-SfosDNSHostEntry -Session "fw2" -Address $entry.AddressList -WhatIf
+```
+
 ### Interfaces
 
 Physical ports cannot be created or removed through this API - only `Get-` and `Set-` exist.

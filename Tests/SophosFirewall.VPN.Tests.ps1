@@ -945,8 +945,8 @@ Describe 'Measured special-case behaviours' {
 
             $result.PasswordHash | Should -Be '$sfos$7$0$deadbeef'
             $result.PasswordHashForm | Should -Be 'mode1'
-            # Regression: a naive [string]$node.Password on an element that carries the
-            # hashform attribute yields the literal CLR type name below instead of the hash.
+            # A naive [string]$node.Password on an element that carries the hashform attribute
+            # yields the literal CLR type name below instead of the hash.
             $result.PasswordHash | Should -Not -Be 'System.Xml.XmlElement'
         }
     }
@@ -1414,7 +1414,7 @@ Describe 'ShouldProcess - -WhatIf prevents every write cmdlet from sending a wri
     }
 }
 
-Describe 'Additional coverage (2026-08-12 test-ausbau) - functions without a prior XML-generation or error-path test' {
+Describe 'Additional coverage - functions without a prior XML-generation or error-path test' {
 
     BeforeAll {
         $conn = @{
@@ -1425,16 +1425,13 @@ Describe 'Additional coverage (2026-08-12 test-ausbau) - functions without a pri
         }
     }
 
-    Context 'New-/Set-/Remove-SfosL2TPConnection - fail-open regression fix (2026-08-12)' {
-        # Measured 2026-08-12: the firewall reports a create/update failure for this entity
-        # FLAT at Response/Configuration/Status, with no L2TPConnection wrapper at all - unlike
-        # every other write on this entity's own Get/Remove, which nest one level deeper.
-        # Before the fix, New-/Set-SfosL2TPConnection called Assert-SfosApiReturnSuccess with
-        # -ObjectName 'L2TPConnection/Configuration'; against this exact response that XPath
-        # finds zero status nodes, which the "no status at all" rule reads as an empty result,
-        # i.e. success - so the cmdlet reported success while creating/updating nothing. The
-        # fix uses the flat -ObjectName 'Configuration' for New-/Set-, matching what the wire
-        # actually returns.
+    Context 'New-/Set-/Remove-SfosL2TPConnection - status path handling' {
+        # The firewall reports a create/update failure for this entity flat at
+        # Response/Configuration/Status, with no L2TPConnection wrapper at all - unlike every
+        # other write on this entity's own Get/Remove, which nest one level deeper. New-/
+        # Set-SfosL2TPConnection therefore check status at the flat -ObjectName 'Configuration'
+        # path; the nested path would find zero status nodes, which reads as an empty result
+        # (success) and would report success while creating/updating nothing.
         BeforeAll {
             # A bare assignment in the Context body only lives through Pester's Discovery
             # phase and is $null again once the It blocks run - the same trap the
@@ -1945,5 +1942,56 @@ Describe 'Additional coverage (2026-08-12 test-ausbau) - functions without a pri
                 $InnerXml -eq '<Remove><SSLBookmarkGroup><Name>ZZRemoveBookmarkGroup</Name></SSLBookmarkGroup></Remove>'
             }
         }
+    }
+}
+
+Describe 'Session parameter (multi-session support)' {
+
+    BeforeAll {
+        $cred1 = [pscredential]::new('apiuser', (ConvertTo-SecureString 'pw1' -AsPlainText -Force))
+        $cred2 = [pscredential]::new('apiuser', (ConvertTo-SecureString 'pw2' -AsPlainText -Force))
+        Connect-SfosFirewall -Firewall 'fw1.example.test' -Credential $cred1 -Name 'fw1' | Out-Null
+        Connect-SfosFirewall -Firewall 'fw2.example.test' -Credential $cred2 -Name 'fw2' -NoDefault | Out-Null
+    }
+
+    AfterAll { Disconnect-SfosFirewall -All }
+
+    BeforeEach {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -MockWith {
+            [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><VPNProfile><Status>No. of records Zero.</Status></VPNProfile></Response>' }
+        }
+    }
+
+    It 'Resolves the named session instead of the ambient default (direct path)' {
+        Get-SfosVPNProfile -Session 'fw2' | Out-Null
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -ParameterFilter {
+            $Firewall -eq 'fw2.example.test'
+        }
+    }
+
+    It 'Uses the ambient default when -Session is omitted' {
+        Get-SfosVPNProfile | Out-Null
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -ParameterFilter {
+            $Firewall -eq 'fw1.example.test'
+        }
+    }
+
+    It 'Resolves a session object on the begin-block pipeline path (New-SfosVPNProfile)' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -MockWith {
+            [PSCustomObject]@{ Content = '<Response><VPNProfile><Status code="200">Configuration applied successfully.</Status></VPNProfile></Response>' }
+        }
+        New-SfosVPNProfile -Name 'CrossFwProfile' -AuthenticationMode MainMode `
+            -Phase1EncryptionAlgorithm1 AES256 -Phase1AuthenticationAlgorithm1 SHA2_256 `
+            -Phase1KeyLife 3600 -Phase1ReKeyMargin 120 -Phase1RandomizeReKeyingMarginBy 100 `
+            -Phase2EncryptionAlgorithm1 AES256 -Phase2AuthenticationAlgorithm1 SHA2_256 `
+            -Phase2KeyLife 3600 -SupportedDHGroup '14(DH2048)' -Session 'fw2' -Confirm:$false
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -ParameterFilter {
+            $Firewall -eq 'fw2.example.test' -and $InnerXml -match '<Name>CrossFwProfile</Name>'
+        }
+    }
+
+    It 'Throws on an unknown session name without calling the API' {
+        { Get-SfosVPNProfile -Session 'nichtda' } | Should -Throw '*No session named*'
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -Times 0 -Exactly
     }
 }

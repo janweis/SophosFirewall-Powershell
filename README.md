@@ -1,7 +1,7 @@
 # Sophos Firewall PowerShell Module Suite
 
-PowerShell module collection for Sophos XGS/SFOS firewall management. Eight modules with 412
-cmdlets are shipped; roughly a dozen further areas of the API are still open.
+PowerShell module collection for Sophos XGS/SFOS firewall management. Ten modules with 451
+cmdlets are shipped; roughly ten further areas of the API are still open.
 
 ## Quick Start
 
@@ -32,8 +32,10 @@ New-SfosIPHost -Name "Server1" -HostType IP -IPAddress "10.0.0.5"
 | **SophosFirewall.Authentication** | 97 | Authentication servers, users and groups, guest and clientless users, one-time passwords, firewall/admin/VPN/web authentication, captive portal, Azure AD SSO, STAS, live users |
 | **SophosFirewall.Routing** | 31 | Gateways and health checks, SD-WAN profiles and policy routes, static (unicast) and multicast routes, PIM |
 | **SophosFirewall.VPN** | 51 | IPsec connections and profiles, SSL VPN (policies, bookmarks, site-to-site), L2TP, PPTP, failover groups |
+| **SophosFirewall.IntrusionPrevention** | 29 | IPS policies and rules, custom signatures, IPS switch, DoS settings and bypass rules, spoof prevention, trusted MACs |
+| **SophosFirewall.ActiveThreatResponse** | 10 | Sophos X-Ops threat feeds (ATP) with host/threat exceptions, third-party threat feeds |
 
-412 cmdlets in total. Every one of them was called against a live SFOS 22.0 appliance, not
+451 cmdlets in total. Every one of them was called against a live SFOS 22.0 appliance, not
 only against mocks — the firmware behaviour that differs from the vendor documentation is
 recorded in the `.NOTES` of the affected function and summarised in each module README.
 
@@ -47,10 +49,12 @@ recorded in the `.NOTES` of the affected function and summarised in each module 
 - [SophosFirewall.Authentication README](Modules/SophosFirewall.Authentication/README.md) - Who may log in and how; read the known limitations before using the write cmdlets
 - [SophosFirewall.Routing README](Modules/SophosFirewall.Routing/README.md) - Gateways, SD-WAN and static routes (the API calls them UnicastRoute); a wrong route can cut off the management path
 - [SophosFirewall.VPN README](Modules/SophosFirewall.VPN/README.md) - IPsec, SSL VPN, L2TP and PPTP; read the known limitations, several add operations are not satisfiable through the XML API
+- [SophosFirewall.IntrusionPrevention README](Modules/SophosFirewall.IntrusionPrevention/README.md) - IPS, DoS and spoof prevention; enabling spoof prevention on the management zone can lock you out, read the warning first
+- [SophosFirewall.ActiveThreatResponse README](Modules/SophosFirewall.ActiveThreatResponse/README.md) - ATP / Sophos X-Ops threat feeds and third-party feeds; note the measured remove/update quirks
 
 ## Key Features
 
-- 412 functions covering eight of roughly twenty API areas
+- 451 functions covering ten of roughly twenty API areas
 - PowerShell 5.1 and 7.x
 - Session management: connect once, use every module
 - Pipeline support between cmdlets

@@ -57,7 +57,7 @@
             Tags         = @('Sophos', 'Firewall', 'API', 'XGS', 'SFOS', 'Routing', 'SDWAN', 'Gateway', 'Multicast')
             LicenseUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/blob/main/Modules/SophosFirewall.Routing/LICENSE.txt'
             ProjectUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/tree/main/Modules/SophosFirewall.Routing'
-            ReleaseNotes = 'Initial release of the Authentication module for Sophos Firewall API management.'
+            ReleaseNotes = 'Initial release of the Routing module for Sophos Firewall API management.'
         }
     }
 }

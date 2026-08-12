@@ -1,6 +1,6 @@
 @{
     RootModule           = 'SophosFirewall.Firewall.psm1'
-    ModuleVersion        = '1.0.1'
+    ModuleVersion        = '1.0.2'
     GUID                 = 'fe5a57d4-bdc0-4fce-958d-72bd4c9a77e9'
     Author               = 'Jan Weis'
     Description          = 'PowerShell module for managing firewall rules, rule groups, NAT rules and SSL/TLS inspection on Sophos XGS / SFOS 22.0 firewalls via API.'
@@ -47,7 +47,7 @@
             Tags         = @('Sophos', 'Firewall', 'API', 'XGS', 'SFOS', 'NAT', 'TLS', 'Security')
             LicenseUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/blob/main/Modules/SophosFirewall.Firewall/LICENSE.txt'
             ProjectUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/tree/main/Modules/SophosFirewall.Firewall'
-            ReleaseNotes = 'Documentation only.'
+            ReleaseNotes = '1.0.2: New-SfosSSLTLSInspectionRule without -Position no longer crashes client-side; ConfirmImpact High on Set-SfosSSLTLSInspectionSettings; if/else array-unwrap hardening.'
         }
     }
 }

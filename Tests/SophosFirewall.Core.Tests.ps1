@@ -1,4 +1,4 @@
-#requires -Version 5.1
+﻿#requires -Version 5.1
 #requires -Modules Pester
 
 <#
@@ -531,7 +531,7 @@ Describe 'Resolve-SfosParameters - Precedence and Missing Values' {
 }
 
 Describe 'SophosFirewall.Core Integration Tests' {
-    
+
     Context 'XML API Request Pattern Validation' {
         It 'Should correctly escape parameters in XML' {
             $name = 'Test & Special'
@@ -539,10 +539,135 @@ Describe 'SophosFirewall.Core Integration Tests' {
             $escaped | Should -Match '&amp;'
         }
     }
-    
+
     Context 'Pipeline Support' {
         It 'ConvertTo-SfosXmlEscaped should support pipeline input' {
             'Test & Value' | ConvertTo-SfosXmlEscaped | Should -Be 'Test &amp; Value'
+        }
+    }
+}
+
+Describe 'Assert-SfosApiReturnSuccess - Fail-open guard for a status at an unexpected path' {
+
+    # Measured against New-SfosL2TPConnection: its create/update status landed FLAT at
+    # /Response/Configuration/Status while a wrong -ObjectName pointed at the nested
+    # Get/Remove shape ('L2TPConnection/Configuration'). The lookup found nothing at either
+    # the expected path or the plain /Response/Status fallback, and the function used to just
+    # return - reporting success for a write that may have failed. These tests use the exact
+    # mock shape and the deliberately wrong -ObjectName from that finding.
+
+    It 'Should throw when an error status sits outside the expected -ObjectName path' {
+        $xml = [xml]@'
+<Response APIVersion="2200.1">
+  <Login><status>Authentication Successful</status></Login>
+  <Configuration><Status code="501">Invalid Request</Status></Configuration>
+</Response>
+'@
+        { Assert-SfosApiReturnSuccess -Xml $xml -ObjectName 'L2TPConnection/Configuration' -Action 'create' -Target 'l2tpconn01' -ErrorAction Stop } |
+            Should -Throw '*501*'
+    }
+
+    It 'Should name the path deviation in the thrown message, so -ObjectName can be corrected' {
+        $xml = [xml]@'
+<Response APIVersion="2200.1">
+  <Login><status>Authentication Successful</status></Login>
+  <Configuration><Status code="501">Invalid Request</Status></Configuration>
+</Response>
+'@
+        { Assert-SfosApiReturnSuccess -Xml $xml -ObjectName 'L2TPConnection/Configuration' -Action 'create' -Target 'l2tpconn01' -ErrorAction Stop } |
+            Should -Throw '*outside the expected path*'
+    }
+
+    It 'Should not throw when a success status sits outside the expected -ObjectName path, but should warn' {
+        $xml = [xml]@'
+<Response APIVersion="2200.1">
+  <Login><status>Authentication Successful</status></Login>
+  <Configuration><Status code="200">Configuration applied successfully.</Status></Configuration>
+</Response>
+'@
+        { Assert-SfosApiReturnSuccess -Xml $xml -ObjectName 'L2TPConnection/Configuration' -Action 'create' -Target 'l2tpconn01' -WarningAction SilentlyContinue } |
+            Should -Not -Throw
+    }
+
+    It 'Should emit a warning when a success status sits outside the expected -ObjectName path' {
+        $xml = [xml]@'
+<Response APIVersion="2200.1">
+  <Login><status>Authentication Successful</status></Login>
+  <Configuration><Status code="200">Configuration applied successfully.</Status></Configuration>
+</Response>
+'@
+        Assert-SfosApiReturnSuccess -Xml $xml -ObjectName 'L2TPConnection/Configuration' -Action 'create' -Target 'l2tpconn01' -WarningVariable warnings -WarningAction SilentlyContinue
+        $warnings.Count | Should -BeGreaterThan 0
+        [string]$warnings[0] | Should -Match 'outside the expected path'
+    }
+
+    It 'Should not fail open on a Status data field even when the fallback search runs' {
+        # Same data-field exclusion as the primary lookup ('not(../Name)') has to hold for
+        # the fallback search too, or a FirewallRule/NATRule's <Status>Enable</Status> would
+        # be picked up as a fabricated success once a wrong -ObjectName forces the fallback.
+        $xml = [xml]@'
+<Response APIVersion="2200.1">
+  <Login><status>Authentication Successful</status></Login>
+  <FirewallRule transactionid=""><Name>Allow-LAN</Name><Status>Enable</Status></FirewallRule>
+</Response>
+'@
+        { Assert-SfosApiReturnSuccess -Xml $xml -ObjectName 'SomeOtherEntity' -Action 'get' -ErrorAction Stop } | Should -Not -Throw
+    }
+
+    It 'Should still behave exactly as before when there is no status anywhere in the response' {
+        $xml = [xml]'<Response APIVersion="2200.1"><Login><status>Authentication Successful</status></Login></Response>'
+        { Assert-SfosApiReturnSuccess -Xml $xml -ObjectName 'IPHost' -Action 'create' -Target 'Web01' -ErrorAction Stop } | Should -Not -Throw
+    }
+
+    It 'Should behave exactly as before when the status sits at the correct -ObjectName path' {
+        # Backward-compatibility check: a correct path must not trigger the fallback warning.
+        $xml = [xml]'<Response><Login><status>Authentication Successful</status></Login><IPHost><Status code="200">OK</Status></IPHost></Response>'
+        Assert-SfosApiReturnSuccess -Xml $xml -ObjectName 'IPHost' -Action 'create' -WarningVariable warnings -WarningAction SilentlyContinue
+        $warnings.Count | Should -Be 0
+    }
+}
+
+Describe 'Invoke-SfosApi - TimeoutSec' {
+
+    BeforeAll {
+        $callArgs = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    BeforeEach {
+        Mock -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -MockWith {
+            [PSCustomObject]@{
+                StatusCode = 200
+                Content    = '<Response APIVersion="2200.1"><Login><status>Authentication Successful</status></Login></Response>'
+            }
+        }
+    }
+
+    It 'Should default TimeoutSec to 30 when not specified' {
+        Invoke-SfosApi @callArgs -InnerXml '<Get><IPHost/></Get>' | Out-Null
+
+        Should -Invoke -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -Times 1 -Exactly -ParameterFilter {
+            $TimeoutSec -eq 30
+        }
+    }
+
+    It 'Should pass an explicit TimeoutSec through to Invoke-WebRequest' {
+        Invoke-SfosApi @callArgs -InnerXml '<Get><IPHost/></Get>' -TimeoutSec 5 | Out-Null
+
+        Should -Invoke -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -Times 1 -Exactly -ParameterFilter {
+            $TimeoutSec -eq 5
+        }
+    }
+
+    It 'Should omit TimeoutSec entirely when 0 is passed' {
+        Invoke-SfosApi @callArgs -InnerXml '<Get><IPHost/></Get>' -TimeoutSec 0 | Out-Null
+
+        Should -Invoke -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -Times 1 -Exactly -ParameterFilter {
+            $null -eq $TimeoutSec
         }
     }
 }

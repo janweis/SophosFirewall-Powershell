@@ -40,6 +40,12 @@ New-SfosIPHost -Name "Server1" -HostType IP -IPAddress "10.0.0.5"
 only against mocks — the firmware behaviour that differs from the vendor documentation is
 recorded in the `.NOTES` of the affected function and summarised in each module README.
 
+**Firmware note:** all measured behaviour — status paths, append-only lists, silent
+no-ops, unsatisfiable operations — was established on SFOS 22.0. A firmware upgrade can
+change any of it; re-verify against a lab appliance before trusting the measured notes on
+a newer release. Cmdlets that can lock you out of the appliance or cause irreversible
+state carry `ConfirmImpact = 'High'` and prompt unless `-Confirm:$false` is passed.
+
 ## Documentation
 
 - [SophosFirewall.Core README](Modules/SophosFirewall.Core/README.md) - Foundation module details

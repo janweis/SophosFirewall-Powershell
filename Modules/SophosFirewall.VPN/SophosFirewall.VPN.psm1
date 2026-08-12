@@ -6983,6 +6983,8 @@ function Get-SfosL2TPConfiguration {
     where none had been before), which conflicts with this task's requirement to restore both
     singletons exactly. The Members sub-object has no such constraint and WAS tested
     end-to-end with a full revert - see Add-/Remove-SfosL2TPConfigurationMember.
+    ConfirmImpact High since 2026-08-12: the original empty state is unrecoverable through the
+    API once any value has been written (measured); automation must pass -Confirm:$false.
 
 .LINK
     https://docs.sophos.com/nsg/sophos-firewall/22.0/API/CONFIGURE/VPN/L2TPConfiguration/operations/ConfigureL2TP.html
@@ -6991,7 +6993,7 @@ function Get-SfosL2TPConfiguration {
     Get-SfosL2TPConfiguration
 #>
 function Set-SfosL2TPConfiguration {
-    [CmdletBinding(SupportsShouldProcess)]
+    [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
     param(
         [ValidateSet('Enable', 'Disable')]
         [string]$L2TPGeneralSettings,
@@ -8321,6 +8323,8 @@ function Get-SfosPPTPConfiguration {
     both the -ObjectName 'PPTPSettings' status path and the same unconditional-mandatory
     behaviour. The Members sub-object has no such constraint and WAS tested end-to-end with a
     full revert - see Add-/Remove-SfosPPTPConfigurationMember.
+    ConfirmImpact High since 2026-08-12: the original empty state is unrecoverable through the
+    API once any value has been written (measured); automation must pass -Confirm:$false.
 
 .LINK
     https://docs.sophos.com/nsg/sophos-firewall/22.0/API/CONFIGURE/VPN/PPTPConfiguration/operations/ConfigurePPTP.html
@@ -8329,7 +8333,7 @@ function Get-SfosPPTPConfiguration {
     Get-SfosPPTPConfiguration
 #>
 function Set-SfosPPTPConfiguration {
-    [CmdletBinding(SupportsShouldProcess)]
+    [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
     param(
         [ValidateSet('Enable', 'Disable')]
         [string]$PPTPGeneralSettings,

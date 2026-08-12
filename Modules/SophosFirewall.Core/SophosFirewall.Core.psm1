@@ -15,7 +15,7 @@
     Module Name: SophosFirewall.Core
     Author: Jan Weis
     Homepage: https://www.it-explorations.de
-    Version: 1.0.0
+    Version: 1.2.0
     PowerShell Version: 5.1+
     
 .LINK
@@ -146,6 +146,13 @@ function Assert-SfosApiLoginSuccess {
     Optional APIVersion attribute for the <Request> element (for example '2200.1').
     When omitted, the firewall processes the request using its own current schema
     version, which is what keeps one module compatible with several firmware levels.
+.PARAMETER TimeoutSec
+    Maximum time in seconds to wait for the HTTP response. Passed straight through to
+    Invoke-WebRequest's own -TimeoutSec, which exists unchanged on both PS 5.1 and PS 7+, so
+    no version branching is needed here. Default 30. Pass 0 to omit the parameter entirely
+    and fall back to Invoke-WebRequest's own default instead. Without an enforced limit an
+    unreachable host used to block for the operating system's own default (around 21
+    seconds under Windows) with no way for a caller to shorten it.
 .PARAMETER SkipCertificateCheck
     Skips SSL certificate validation for self-signed certificates.
 .OUTPUTS
@@ -158,25 +165,31 @@ function Assert-SfosApiLoginSuccess {
     $securePw = Read-Host -AsSecureString
     $inner = "&lt;Get&gt;&lt;IPHost&gt;&lt;/IPHost&gt;&lt;/Get&gt;"
     Invoke-SfosApi -Firewall "firewall.example.com" -Port 4444 -Username "admin" -Password $securePw -InnerXml $inner -SkipCertificateCheck
+.EXAMPLE
+    # Fail fast against a host that might be unreachable, instead of waiting out the
+    # operating system's own default timeout.
+    Invoke-SfosApi -Firewall "firewall.example.com" -Username "admin" -Password $securePw -InnerXml $inner -TimeoutSec 5
 #>
 function Invoke-SfosApi {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
         [string]$Firewall,
-        
+
         [int]$Port = $script:DefaultSfosPort,
-        
+
         [Parameter(Mandatory)]
         [string]$Username,
-        
+
         [Parameter(Mandatory)]
         [SecureString]$Password,
-        
+
         [Parameter(Mandatory)]
         [string]$InnerXml,
 
         [string]$ApiVersion,
+
+        [int]$TimeoutSec = 30,
 
         [switch]$SkipCertificateCheck
     )
@@ -219,6 +232,14 @@ function Invoke-SfosApi {
             Method      = 'Post'
             Body        = $body
             ErrorAction = 'Stop'
+        }
+
+        # -TimeoutSec is identical on Invoke-WebRequest under PS 5.1 and PS 7+, so no version
+        # branch is needed the way there is for -UseBasicParsing/-SkipCertificateCheck below.
+        # 0 means "no enforced limit" - omit the parameter and let Invoke-WebRequest use its
+        # own default rather than passing a literal 0, which Invoke-WebRequest would reject.
+        if ($TimeoutSec -gt 0) {
+            $invokeParams['TimeoutSec'] = $TimeoutSec
         }
 
         # -UseBasicParsing under PS 5.1: without it Invoke-WebRequest hands the response to
@@ -389,6 +410,14 @@ function Get-SfosApiStatus {
     every other undocumented code throws, so an unrecognised status is never mistaken for
     success. See the comments at the corresponding checks.
 
+    If nothing is found at the path derived from -ObjectName (and not at the plain
+    /Response/Status fallback either), the function searches the rest of the response once
+    for any other node that still matches the API-status heuristic before giving up. A
+    status found this way still throws on an error code (with a hint in the message that the
+    -ObjectName needs measuring) and still succeeds on 200/216/... but with a warning naming
+    the path deviation - a response with genuinely no status anywhere is unaffected and
+    behaves exactly as before.
+
 .PARAMETER Xml
     The XML response from the API.
 
@@ -436,6 +465,40 @@ function Assert-SfosApiReturnSuccess {
     # one. Without the filter the loop below inspects that $null and reports a status-less
     # response as a broken status.
     $statusList = @(Get-SfosApiStatus -Xml $Xml -ObjectName $ObjectName | Where-Object { $_ })
+
+    # Fail-open guard, measured against New-SfosL2TPConnection: its create/update status
+    # landed FLAT at /Response/Configuration/Status while the caller's -ObjectName pointed
+    # at the nested Get/Remove shape, so the lookup above found nothing there and nothing at
+    # the /Response/Status fallback either - and this function used to just return, reporting
+    # success for a write that may have failed. Before treating "nothing at the expected
+    # path" as "no status anywhere" (which is legitimately what an empty Get result looks
+    # like), search the rest of the response once for any node the existing heuristic still
+    # recognises as an API status: a Status carrying a code attribute, or a code-less Status
+    # whose parent has no <Name> child. That second half is the same data-field exclusion
+    # used above - a FirewallRule/NATRule's <Status>Enable</Status> sits next to <Name> and
+    # stays excluded here too.
+    $fallbackUsed = $false
+    if (-not $statusList.Count) {
+        $fallbackNodes = @($Xml.SelectNodes('//Status[@code or not(../Name)]') | Where-Object { $_ })
+        if ($fallbackNodes.Count) {
+            $fallbackUsed = $true
+            $statusList = @($fallbackNodes | ForEach-Object {
+                    $pathParts = @()
+                    $ancestor = $_
+                    while ($ancestor -and $ancestor.NodeType -eq [System.Xml.XmlNodeType]::Element) {
+                        $pathParts = , $ancestor.Name + $pathParts
+                        $ancestor = $ancestor.ParentNode
+                    }
+                    $actualPath = '/' + ($pathParts -join '/')
+                    [PSCustomObject]@{
+                        Code      = [string]$_.GetAttribute('code')
+                        Message   = [string]$_.InnerText
+                        XPathHint = "$actualPath (found outside the expected path for -ObjectName '$ObjectName' - measure and correct -ObjectName for this operation)"
+                    }
+                })
+        }
+    }
+
     if (-not $statusList.Count) {
         return
     }
@@ -464,6 +527,9 @@ function Assert-SfosApiReturnSuccess {
 
         # Status codes per the table published by Sophos
         if ($code -eq 200 -or $code -eq 216) {
+            if ($fallbackUsed) {
+                Write-Warning "Sophos API reported success (code $code) while trying to $actionPart$targetPart, but the status was found outside the expected path for -ObjectName '$ObjectName'. The operation likely succeeded; measure and correct -ObjectName for this operation. (StatusPath=$($status.XPathHint))"
+            }
             continue
         }
 

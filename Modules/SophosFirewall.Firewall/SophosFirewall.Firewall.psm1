@@ -4610,6 +4610,9 @@ function Get-SfosSSLTLSInspectionSettings {
         Minimum supported PowerShell version: 5.1
         Every field of this entity acts device-wide, immediately, for every HTTPS connection through the firewall - there is no per-object or per-rule scope to fall back on. SSLTLSEngine='Disabled' or SSLTLSInspection='Disabled' turns SSL/TLS inspection off firewall-wide; a wrong SSLv2SSLv3/SSLCompression/SSLConnectionsExceeded/TLS13Decryption value can drop or reject HTTPS connections that were previously allowed. No parameter carries a default value in this cmdlet on purpose - only what the caller explicitly passes (or what read-modify-write carries forward unchanged from the current state) is ever sent. Verified against the live firewall via its Get path only; the write path was verified by inspecting the generated XML (e.g. with -WhatIf), never executed, because every field here is on this task's do-not-touch list.
 
+        ConfirmImpact High since 2026-08-12: device-wide TLS inspection engine; a wrong value
+        switches off TLS inspection firewall-wide. Automation must pass -Confirm:$false.
+
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/PROTECT/Firewall/TLSSettings/operations/UpdateSSLTLSinspectionsettings.html
 
@@ -4622,7 +4625,7 @@ function Set-SfosSSLTLSInspectionSettings {
     # singleton holding one configuration. the project build rules, section 3 puts the Sophos spelling above
     # PowerShell habit.
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '')]
-    [CmdletBinding(SupportsShouldProcess)]
+    [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
     param(
         [string]$RSACA,
         [string]$ECCA,

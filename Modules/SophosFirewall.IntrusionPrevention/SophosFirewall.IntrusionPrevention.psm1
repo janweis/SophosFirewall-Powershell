@@ -1916,6 +1916,8 @@ function Get-SfosIPSSwitch {
     firewall, ending back at the original baseline. The error path (an invalid value
     answering code 501 at /Response/IPSSwitch/Status[@code]) was also reproduced - see the
     task report for both transcripts.
+    ConfirmImpact High since 2026-08-12: device-wide IPS main switch; automation must pass
+    -Confirm:$false.
 
 .LINK
     https://docs.sophos.com/nsg/sophos-firewall/22.0/API/PROTECT/Intrusion%20Prevention/ipsswitch/operations/IPSswitch.html
@@ -1924,7 +1926,7 @@ function Get-SfosIPSSwitch {
     Get-SfosIPSSwitch
 #>
 function Set-SfosIPSSwitch {
-    [CmdletBinding(SupportsShouldProcess)]
+    [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
     param(
         [Parameter(Mandatory)]
         [ValidateSet('Enable', 'Disable')]
@@ -3017,6 +3019,8 @@ function Get-SfosSpoofPrevention {
     reproduced - see the task report and the region header. The zone 'LAN' was never sent in
     this or any prior verification run of this cmdlet, per the explicit prohibition in this
     task's group order.
+    ConfirmImpact High since 2026-08-12: enabling IPSpoofing on the management zone caused a
+    measured, unrecoverable-remote lock-out; automation must pass -Confirm:$false.
 
 .LINK
     https://docs.sophos.com/nsg/sophos-firewall/22.0/API/PROTECT/Intrusion%20Prevention/SpoofPreventionSettings/operations/ConfigureSpoofPrevention.html
@@ -3025,7 +3029,7 @@ function Get-SfosSpoofPrevention {
     Get-SfosSpoofPrevention
 #>
 function Set-SfosSpoofPrevention {
-    [CmdletBinding(SupportsShouldProcess)]
+    [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
     param(
         [ValidateSet('Enable', 'Disable')]
         [string]$Status,

@@ -6103,6 +6103,9 @@ function Get-SfosGuestUserSettings {
 
         What this means for callers: on an appliance in this state the settings can only be changed through the web admin, because this cmdlet reads before it writes and that read throws. No bypass switch was added on purpose - a write that cannot read the current object first cannot preserve the fields it does not know, which is the exact damage read-modify-write exists to prevent. It is a firmware defect worth reporting to Sophos, and the useful part of that report is that writing still works while reading does not.
 
+        ConfirmImpact High since 2026-08-12: a write can irreversibly break this entity's own
+        read path (measured, reboot does not restore it); automation must pass -Confirm:$false.
+
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/API/CONFIGURE/Authentication/GuestUsersGeneralSettings/operations/ConfigureGuestUser.html
 #>
@@ -10948,11 +10951,14 @@ function Get-SfosAdminAuthentication {
         /Response/<Entity>/Status - not from a direct measurement on AdminAuthentication
         itself, since that measurement would have required a write against this entity.
 
+        ConfirmImpact High since 2026-08-12: governs the API session's own login path; a wrong
+        value can lock the appliance's administrators out. Automation must pass -Confirm:$false.
+
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/API/CONFIGURE/Authentication/AuthAdmin/operations/ConfigureAdministratorAuthenticationServer.html
 #>
 function Set-SfosAdminAuthentication {
-    [CmdletBinding(SupportsShouldProcess)]
+    [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
     param(
         [string]$AuthenticationMethods,
 
@@ -11078,11 +11084,14 @@ function Set-SfosAdminAuthentication {
         NOT verified against the live firewall as a write, by deliberate policy - this entity
         controls the login path of the API user this module authenticates as.
 
+        ConfirmImpact High since 2026-08-12: governs the API session's own login path; automation
+        must pass -Confirm:$false.
+
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/API/CONFIGURE/Authentication/AuthAdmin/operations/ConfigureAdministratorAuthenticationServer.html
 #>
 function Add-SfosAdminAuthenticationMember {
-    [CmdletBinding(SupportsShouldProcess)]
+    [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
     param(
         [Parameter(Mandatory)]
         [ValidateNotNullOrEmpty()]
@@ -11195,11 +11204,15 @@ function Add-SfosAdminAuthenticationMember {
         NOT verified against the live firewall as a write, by deliberate policy - this entity
         controls the login path of the API user this module authenticates as.
 
+        ConfirmImpact High since 2026-08-12: removing the last server can lock every
+        administrator out, including this module's own API user; automation must pass
+        -Confirm:$false.
+
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/API/CONFIGURE/Authentication/AuthAdmin/operations/ConfigureAdministratorAuthenticationServer.html
 #>
 function Remove-SfosAdminAuthenticationMember {
-    [CmdletBinding(SupportsShouldProcess)]
+    [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
     param(
         [Parameter(Mandatory)]
         [ValidateNotNullOrEmpty()]

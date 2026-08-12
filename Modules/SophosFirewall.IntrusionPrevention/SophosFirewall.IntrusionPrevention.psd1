@@ -1,6 +1,6 @@
 @{
     RootModule           = 'SophosFirewall.IntrusionPrevention.psm1'
-    ModuleVersion        = '1.0.0'
+    ModuleVersion        = '1.0.1'
     GUID                 = '44f6945c-59a9-45a0-9a97-f6352eb5d054'
     Author               = 'Jan Weis'
     Description          = 'PowerShell module for managing intrusion prevention on Sophos XGS / SFOS 22.0 firewalls via API: IPS policies, custom signatures, IPS switch, DoS settings, DoS bypass rules, spoof prevention and trusted MACs.'
@@ -55,7 +55,7 @@
             Tags         = @('Sophos', 'Firewall', 'API', 'XGS', 'SFOS', 'IntrusionPrevention', 'IPS', 'DoS', 'SpoofPrevention', 'TrustedMAC')
             LicenseUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/blob/main/Modules/SophosFirewall.IntrusionPrevention/LICENSE.txt'
             ProjectUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/tree/main/Modules/SophosFirewall.IntrusionPrevention'
-            ReleaseNotes = 'Initial release of the IntrusionPrevention module for Sophos Firewall API management.'
+            ReleaseNotes = '1.0.1: ConfirmImpact High on Set-SfosSpoofPrevention and Set-SfosIPSSwitch; if/else array-unwrap hardening.'
         }
     }
 }

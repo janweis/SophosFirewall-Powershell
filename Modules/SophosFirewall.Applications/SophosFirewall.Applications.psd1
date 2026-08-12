@@ -1,6 +1,6 @@
 @{
     RootModule           = 'SophosFirewall.Applications.psm1'
-    ModuleVersion        = '1.0.0'
+    ModuleVersion        = '1.0.1'
     GUID                 = 'ebbadd35-0d7a-45a6-a2ad-15f0609e65c3'
     Author               = 'Jan Weis'
     Description          = 'PowerShell module for managing application control on Sophos XGS / SFOS 22.0 firewalls via API: application filter policies and rules, application objects, application categories with QoS assignment, application classification.'
@@ -46,7 +46,7 @@
             Tags         = @('Sophos', 'Firewall', 'API', 'XGS', 'SFOS', 'Applications', 'AppControl', 'QoS')
             LicenseUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/blob/main/Modules/SophosFirewall.Applications/LICENSE.txt'
             ProjectUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/tree/main/Modules/SophosFirewall.Applications'
-            ReleaseNotes = 'Initial release of the Applications module for Sophos Firewall API management.'
+            ReleaseNotes = '1.0.1: Add-SfosApplicationFilterCategoryMember refuses the silent-no-op QoSPolicy None; first per-app override no longer lost on Windows PowerShell 5.1.'
         }
     }
 }

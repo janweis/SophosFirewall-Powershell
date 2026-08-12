@@ -1,6 +1,6 @@
 @{
     RootModule           = 'SophosFirewall.HostsAndServices.psm1'
-    ModuleVersion        = '1.0.0'
+    ModuleVersion        = '1.0.1'
     GUID                 = '1c2a45f5-8215-4035-a691-2be3ef0e8191'
     Author               = 'Jan Weis'
     Description          = 'PowerShell module for managing Sophos XGS / SFOS 21.x firewall hosts and services via API.'
@@ -79,7 +79,7 @@
             Tags         = @('Sophos', 'Firewall', 'API', 'XGS', 'SFOS', 'Network', 'Security')
             LicenseUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/blob/main/Modules/SophosFirewall.HostsAndServices/LICENSE.txt'
             ProjectUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/tree/main/Modules/SophosFirewall.HostsAndServices'
-            ReleaseNotes = 'Initial release of HostsAndServices module for Sophos Firewall API management.'
+            ReleaseNotes = '1.0.1: New-SfosService no longer sends an empty ICMPCode/ICMPv6Code (defaults to -1, was rejected 501); if/else array-unwrap hardening.'
         }
     }
 }

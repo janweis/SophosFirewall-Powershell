@@ -1,6 +1,6 @@
 @{
     RootModule           = 'SophosFirewall.Core.psm1'
-    ModuleVersion        = '1.1.0'
+    ModuleVersion        = '1.2.0'
     GUID                 = 'cf0350d0-30af-4cd9-ae9e-8eb43356718d'
     Author               = 'Jan Weis'
     Description          = 'Core helper functions for Sophos Firewall API modules. Provides session management, API communication, XML escaping, and response validation.'
@@ -28,6 +28,24 @@
             LicenseUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/blob/main/Modules/SophosFirewall.Core/LICENSE.txt'
             ProjectUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/tree/main/Modules/SophosFirewall.Core'
             ReleaseNotes = @'
+Version 1.2.0 (2026-08-12)
+Hardening for production use. The exported surface is unchanged.
+
+- New -TimeoutSec parameter on Invoke-SfosApi (default 30, identical on PS
+  5.1 and PS 7+). An unreachable host previously blocked for the operating
+  system's own default with no way for a caller to shorten it. Pass 0 to
+  fall back to Invoke-WebRequest's own default.
+- Assert-SfosApiReturnSuccess no longer fails open when a status node exists
+  but sits outside the path derived from -ObjectName. Measured against
+  New-SfosL2TPConnection, whose create/update status landed flat at
+  /Response/Configuration/Status: the lookup found nothing at the expected
+  path and the function used to just return, reporting success for a write
+  that may have failed. It now searches the rest of the response once for
+  any node the existing status heuristic still recognises, throws on an
+  error code found that way (naming the path deviation, so -ObjectName can
+  be corrected), and warns on a success code found that way. A response
+  with genuinely no status anywhere behaves exactly as before.
+
 Version 1.1.0 (2026-08-11)
 Correctness fixes measured against a live SFOS 22.0 appliance. The exported
 surface is unchanged, so no caller has to be adapted, but the behaviour of

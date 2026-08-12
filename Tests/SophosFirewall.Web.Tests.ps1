@@ -674,3 +674,1774 @@ Describe 'New-SfosWebFilterPolicyRule -InputObject' {
         { New-SfosWebFilterPolicyRule -HTTPAction Deny } | Should -Throw '*needs -Category*'
     }
 }
+
+<#
+    Everything below extends coverage to the remaining exported functions that the
+    original suite above did not touch: every Get-* parsing shape, every write-cmdlet's
+    generated XML, every Set-*'s read-modify-write preservation (including the five
+    settings singletons), the module's own status-handling edge cases (217/222 warn,
+    code-less "Transaction fail" throws), and the client-side error paths each cmdlet
+    carries. See tools/coverage notes in the accompanying report for the full function
+    list this closes.
+#>
+
+Describe 'Status Handling Edge Cases' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    Context 'Undocumented code 217 (External WebFilterCategory create)' {
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -MockWith {
+                [PSCustomObject]@{ Content = '<Response><WebFilterCategory><Status code="217">Unable to get status message</Status></WebFilterCategory></Response>' }
+            }
+        }
+
+        It 'Should not throw and should warn instead' {
+            { New-SfosWebFilterCategory -Name 'ExtCat' -Classification Acceptable -QoSPolicy None -Url 'example.com/list.txt' @conn -Confirm:$false -WarningAction SilentlyContinue } | Should -Not -Throw
+
+            $streams = New-SfosWebFilterCategory -Name 'ExtCat3' -Classification Acceptable -QoSPolicy None -Url 'example.com/list3.txt' @conn -Confirm:$false 3>&1
+            $warnings = @($streams | Where-Object { $_ -is [System.Management.Automation.WarningRecord] })
+            $warnings.Count | Should -BeGreaterThan 0
+        }
+    }
+
+    Context 'Undocumented code 222' {
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -MockWith {
+                [PSCustomObject]@{ Content = '<Response><WebFilterCategory><Status code="222">Unable to get status message</Status></WebFilterCategory></Response>' }
+            }
+        }
+
+        It 'Should not throw' {
+            { New-SfosWebFilterCategory -Name 'ExtCat2' -Classification Acceptable -QoSPolicy None -Url 'example.com/list2.txt' @conn -Confirm:$false -WarningAction SilentlyContinue } | Should -Not -Throw
+        }
+    }
+
+    Context 'Code 201 "Operation partially successful" (append-only URLList shrink attempt)' {
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -MockWith {
+                if ($InnerXml -match '<Get>') {
+                    [PSCustomObject]@{ Content = @'
+<Response>
+  <Login><status>Authentication Successful</status></Login>
+  <WebFilterCategory>
+    <Name>ExternalCat</Name>
+    <Classification>Acceptable</Classification>
+    <QoSPolicy>None</QoSPolicy>
+    <ConfigureCategory>External</ConfigureCategory>
+    <URLList><URL>a.example.com</URL><URL>b.example.com</URL></URLList>
+  </WebFilterCategory>
+</Response>
+'@
+                    }
+                }
+                else {
+                    # Live-observed: sending fewer URLs than currently stored answers 201 and
+                    # removes nothing - the firewall's URLList is append-only on update.
+                    [PSCustomObject]@{ Content = '<Response><WebFilterCategory><Status code="201">Operation partially successful.</Status></WebFilterCategory></Response>' }
+                }
+            }
+        }
+
+        It 'Should send only the reduced URL list the caller asked for' {
+            Set-SfosWebFilterCategory -Name 'ExternalCat' -ConfigureCategory External -Url 'a.example.com' @conn -Confirm:$false -WarningAction SilentlyContinue
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Set operation="update">' -and
+                $InnerXml -match '<URL>a\.example\.com</URL>' -and
+                $InnerXml -notmatch '<URL>b\.example\.com</URL>'
+            }
+        }
+
+        It 'Should not throw even though the firewall silently kept both URLs (code 201 is a warning, not a failure)' {
+            { Set-SfosWebFilterCategory -Name 'ExternalCat' -ConfigureCategory External -Url 'a.example.com' @conn -Confirm:$false -WarningAction SilentlyContinue } | Should -Not -Throw
+        }
+    }
+
+    Context 'Code-less "Transaction fail" (ContentConditionList Name filter)' {
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -MockWith {
+                [PSCustomObject]@{ Content = '<Response><ContentConditionList><Status>Transaction fail</Status></ContentConditionList></Response>' }
+            }
+        }
+
+        It 'Should throw rather than reading it as an empty result' {
+            { Get-SfosContentConditionList -KeyLike 'DoesNotMatter' @conn } | Should -Throw '*Transaction fail*'
+        }
+    }
+
+    Context 'Code-less "No. of records Zero." (genuinely empty result)' {
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -MockWith {
+                [PSCustomObject]@{ Content = '<Response><ContentConditionList><Status>No. of records Zero.</Status></ContentConditionList></Response>' }
+            }
+        }
+
+        It 'Should return an empty array without throwing' {
+            $result = @(Get-SfosContentConditionList @conn)
+            $result.Count | Should -Be 0
+        }
+    }
+}
+
+Describe 'Get Parsing - FileType' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    Context 'A populated object' {
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -MockWith {
+                [PSCustomObject]@{ Content = @'
+<Response>
+  <Login><status>Authentication Successful</status></Login>
+  <FileType>
+    <Name>Archives</Name>
+    <Description>Common archives</Description>
+    <FileExtensionList><FileExtension>zip</FileExtension><FileExtension>rar</FileExtension></FileExtensionList>
+    <MIMEHeaderList><MIMEHeader>application/zip</MIMEHeader></MIMEHeaderList>
+  </FileType>
+</Response>
+'@
+                }
+            }
+        }
+
+        It 'Should parse Name, Description, FileExtensionList and MIMEHeaderList' {
+            $result = @(Get-SfosFileType @conn)[0]
+
+            $result.Name | Should -Be 'Archives'
+            $result.Description | Should -Be 'Common archives'
+            @($result.FileExtensionList) | Should -Be @('zip', 'rar')
+            @($result.MIMEHeaderList) | Should -Be @('application/zip')
+        }
+
+        It 'Should not expose a Template property' {
+            $result = @(Get-SfosFileType @conn)[0]
+            ($result.PSObject.Properties.Name -contains 'Template') | Should -Be $false
+        }
+    }
+
+    Context 'An object with no extensions or headers' {
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -MockWith {
+                [PSCustomObject]@{ Content = '<Response><FileType><Name>Empty</Name></FileType></Response>' }
+            }
+        }
+
+        It 'Should return empty arrays, not $null' {
+            $result = @(Get-SfosFileType @conn)[0]
+            @($result.FileExtensionList).Count | Should -Be 0
+            @($result.MIMEHeaderList).Count | Should -Be 0
+        }
+    }
+}
+
+Describe 'Additional XML Generation - FileType/URLGroup members' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    Context 'New-SfosFileType -Template' {
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -MockWith {
+                [PSCustomObject]@{ Content = '<Response><FileType><Status code="200">OK</Status></FileType></Response>' }
+            }
+        }
+
+        It 'Should send the Template element when supplied' {
+            New-SfosFileType -Name 'Templated' -Template 'Blank' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Template>Blank</Template>'
+            }
+        }
+    }
+
+    Context 'Remove-SfosFileType' {
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -MockWith {
+                [PSCustomObject]@{ Content = '<Response><FileType><Status code="200">OK</Status></FileType></Response>' }
+            }
+        }
+
+        It 'Should send a Remove request naming the object' {
+            Remove-SfosFileType -Name 'Archives' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Remove>' -and $InnerXml -match '<Name>Archives</Name>'
+            }
+        }
+    }
+
+    Context 'Remove-SfosWebFilterURLGroup' {
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -MockWith {
+                [PSCustomObject]@{ Content = '<Response><WebFilterURLGroup><Status code="200">OK</Status></WebFilterURLGroup></Response>' }
+            }
+        }
+
+        It 'Should send a Remove request naming the object' {
+            Remove-SfosWebFilterURLGroup -Name 'AllowedNews' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Remove>' -and $InnerXml -match '<Name>AllowedNews</Name>'
+            }
+        }
+    }
+
+    Context 'Add-SfosWebFilterURLGroupMember' {
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -MockWith {
+                if ($InnerXml -match '<Get>') {
+                    [PSCustomObject]@{ Content = @'
+<Response>
+  <Login><status>Authentication Successful</status></Login>
+  <WebFilterURLGroup>
+    <Name>AllowedNews</Name>
+    <Description>Approved sites</Description>
+    <URLlist><URL>news.example.com</URL></URLlist>
+  </WebFilterURLGroup>
+</Response>
+'@
+                    }
+                }
+                else {
+                    [PSCustomObject]@{ Content = '<Response><WebFilterURLGroup><Status code="200">OK</Status></WebFilterURLGroup></Response>' }
+                }
+            }
+        }
+
+        It 'Should merge the new member with the existing one and preserve Description' {
+            Add-SfosWebFilterURLGroupMember -Name 'AllowedNews' -Members 'news2.example.com' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Set operation="update">' -and
+                $InnerXml -match '<URL>news\.example\.com</URL>' -and
+                $InnerXml -match '<URL>news2\.example\.com</URL>' -and
+                $InnerXml -match '<Description>Approved sites</Description>'
+            }
+        }
+    }
+
+    Context 'Remove-SfosWebFilterURLGroupMember' {
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -MockWith {
+                if ($InnerXml -match '<Get>') {
+                    [PSCustomObject]@{ Content = @'
+<Response>
+  <Login><status>Authentication Successful</status></Login>
+  <WebFilterURLGroup>
+    <Name>AllowedNews</Name>
+    <Description>Approved sites</Description>
+    <URLlist><URL>news.example.com</URL><URL>news2.example.com</URL></URLlist>
+  </WebFilterURLGroup>
+</Response>
+'@
+                    }
+                }
+                else {
+                    [PSCustomObject]@{ Content = '<Response><WebFilterURLGroup><Status code="200">OK</Status></WebFilterURLGroup></Response>' }
+                }
+            }
+        }
+
+        It 'Should resend only the remaining member' {
+            Remove-SfosWebFilterURLGroupMember -Name 'AllowedNews' -Members 'news2.example.com' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<URL>news\.example\.com</URL>' -and
+                $InnerXml -notmatch '<URL>news2\.example\.com</URL>'
+            }
+        }
+    }
+
+    Context 'Remove-SfosWebFilterURLGroupMember on a group with no members' {
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -MockWith {
+                [PSCustomObject]@{ Content = '<Response><WebFilterURLGroup><Name>Empty</Name></WebFilterURLGroup></Response>' }
+            }
+        }
+
+        It 'Should return without calling the API again for the Set' {
+            Remove-SfosWebFilterURLGroupMember -Name 'Empty' -Members 'x.example.com' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -Times 1 -Exactly -ParameterFilter { $InnerXml -match '<Get>' }
+        }
+    }
+}
+
+Describe 'Set-SfosFileType Read-Modify-Write' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    BeforeEach {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -MockWith {
+            if ($InnerXml -match '<Get>') {
+                [PSCustomObject]@{ Content = @'
+<Response>
+  <Login><status>Authentication Successful</status></Login>
+  <FileType>
+    <Name>Archives</Name>
+    <Description>Original description</Description>
+    <FileExtensionList><FileExtension>zip</FileExtension><FileExtension>rar</FileExtension></FileExtensionList>
+    <MIMEHeaderList><MIMEHeader>application/zip</MIMEHeader></MIMEHeaderList>
+  </FileType>
+</Response>
+'@
+                }
+            }
+            else {
+                [PSCustomObject]@{ Content = '<Response><FileType><Status code="200">OK</Status></FileType></Response>' }
+            }
+        }
+    }
+
+    It 'Should resend the existing extensions and MIME headers when only the description changes' {
+        Set-SfosFileType -Name 'Archives' -Description 'Updated description' @conn -Confirm:$false
+
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -Times 1 -Exactly -ParameterFilter {
+            $InnerXml -match '<Set operation="update">' -and
+            $InnerXml -match '<Description>Updated description</Description>' -and
+            $InnerXml -match '<FileExtension>zip</FileExtension>' -and
+            $InnerXml -match '<FileExtension>rar</FileExtension>' -and
+            $InnerXml -match '<MIMEHeader>application/zip</MIMEHeader>'
+        }
+    }
+
+    It 'Should not expose a -Template parameter (the firewall never returns it, so it cannot be preserved)' {
+        (Get-Command Set-SfosFileType).Parameters.ContainsKey('Template') | Should -Be $false
+    }
+}
+
+Describe 'Get Parsing - WebFilterCategory' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    BeforeEach {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -MockWith {
+            [PSCustomObject]@{ Content = @'
+<Response>
+  <Login><status>Authentication Successful</status></Login>
+  <WebFilterCategory>
+    <Name>LocalCat</Name>
+    <Classification>Productive</Classification>
+    <ConfigureCategory>Local</ConfigureCategory>
+    <QoSPolicy>None</QoSPolicy>
+    <DomainList><Domain>example.com</Domain></DomainList>
+  </WebFilterCategory>
+  <WebFilterCategory>
+    <Name>OtherCat</Name>
+    <Classification>Unproductive</Classification>
+    <ConfigureCategory>Local</ConfigureCategory>
+    <QoSPolicy>None</QoSPolicy>
+  </WebFilterCategory>
+</Response>
+'@
+            }
+        }
+    }
+
+    It 'Should parse Classification, ConfigureCategory, QoSPolicy and DomainList' {
+        $result = @(Get-SfosWebFilterCategory @conn | Where-Object { $_.Name -eq 'LocalCat' })[0]
+
+        $result.Classification | Should -Be 'Productive'
+        $result.ConfigureCategory | Should -Be 'Local'
+        $result.QoSPolicy | Should -Be 'None'
+        @($result.DomainList) | Should -Be @('example.com')
+    }
+
+    It 'Should yield an empty array for absent KeywordList/URLList (regression: bare string-array cast used to produce a one-element array)' {
+        # Regression test for a defect found while writing this suite and fixed 2026-08-12:
+        # Get-SfosWebFilterCategory used to cast the bare ExpandProperty pipeline straight
+        # to [string[]], so an absent element ($node.KeywordList is $null) produced a
+        # one-element array holding an empty string instead of the @() that CLAUDE.md
+        # section 7 guarantees. The parser now wraps in @(...) with an empty-item filter,
+        # like the sibling parsers in WebFilterURLGroup/FileType always did.
+        $result = @(Get-SfosWebFilterCategory @conn | Where-Object { $_.Name -eq 'LocalCat' })[0]
+        @($result.KeywordList).Count | Should -Be 0
+        @($result.URLList).Count | Should -Be 0
+    }
+
+    It 'Should apply -ClassificationLike client-side' {
+        $result = @(Get-SfosWebFilterCategory -ClassificationLike 'Unproductive' @conn)
+        $result.Count | Should -Be 1
+        $result[0].Name | Should -Be 'OtherCat'
+    }
+}
+
+Describe 'New-SfosWebFilterCategory client-side validation' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    BeforeEach {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -MockWith {
+            [PSCustomObject]@{ Content = '<Response><WebFilterCategory><Status code="200">OK</Status></WebFilterCategory></Response>' }
+        }
+    }
+
+    It 'Should reject a Domain entry over 250 characters without calling the API' {
+        $longDomain = 'a' * 251
+        { New-SfosWebFilterCategory -Name 'TooLong' -Classification Productive -QoSPolicy None -Domain $longDomain @conn -Confirm:$false } | Should -Throw '*250 characters*'
+
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -Times 0 -Exactly
+    }
+
+    It 'Should reject a URL that includes a scheme without calling the API' {
+        { New-SfosWebFilterCategory -Name 'BadUrl' -Classification Productive -QoSPolicy None -Url 'https://example.com/list.txt' @conn -Confirm:$false } | Should -Throw '*scheme*'
+
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -Times 0 -Exactly
+    }
+}
+
+Describe 'Set-SfosWebFilterCategory Read-Modify-Write (Local)' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    BeforeEach {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -MockWith {
+            if ($InnerXml -match '<Get>') {
+                [PSCustomObject]@{ Content = @'
+<Response>
+  <Login><status>Authentication Successful</status></Login>
+  <WebFilterCategory>
+    <Name>LocalCat</Name>
+    <Classification>Productive</Classification>
+    <ConfigureCategory>Local</ConfigureCategory>
+    <QoSPolicy>None</QoSPolicy>
+    <Description>Original description</Description>
+    <DomainList><Domain>example.com</Domain></DomainList>
+  </WebFilterCategory>
+</Response>
+'@
+                }
+            }
+            else {
+                [PSCustomObject]@{ Content = '<Response><WebFilterCategory><Status code="200">OK</Status></WebFilterCategory></Response>' }
+            }
+        }
+    }
+
+    It 'Should resend Classification, QoSPolicy and Domain when only the description changes' {
+        Set-SfosWebFilterCategory -Name 'LocalCat' -ConfigureCategory Local -Description 'Updated description' @conn -Confirm:$false
+
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -Times 1 -Exactly -ParameterFilter {
+            $InnerXml -match '<Set operation="update">' -and
+            $InnerXml -match '<Classification>Productive</Classification>' -and
+            $InnerXml -match '<QoSPolicy>None</QoSPolicy>' -and
+            $InnerXml -match '<Domain>example\.com</Domain>' -and
+            $InnerXml -match '<Description>Updated description</Description>'
+        }
+    }
+}
+
+Describe 'Remove-SfosWebFilterCategory' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    BeforeEach {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -MockWith {
+            [PSCustomObject]@{ Content = '<Response><WebFilterCategory><Status code="200">OK</Status></WebFilterCategory></Response>' }
+        }
+    }
+
+    It 'Should send a Remove request naming the object' {
+        Remove-SfosWebFilterCategory -Name 'LocalCat' @conn -Confirm:$false
+
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -Times 1 -Exactly -ParameterFilter {
+            $InnerXml -match '<Remove>' -and $InnerXml -match '<Name>LocalCat</Name>'
+        }
+    }
+}
+
+Describe 'Get Parsing - UserActivity' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    BeforeEach {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -MockWith {
+            [PSCustomObject]@{ Content = @'
+<Response>
+  <Login><status>Authentication Successful</status></Login>
+  <UserActivity>
+    <Name>Activity1</Name>
+    <Desc>Search related</Desc>
+    <CategoryList><Category><ID>Search Engines</ID><type>web category</type></Category></CategoryList>
+  </UserActivity>
+</Response>
+'@
+            }
+        }
+    }
+
+    It 'Should map the lowercase <type> element to a Type property' {
+        $result = @(Get-SfosUserActivity @conn)[0]
+
+        $result.Desc | Should -Be 'Search related'
+        $result.CategoryList[0].ID | Should -Be 'Search Engines'
+        $result.CategoryList[0].Type | Should -Be 'web category'
+    }
+}
+
+Describe 'New-SfosUserActivity' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    BeforeEach {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -MockWith {
+            [PSCustomObject]@{ Content = '<Response><UserActivity><Status code="200">OK</Status></UserActivity></Response>' }
+        }
+    }
+
+    It 'Should build CategoryList with a lowercase type element' {
+        New-SfosUserActivity -Name 'Activity1' -CategoryList @([PSCustomObject]@{ ID = 'Search Engines'; Type = 'web category' }) @conn -Confirm:$false
+
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -Times 1 -Exactly -ParameterFilter {
+            $InnerXml -cmatch '<Category><ID>Search Engines</ID><type>web category</type></Category>' -and
+            $InnerXml -match '<Set operation="add">'
+        }
+    }
+
+    It 'Should reject a CategoryList entry missing ID or Type without calling the API' {
+        { New-SfosUserActivity -Name 'Bad' -CategoryList @([PSCustomObject]@{ ID = 'Search Engines' }) @conn -Confirm:$false } | Should -Throw '*ID*Type*'
+
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -Times 0 -Exactly
+    }
+}
+
+Describe 'Set-SfosUserActivity CategoryList preservation' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    BeforeEach {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -MockWith {
+            if ($InnerXml -match '<Get>') {
+                [PSCustomObject]@{ Content = @'
+<Response>
+  <Login><status>Authentication Successful</status></Login>
+  <UserActivity>
+    <Name>Activity1</Name>
+    <Desc>original</Desc>
+    <CategoryList><Category><ID>Search Engines</ID><type>web category</type></Category></CategoryList>
+  </UserActivity>
+</Response>
+'@
+                }
+            }
+            else {
+                [PSCustomObject]@{ Content = '<Response><UserActivity><Status code="200">OK</Status></UserActivity></Response>' }
+            }
+        }
+    }
+
+    It 'Should resend the existing CategoryList when only Desc changes' {
+        Set-SfosUserActivity -Name 'Activity1' -Desc 'updated' @conn -Confirm:$false
+
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -Times 1 -Exactly -ParameterFilter {
+            $InnerXml -cmatch '<Category><ID>Search Engines</ID><type>web category</type></Category>'
+        }
+    }
+}
+
+Describe 'Remove-SfosUserActivity' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    BeforeEach {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -MockWith {
+            [PSCustomObject]@{ Content = '<Response><UserActivity><Status code="200">OK</Status></UserActivity></Response>' }
+        }
+    }
+
+    It 'Should send a Remove request naming the object' {
+        Remove-SfosUserActivity -Name 'Activity1' @conn -Confirm:$false
+
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -Times 1 -Exactly -ParameterFilter {
+            $InnerXml -match '<Remove>' -and $InnerXml -match '<Name>Activity1</Name>'
+        }
+    }
+}
+
+Describe 'Add-SfosUserActivityMember merge behaviour' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    BeforeEach {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -MockWith {
+            if ($InnerXml -match '<Get>') {
+                [PSCustomObject]@{ Content = @'
+<Response>
+  <Login><status>Authentication Successful</status></Login>
+  <UserActivity>
+    <Name>Activity1</Name>
+    <Desc>original</Desc>
+    <CategoryList><Category><ID>Search Engines</ID><type>web category</type></Category></CategoryList>
+  </UserActivity>
+</Response>
+'@
+                }
+            }
+            else {
+                [PSCustomObject]@{ Content = '<Response><UserActivity><Status code="200">OK</Status></UserActivity></Response>' }
+            }
+        }
+    }
+
+    It 'Should keep the existing category and add the new one' {
+        Add-SfosUserActivityMember -Name 'Activity1' -Members @([PSCustomObject]@{ ID = 'Image Search'; Type = 'web category' }) @conn -Confirm:$false
+
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -Times 1 -Exactly -ParameterFilter {
+            $InnerXml -cmatch '<Category><ID>Search Engines</ID><type>web category</type></Category>' -and
+            $InnerXml -cmatch '<Category><ID>Image Search</ID><type>web category</type></Category>'
+        }
+    }
+}
+
+Describe 'Remove-SfosUserActivityMember error path' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    BeforeEach {
+        # Only one category present - removing it would leave an empty list, which the
+        # firewall rejects. The cmdlet must catch this client-side before calling the API.
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -MockWith {
+            if ($InnerXml -match '<Get>') {
+                [PSCustomObject]@{ Content = @'
+<Response>
+  <Login><status>Authentication Successful</status></Login>
+  <UserActivity>
+    <Name>Activity1</Name>
+    <Desc>original</Desc>
+    <CategoryList><Category><ID>Search Engines</ID><type>web category</type></Category></CategoryList>
+  </UserActivity>
+</Response>
+'@
+                }
+            }
+            else {
+                [PSCustomObject]@{ Content = '<Response><UserActivity><Status code="200">OK</Status></UserActivity></Response>' }
+            }
+        }
+    }
+
+    It 'Should throw rather than send an update with an empty CategoryList' {
+        { Remove-SfosUserActivityMember -Name 'Activity1' -Members @([PSCustomObject]@{ ID = 'Search Engines'; Type = 'web category' }) @conn -Confirm:$false } |
+            Should -Throw '*last CategoryList entry*'
+
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -Times 1 -Exactly -ParameterFilter { $InnerXml -match '<Get>' }
+    }
+}
+
+Describe 'Get Parsing - WebFilterException' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    BeforeEach {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -MockWith {
+            [PSCustomObject]@{ Content = @'
+<Response>
+  <Login><status>Authentication Successful</status></Login>
+  <WebFilterException>
+    <Name>Sophos Services</Name>
+    <Desc>Predefined</Desc>
+    <Enabled>on</Enabled>
+    <CertValidation>on</CertValidation>
+    <EnableSrcIP>no</EnableSrcIP>
+    <EnableDstIP>no</EnableDstIP>
+    <EnableURLRegex>no</EnableURLRegex>
+    <EnableWebCat>yes</EnableWebCat>
+    <DomainList><WebCategory>Business</WebCategory></DomainList>
+    <IsDefault>yes</IsDefault>
+  </WebFilterException>
+</Response>
+'@
+            }
+        }
+    }
+
+    It 'Should flatten the DomainList wrapper into named properties and expose IsDefault' {
+        $result = @(Get-SfosWebFilterException @conn)[0]
+
+        @($result.WebCategory) | Should -Be @('Business')
+        @($result.SourceIPAddress).Count | Should -Be 0
+        $result.IsDefault | Should -Be 'yes'
+        $result.EnableWebCat | Should -Be 'yes'
+    }
+}
+
+Describe 'Set-SfosWebFilterException additional error paths' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    Context 'A regex rejected by the firewall (live-observed 501)' {
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -MockWith {
+                if ($InnerXml -match '<Get>') {
+                    [PSCustomObject]@{ Content = @'
+<Response>
+  <Login><status>Authentication Successful</status></Login>
+  <WebFilterException>
+    <Name>ExampleException</Name>
+    <Desc>Original</Desc>
+    <Enabled>on</Enabled>
+    <CertValidation>on</CertValidation>
+    <EnableURLRegex>no</EnableURLRegex>
+    <DomainList></DomainList>
+  </WebFilterException>
+</Response>
+'@
+                    }
+                }
+                else {
+                    # Live-observed: '^https://...' style regexes are rejected with a
+                    # diagnostic-free 501 - reproduced here as a mocked error path.
+                    [PSCustomObject]@{ Content = '<Response><WebFilterException><Status code="501">Configuration parameters validation failed.</Status></WebFilterException></Response>' }
+                }
+            }
+        }
+
+        It 'Should throw and leave the object conceptually unmodified' {
+            { Set-SfosWebFilterException -Name 'ExampleException' -URLRegex '^https://blocked\.example\.com' @conn -Confirm:$false } | Should -Throw
+        }
+    }
+
+    Context 'Clearing every match criterion on update' {
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -MockWith {
+                [PSCustomObject]@{ Content = @'
+<Response>
+  <Login><status>Authentication Successful</status></Login>
+  <WebFilterException>
+    <Name>ExampleException</Name>
+    <Desc>Original</Desc>
+    <Enabled>on</Enabled>
+    <CertValidation>on</CertValidation>
+    <EnableSrcIP>yes</EnableSrcIP>
+    <DomainList><SrcIp>10.0.0.0/24</SrcIp></DomainList>
+  </WebFilterException>
+</Response>
+'@
+                }
+            }
+        }
+
+        It 'Should throw client-side rather than send an object with no criteria' {
+            { Set-SfosWebFilterException -Name 'ExampleException' -SourceIPAddress @() @conn -Confirm:$false } | Should -Throw '*match criterion*'
+        }
+    }
+}
+
+Describe 'Remove-SfosWebFilterException' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    BeforeEach {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -MockWith {
+            [PSCustomObject]@{ Content = '<Response><WebFilterException><Status code="200">OK</Status></WebFilterException></Response>' }
+        }
+    }
+
+    It 'Should send a Remove request naming the object' {
+        Remove-SfosWebFilterException -Name 'Example' @conn -Confirm:$false
+
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -Times 1 -Exactly -ParameterFilter {
+            $InnerXml -match '<Remove>' -and $InnerXml -match '<Name>Example</Name>'
+        }
+    }
+}
+
+Describe 'Get Parsing - WebFilterPolicy' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    Context 'A policy with rules' {
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -MockWith {
+                [PSCustomObject]@{ Content = @'
+<Response>
+  <Login><status>Authentication Successful</status></Login>
+  <WebFilterPolicy>
+    <Name>Restricted</Name>
+    <DefaultAction>Allow</DefaultAction>
+    <DownloadFileSizeRestriction>0</DownloadFileSizeRestriction>
+    <RuleList>
+      <Rule>
+        <CategoryList><Category><ID>Weapons</ID><type>WebCategory</type></Category></CategoryList>
+        <HTTPAction>Deny</HTTPAction>
+        <HTTPSAction>Deny</HTTPSAction>
+        <FollowHTTPAction>0</FollowHTTPAction>
+        <Schedule>All The Time</Schedule>
+        <PolicyRuleEnabled>1</PolicyRuleEnabled>
+        <CCLRuleEnabled>0</CCLRuleEnabled>
+        <ExceptionList><FileTypeCategory/></ExceptionList>
+      </Rule>
+    </RuleList>
+  </WebFilterPolicy>
+</Response>
+'@
+                }
+            }
+        }
+
+        It 'Should parse the RuleList into rule objects with an empty ExceptionList (not @(""))' {
+            $result = @(Get-SfosWebFilterPolicy @conn)[0]
+
+            @($result.RuleList).Count | Should -Be 1
+            $result.RuleList[0].HTTPAction | Should -Be 'Deny'
+            $result.RuleList[0].CategoryList[0].ID | Should -Be 'Weapons'
+            @($result.RuleList[0].ExceptionList).Count | Should -Be 0
+        }
+    }
+
+    Context 'A policy with no rules (the phantom-rule trap)' {
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -MockWith {
+                [PSCustomObject]@{ Content = '<Response><WebFilterPolicy><Name>Empty-Policy</Name><DefaultAction>Allow</DefaultAction><DownloadFileSizeRestriction>0</DownloadFileSizeRestriction></WebFilterPolicy></Response>' }
+            }
+        }
+
+        It 'Should return an empty RuleList, not a one-element array of blanks' {
+            $result = @(Get-SfosWebFilterPolicy @conn)[0]
+            @($result.RuleList).Count | Should -Be 0
+        }
+    }
+}
+
+Describe 'Remove-SfosWebFilterPolicy' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    BeforeEach {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -MockWith {
+            [PSCustomObject]@{ Content = '<Response><WebFilterPolicy><Status code="200">OK</Status></WebFilterPolicy></Response>' }
+        }
+    }
+
+    It 'Should send a Remove request naming the object' {
+        Remove-SfosWebFilterPolicy -Name 'Restricted' @conn -Confirm:$false
+
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -Times 1 -Exactly -ParameterFilter {
+            $InnerXml -match '<Remove>' -and $InnerXml -match '<Name>Restricted</Name>'
+        }
+    }
+}
+
+Describe 'New-SfosWebFilterPolicyCategory' {
+
+    It 'Should build a plain in-memory ID/Type object' {
+        $result = New-SfosWebFilterPolicyCategory -ID 'Extreme' -Type WebCategory
+
+        $result.ID | Should -Be 'Extreme'
+        $result.Type | Should -Be 'WebCategory'
+    }
+
+    It 'Should reject a Type outside the documented set' {
+        { New-SfosWebFilterPolicyCategory -ID 'Extreme' -Type 'NotARealType' } | Should -Throw
+    }
+}
+
+Describe 'New-SfosWebFilterPolicyRule rejects the undocumented-live-broken Log action' {
+
+    It 'Should not accept Log for -HTTPAction' {
+        { New-SfosWebFilterPolicyRule -Category (New-SfosWebFilterPolicyCategory -ID 'Extreme' -Type WebCategory) -HTTPAction Log } | Should -Throw
+    }
+
+    It 'Should not accept Log for -HTTPSAction' {
+        { New-SfosWebFilterPolicyRule -Category (New-SfosWebFilterPolicyCategory -ID 'Extreme' -Type WebCategory) -HTTPSAction Log } | Should -Throw
+    }
+}
+
+Describe 'Add-SfosWebFilterPolicyRule' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    Context 'An existing policy with one rule' {
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -MockWith {
+                if ($InnerXml -match '<Get>') {
+                    [PSCustomObject]@{ Content = @'
+<Response>
+  <Login><status>Authentication Successful</status></Login>
+  <WebFilterPolicy>
+    <Name>Basic-Policy</Name>
+    <DefaultAction>Allow</DefaultAction>
+    <DownloadFileSizeRestriction>0</DownloadFileSizeRestriction>
+    <RuleList>
+      <Rule>
+        <CategoryList><Category><ID>Extreme</ID><type>WebCategory</type></Category></CategoryList>
+        <HTTPAction>Deny</HTTPAction>
+        <HTTPSAction>Deny</HTTPSAction>
+        <FollowHTTPAction>0</FollowHTTPAction>
+        <Schedule>All The Time</Schedule>
+        <PolicyRuleEnabled>1</PolicyRuleEnabled>
+        <CCLRuleEnabled>0</CCLRuleEnabled>
+      </Rule>
+    </RuleList>
+  </WebFilterPolicy>
+</Response>
+'@
+                    }
+                }
+                else {
+                    [PSCustomObject]@{ Content = '<Response><WebFilterPolicy><Status code="200">OK</Status></WebFilterPolicy></Response>' }
+                }
+            }
+        }
+
+        It 'Should keep the existing rule and append the new one' {
+            $newRule = New-SfosWebFilterPolicyRule -Category (New-SfosWebFilterPolicyCategory -ID 'Weapons' -Type WebCategory) -HTTPAction Warn -HTTPSAction Warn
+            Add-SfosWebFilterPolicyRule -Name 'Basic-Policy' -Rule $newRule @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<ID>Extreme</ID>' -and $InnerXml -match '<ID>Weapons</ID>' -and
+                $InnerXml -match '<Set operation="update">'
+            }
+        }
+    }
+
+    Context 'A policy that does not exist' {
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -MockWith {
+                [PSCustomObject]@{ Content = '<Response><WebFilterPolicy><Status>No. of records Zero.</Status></WebFilterPolicy></Response>' }
+            }
+        }
+
+        It 'Should throw naming the object' {
+            $rule = New-SfosWebFilterPolicyRule -Category (New-SfosWebFilterPolicyCategory -ID 'Weapons' -Type WebCategory) -HTTPAction Warn
+            { Add-SfosWebFilterPolicyRule -Name 'DoesNotExist' -Rule $rule @conn -Confirm:$false } | Should -Throw '*DoesNotExist*'
+        }
+    }
+}
+
+Describe 'Remove-SfosWebFilterPolicyRule' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    Context 'A policy with two rules' {
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -MockWith {
+                if ($InnerXml -match '<Get>') {
+                    [PSCustomObject]@{ Content = @'
+<Response>
+  <Login><status>Authentication Successful</status></Login>
+  <WebFilterPolicy>
+    <Name>Basic-Policy</Name>
+    <DefaultAction>Allow</DefaultAction>
+    <DownloadFileSizeRestriction>0</DownloadFileSizeRestriction>
+    <RuleList>
+      <Rule>
+        <CategoryList><Category><ID>Extreme</ID><type>WebCategory</type></Category></CategoryList>
+        <HTTPAction>Deny</HTTPAction><HTTPSAction>Deny</HTTPSAction><FollowHTTPAction>0</FollowHTTPAction>
+        <Schedule>All The Time</Schedule><PolicyRuleEnabled>1</PolicyRuleEnabled><CCLRuleEnabled>0</CCLRuleEnabled>
+      </Rule>
+      <Rule>
+        <CategoryList><Category><ID>Weapons</ID><type>WebCategory</type></Category></CategoryList>
+        <HTTPAction>Warn</HTTPAction><HTTPSAction>Warn</HTTPSAction><FollowHTTPAction>0</FollowHTTPAction>
+        <Schedule>All The Time</Schedule><PolicyRuleEnabled>1</PolicyRuleEnabled><CCLRuleEnabled>0</CCLRuleEnabled>
+      </Rule>
+    </RuleList>
+  </WebFilterPolicy>
+</Response>
+'@
+                    }
+                }
+                else {
+                    [PSCustomObject]@{ Content = '<Response><WebFilterPolicy><Status code="200">OK</Status></WebFilterPolicy></Response>' }
+                }
+            }
+        }
+
+        It 'Should keep only the rule that was not removed' {
+            Remove-SfosWebFilterPolicyRule -Name 'Basic-Policy' -Index 0 @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<ID>Weapons</ID>' -and $InnerXml -notmatch '<ID>Extreme</ID>'
+            }
+        }
+
+        It 'Should throw for an out-of-range index' {
+            { Remove-SfosWebFilterPolicyRule -Name 'Basic-Policy' -Index 5 @conn -Confirm:$false } | Should -Throw '*out of range*'
+        }
+    }
+}
+
+Describe 'Get Parsing - SurfingQuotaPolicy' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    BeforeEach {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -MockWith {
+            [PSCustomObject]@{ Content = @'
+<Response>
+  <Login><status>Authentication Successful</status></Login>
+  <SurfingQuotaPolicy>
+    <Name>Daily-Quota</Name>
+    <CycleType>Cyclic</CycleType>
+    <CycleHours>2</CycleHours>
+    <CycleMinutes>30</CycleMinutes>
+    <PerDay>Days</PerDay>
+  </SurfingQuotaPolicy>
+  <SurfingQuotaPolicy>
+    <Name>Monthly-Quota</Name>
+    <CycleType>NonCyclic</CycleType>
+    <Validity>30</Validity>
+    <MaximumHours>100</MaximumHours>
+  </SurfingQuotaPolicy>
+</Response>
+'@
+            }
+        }
+    }
+
+    It 'Should parse Cyclic type-specific fields' {
+        $result = @(Get-SfosSurfingQuotaPolicy @conn | Where-Object { $_.Name -eq 'Daily-Quota' })[0]
+
+        $result.CycleType | Should -Be 'Cyclic'
+        $result.CycleHours | Should -Be '2'
+        $result.PerDay | Should -Be 'Days'
+    }
+
+    It 'Should parse NonCyclic type-specific fields' {
+        $result = @(Get-SfosSurfingQuotaPolicy @conn | Where-Object { $_.Name -eq 'Monthly-Quota' })[0]
+
+        $result.CycleType | Should -Be 'NonCyclic'
+        $result.Validity | Should -Be '30'
+        $result.MaximumHours | Should -Be '100'
+    }
+}
+
+Describe 'New-SfosSurfingQuotaPolicy' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    BeforeEach {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -MockWith {
+            [PSCustomObject]@{ Content = '<Response><SurfingQuotaPolicy><Status code="200">OK</Status></SurfingQuotaPolicy></Response>' }
+        }
+    }
+
+    It 'Should send CycleHours/CycleMinutes/PerDay for a Cyclic policy' {
+        New-SfosSurfingQuotaPolicy -Name 'Daily-Quota' -CycleType Cyclic -CycleHours 2 -CycleMinutes 30 -PerDay Days @conn -Confirm:$false
+
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -Times 1 -Exactly -ParameterFilter {
+            $InnerXml -match '<CycleType>Cyclic</CycleType>' -and
+            $InnerXml -match '<CycleHours>2</CycleHours>' -and
+            $InnerXml -match '<CycleMinutes>30</CycleMinutes>' -and
+            $InnerXml -match '<PerDay>Days</PerDay>' -and
+            $InnerXml -notmatch '<Validity>'
+        }
+    }
+
+    It 'Should send Validity/MaximumHours for a NonCyclic policy' {
+        New-SfosSurfingQuotaPolicy -Name 'Monthly-Quota' -CycleType NonCyclic -Validity 30 -MaximumHours 100 @conn -Confirm:$false
+
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -Times 1 -Exactly -ParameterFilter {
+            $InnerXml -match '<CycleType>NonCyclic</CycleType>' -and
+            $InnerXml -match '<Validity>30</Validity>' -and
+            $InnerXml -match '<MaximumHours>100</MaximumHours>' -and
+            $InnerXml -notmatch '<CycleHours>'
+        }
+    }
+
+    It 'Should throw for Cyclic without the required fields, before calling the API' {
+        { New-SfosSurfingQuotaPolicy -Name 'Bad' -CycleType Cyclic @conn -Confirm:$false } | Should -Throw '*requires*'
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -Times 0 -Exactly
+    }
+
+    It 'Should throw for NonCyclic without the required fields, before calling the API' {
+        { New-SfosSurfingQuotaPolicy -Name 'Bad' -CycleType NonCyclic @conn -Confirm:$false } | Should -Throw '*requires*'
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -Times 0 -Exactly
+    }
+
+    It 'Should reject a non-numeric CycleHours' {
+        { New-SfosSurfingQuotaPolicy -Name 'Bad' -CycleType Cyclic -CycleHours 'notanumber' -CycleMinutes 0 -PerDay Days @conn -Confirm:$false } | Should -Throw '*non-negative integer*'
+    }
+}
+
+Describe 'Set-SfosSurfingQuotaPolicy Read-Modify-Write' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    BeforeEach {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -MockWith {
+            if ($InnerXml -match '<Get>') {
+                [PSCustomObject]@{ Content = @'
+<Response>
+  <Login><status>Authentication Successful</status></Login>
+  <SurfingQuotaPolicy>
+    <Name>Daily-Quota</Name>
+    <CycleType>Cyclic</CycleType>
+    <CycleHours>2</CycleHours>
+    <CycleMinutes>30</CycleMinutes>
+    <PerDay>Days</PerDay>
+    <Description>Original description</Description>
+  </SurfingQuotaPolicy>
+</Response>
+'@
+                }
+            }
+            else {
+                [PSCustomObject]@{ Content = '<Response><SurfingQuotaPolicy><Status code="200">OK</Status></SurfingQuotaPolicy></Response>' }
+            }
+        }
+    }
+
+    It 'Should resend CycleHours/CycleMinutes/PerDay when only the description changes' {
+        Set-SfosSurfingQuotaPolicy -Name 'Daily-Quota' -CycleType Cyclic -Description 'Updated description' @conn -Confirm:$false
+
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -Times 1 -Exactly -ParameterFilter {
+            $InnerXml -match '<Set operation="update">' -and
+            $InnerXml -match '<CycleHours>2</CycleHours>' -and
+            $InnerXml -match '<CycleMinutes>30</CycleMinutes>' -and
+            $InnerXml -match '<PerDay>Days</PerDay>' -and
+            $InnerXml -match '<Description>Updated description</Description>'
+        }
+    }
+}
+
+Describe 'Remove-SfosSurfingQuotaPolicy' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    BeforeEach {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -MockWith {
+            [PSCustomObject]@{ Content = '<Response><SurfingQuotaPolicy><Status code="200">OK</Status></SurfingQuotaPolicy></Response>' }
+        }
+    }
+
+    It 'Should send a Remove request naming the object' {
+        Remove-SfosSurfingQuotaPolicy -Name 'Daily-Quota' @conn -Confirm:$false
+
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -Times 1 -Exactly -ParameterFilter {
+            $InnerXml -match '<Remove>' -and $InnerXml -match '<Name>Daily-Quota</Name>'
+        }
+    }
+}
+
+Describe 'ContentConditionList (Key addressing)' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    Context 'Get-SfosContentConditionList' {
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -MockWith {
+                [PSCustomObject]@{ Content = @'
+<Response>
+  <Login><status>Authentication Successful</status></Login>
+  <ContentConditionList>
+    <Name>Sensitive-Terms</Name>
+    <Key>SensitiveTerms_Custom</Key>
+    <Description>Test list</Description>
+    <ContentList><ContentString>foo</ContentString><ContentString>bar</ContentString></ContentList>
+  </ContentConditionList>
+</Response>
+'@
+                }
+            }
+        }
+
+        It 'Should parse Key and ContentList and send only Key server-side' {
+            Get-SfosContentConditionList -KeyLike 'SensitiveTerms' @conn | Out-Null
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<key name="Key" criteria="like">SensitiveTerms</key>'
+            }
+        }
+
+        It 'Should return the parsed object' {
+            $result = @(Get-SfosContentConditionList @conn)[0]
+            $result.Key | Should -Be 'SensitiveTerms_Custom'
+            @($result.ContentList) | Should -Be @('foo', 'bar')
+        }
+    }
+
+    Context 'New-SfosContentConditionList' {
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -MockWith {
+                [PSCustomObject]@{ Content = '<Response><ContentConditionList><Status code="200">OK</Status></ContentConditionList></Response>' }
+            }
+        }
+
+        It 'Should not send a Key element - the firewall derives it from Name' {
+            New-SfosContentConditionList -Name 'Sensitive-Terms' -ContentStrings @('foo', 'bar') @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -notmatch '<Key>' -and
+                $InnerXml -match '<ContentString>foo</ContentString>' -and
+                $InnerXml -match '<ContentString>bar</ContentString>'
+            }
+        }
+    }
+
+    Context 'Set-SfosContentConditionList' {
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -MockWith {
+                if ($InnerXml -match '<Get>') {
+                    [PSCustomObject]@{ Content = @'
+<Response>
+  <Login><status>Authentication Successful</status></Login>
+  <ContentConditionList>
+    <Name>Sensitive-Terms</Name>
+    <Key>SensitiveTerms_Custom</Key>
+    <Description>Original description</Description>
+    <ContentList><ContentString>foo</ContentString><ContentString>bar</ContentString></ContentList>
+  </ContentConditionList>
+</Response>
+'@
+                    }
+                }
+                else {
+                    [PSCustomObject]@{ Content = '<Response><ContentConditionList><Status code="200">OK</Status></ContentConditionList></Response>' }
+                }
+            }
+        }
+
+        It 'Should address the object by Key and resend the existing ContentList when only Description changes' {
+            Set-SfosContentConditionList -Key 'SensitiveTerms_Custom' -Description 'Updated description' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Key>SensitiveTerms_Custom</Key>' -and
+                $InnerXml -match '<Description>Updated description</Description>' -and
+                $InnerXml -match '<ContentString>foo</ContentString>' -and
+                $InnerXml -match '<ContentString>bar</ContentString>'
+            }
+        }
+    }
+
+    Context 'Remove-SfosContentConditionList' {
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -MockWith {
+                [PSCustomObject]@{ Content = '<Response><ContentConditionList><Status code="200">OK</Status></ContentConditionList></Response>' }
+            }
+        }
+
+        It 'Should remove by Key, not by Name' {
+            Remove-SfosContentConditionList -Key 'SensitiveTerms_Custom' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Remove>' -and $InnerXml -match '<Key>SensitiveTerms_Custom</Key>'
+            }
+        }
+    }
+
+    Context 'Add-SfosContentConditionListMember' {
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -MockWith {
+                if ($InnerXml -match '<Get>') {
+                    [PSCustomObject]@{ Content = @'
+<Response>
+  <Login><status>Authentication Successful</status></Login>
+  <ContentConditionList>
+    <Name>Sensitive-Terms</Name>
+    <Key>SensitiveTerms_Custom</Key>
+    <Description>Test list</Description>
+    <ContentList><ContentString>foo</ContentString></ContentList>
+  </ContentConditionList>
+</Response>
+'@
+                    }
+                }
+                else {
+                    [PSCustomObject]@{ Content = '<Response><ContentConditionList><Status code="200">OK</Status></ContentConditionList></Response>' }
+                }
+            }
+        }
+
+        It 'Should merge the new string with the existing one and preserve Name and Description' {
+            Add-SfosContentConditionListMember -Key 'SensitiveTerms_Custom' -ContentStrings 'baz' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<ContentString>foo</ContentString>' -and
+                $InnerXml -match '<ContentString>baz</ContentString>' -and
+                $InnerXml -match '<Name>Sensitive-Terms</Name>' -and
+                $InnerXml -match '<Description>Test list</Description>'
+            }
+        }
+    }
+
+    Context 'Remove-SfosContentConditionListMember' {
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -MockWith {
+                if ($InnerXml -match '<Get>') {
+                    [PSCustomObject]@{ Content = @'
+<Response>
+  <Login><status>Authentication Successful</status></Login>
+  <ContentConditionList>
+    <Name>Sensitive-Terms</Name>
+    <Key>SensitiveTerms_Custom</Key>
+    <Description>Test list</Description>
+    <ContentList><ContentString>foo</ContentString><ContentString>baz</ContentString></ContentList>
+  </ContentConditionList>
+</Response>
+'@
+                    }
+                }
+                else {
+                    [PSCustomObject]@{ Content = '<Response><ContentConditionList><Status code="200">OK</Status></ContentConditionList></Response>' }
+                }
+            }
+        }
+
+        It 'Should resend only the remaining string' {
+            Remove-SfosContentConditionListMember -Key 'SensitiveTerms_Custom' -ContentStrings 'baz' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<ContentString>foo</ContentString>' -and
+                $InnerXml -notmatch '<ContentString>baz</ContentString>'
+            }
+        }
+    }
+}
+
+Describe 'Settings Singletons' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    Context 'Get-SfosMalwareProtection' {
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -MockWith {
+                [PSCustomObject]@{ Content = '<Response><MalwareProtection><PrimaryAntiVirusEngine>Sophos</PrimaryAntiVirusEngine></MalwareProtection></Response>' }
+            }
+        }
+
+        It 'Should parse PrimaryAntiVirusEngine' {
+            (Get-SfosMalwareProtection @conn).PrimaryAntiVirusEngine | Should -Be 'Sophos'
+        }
+    }
+
+    Context 'Set-SfosMalwareProtection Read-Modify-Write' {
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -MockWith {
+                if ($InnerXml -match '<Get>') {
+                    [PSCustomObject]@{ Content = '<Response><MalwareProtection><PrimaryAntiVirusEngine>Sophos</PrimaryAntiVirusEngine></MalwareProtection></Response>' }
+                }
+                else {
+                    [PSCustomObject]@{ Content = '<Response><MalwareProtection><Status code="200">OK</Status></MalwareProtection></Response>' }
+                }
+            }
+        }
+
+        It 'Should resend the existing engine when no parameter is bound' {
+            Set-SfosMalwareProtection @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Set operation="update">' -and
+                $InnerXml -match '<PrimaryAntiVirusEngine>Sophos</PrimaryAntiVirusEngine>'
+            }
+        }
+    }
+
+    Context 'Get-SfosWebFilterSettings' {
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -MockWith {
+                [PSCustomObject]@{ Content = @'
+<Response>
+  <WebFilterSettings>
+    <WebCaching>Disable</WebCaching>
+    <Scanning>Single Anti-Virus (Maximum Performance)</Scanning>
+    <BlockUnscannableContent>Block (Best Protection)</BlockUnscannableContent>
+    <PharmingProtection>Enable</PharmingProtection>
+    <DeniedMessageImage>Default</DeniedMessageImage>
+  </WebFilterSettings>
+</Response>
+'@
+                }
+            }
+        }
+
+        It 'Should parse the fields and return an empty PUAWhitelist when absent' {
+            $result = Get-SfosWebFilterSettings @conn
+            $result.WebCaching | Should -Be 'Disable'
+            $result.PharmingProtection | Should -Be 'Enable'
+            @($result.PUAWhitelist).Count | Should -Be 0
+        }
+    }
+
+    Context 'Set-SfosWebFilterSettings preserves PharmingProtection (documented worst-case)' {
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -MockWith {
+                if ($InnerXml -match '<Get>') {
+                    [PSCustomObject]@{ Content = @'
+<Response>
+  <WebFilterSettings>
+    <WebCaching>Disable</WebCaching>
+    <Scanning>Single Anti-Virus (Maximum Performance)</Scanning>
+    <BlockUnscannableContent>Block (Best Protection)</BlockUnscannableContent>
+    <PharmingProtection>Enable</PharmingProtection>
+    <DeniedMessageImage>Default</DeniedMessageImage>
+  </WebFilterSettings>
+</Response>
+'@
+                    }
+                }
+                else {
+                    [PSCustomObject]@{ Content = '<Response><WebFilterSettings><Status code="200">OK</Status></WebFilterSettings></Response>' }
+                }
+            }
+        }
+
+        It 'Should resend PharmingProtection unchanged when only WebCaching is toggled' {
+            # This is the exact scenario CLAUDE.md documents as a live data-loss defect on the
+            # sibling singleton WebFilterProtectionSettings: a field never mentioned in the
+            # request was silently reset to Disable. Read-modify-write must prevent it here too.
+            Set-SfosWebFilterSettings -WebCaching 'Enable' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<WebCaching>Enable</WebCaching>' -and
+                $InnerXml -match '<PharmingProtection>Enable</PharmingProtection>' -and
+                $InnerXml -match '<Scanning>Single Anti-Virus \(Maximum Performance\)</Scanning>'
+            }
+        }
+    }
+
+    Context 'Get-SfosWebFilterProtectionSettings' {
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -MockWith {
+                [PSCustomObject]@{ Content = @'
+<Response>
+  <WebFilterProtectionSettings>
+    <ScanMode>BatchMode</ScanMode>
+    <FileSizeThreshold>30720</FileSizeThreshold>
+    <FTPFileSizeThreshold>30720</FTPFileSizeThreshold>
+    <PharmingProtection>Enable</PharmingProtection>
+    <PUADetection>Disable</PUADetection>
+  </WebFilterProtectionSettings>
+</Response>
+'@
+                }
+            }
+        }
+
+        It 'Should parse FileSizeThreshold as an int and PharmingProtection as a string' {
+            $result = Get-SfosWebFilterProtectionSettings @conn
+            $result.FileSizeThreshold | Should -Be 30720
+            $result.PharmingProtection | Should -Be 'Enable'
+        }
+    }
+
+    Context 'Set-SfosWebFilterProtectionSettings preserves PharmingProtection - the documented Ernstfall' {
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -MockWith {
+                if ($InnerXml -match '<Get>') {
+                    [PSCustomObject]@{ Content = @'
+<Response>
+  <WebFilterProtectionSettings>
+    <ScanMode>BatchMode</ScanMode>
+    <FileSizeThreshold>30720</FileSizeThreshold>
+    <FTPFileSizeThreshold>30720</FTPFileSizeThreshold>
+    <AudioVideoFileScanning>Enable</AudioVideoFileScanning>
+    <PharmingProtection>Enable</PharmingProtection>
+    <PUADetection>Disable</PUADetection>
+  </WebFilterProtectionSettings>
+</Response>
+'@
+                    }
+                }
+                else {
+                    [PSCustomObject]@{ Content = '<Response><WebFilterProtectionSettings><Status code="200">OK</Status></WebFilterProtectionSettings></Response>' }
+                }
+            }
+        }
+
+        It 'Should resend PharmingProtection=Enable when only FileSizeThreshold changes' {
+            # Live-verified defect (CLAUDE.md SS5): a Set carrying only FileSizeThreshold,
+            # FTPFileSizeThreshold and AudioVideoFileScanning reset PharmingProtection from
+            # Enable to Disable with a code="200" success response. This is the test that
+            # catches a regression of exactly that defect.
+            Set-SfosWebFilterProtectionSettings -FileSizeThreshold 30721 @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<FileSizeThreshold>30721</FileSizeThreshold>' -and
+                $InnerXml -match '<PharmingProtection>Enable</PharmingProtection>' -and
+                $InnerXml -match '<AudioVideoFileScanning>Enable</AudioVideoFileScanning>'
+            }
+        }
+    }
+
+    Context 'Get-SfosWebFilterAdvancedSettings' {
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -MockWith {
+                [PSCustomObject]@{ Content = @'
+<Response>
+  <WebFilterAdvancedSettings>
+    <WebCaching>Disable</WebCaching>
+    <WebProxyPort>3128</WebProxyPort>
+    <WebProxyMinimumTLSVersion>TLS 1.1</WebProxyMinimumTLSVersion>
+    <TrustedPorts><Port>21</Port><Port>1025-65535</Port></TrustedPorts>
+  </WebFilterAdvancedSettings>
+</Response>
+'@
+                }
+            }
+        }
+
+        It 'Should parse TrustedPorts as strings, including a range' {
+            $result = Get-SfosWebFilterAdvancedSettings @conn
+            @($result.TrustedPorts) | Should -Be @('21', '1025-65535')
+            $result.WebProxyPort | Should -Be 3128
+        }
+    }
+
+    Context 'Set-SfosWebFilterAdvancedSettings preserves TrustedPorts' {
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -MockWith {
+                if ($InnerXml -match '<Get>') {
+                    [PSCustomObject]@{ Content = @'
+<Response>
+  <WebFilterAdvancedSettings>
+    <WebCaching>Disable</WebCaching>
+    <WebProxyPort>3128</WebProxyPort>
+    <WebProxyMinimumTLSVersion>TLS 1.1</WebProxyMinimumTLSVersion>
+    <TrustedPorts><Port>21</Port><Port>1025-65535</Port></TrustedPorts>
+  </WebFilterAdvancedSettings>
+</Response>
+'@
+                    }
+                }
+                else {
+                    [PSCustomObject]@{ Content = '<Response><WebFilterAdvancedSettings><Status code="200">OK</Status></WebFilterAdvancedSettings></Response>' }
+                }
+            }
+        }
+
+        It 'Should resend the existing TrustedPorts when only WebProxyPort changes' {
+            Set-SfosWebFilterAdvancedSettings -WebProxyPort 8080 @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<WebProxyPort>8080</WebProxyPort>' -and
+                $InnerXml -match '<Port>21</Port>' -and
+                $InnerXml -match '<Port>1025-65535</Port>' -and
+                $InnerXml -match '<WebProxyMinimumTLSVersion>TLS 1\.1</WebProxyMinimumTLSVersion>'
+            }
+        }
+    }
+
+    Context 'Get-SfosDefaultWebFilterNotificationSettings' {
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -MockWith {
+                [PSCustomObject]@{ Content = '<Response><DefaultWebFilterNotificationSettings><Warning>Warning!</Warning><DownloadBlocked>Blocked</DownloadBlocked></DefaultWebFilterNotificationSettings></Response>' }
+            }
+        }
+
+        It 'Should build a dynamic object from whatever fields the firewall returns' {
+            $result = Get-SfosDefaultWebFilterNotificationSettings @conn
+            $result.Warning | Should -Be 'Warning!'
+            $result.DownloadBlocked | Should -Be 'Blocked'
+        }
+    }
+
+    Context 'Set-SfosDefaultWebFilterNotificationSettings' {
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -MockWith {
+                if ($InnerXml -match '<Get>') {
+                    [PSCustomObject]@{ Content = '<Response><DefaultWebFilterNotificationSettings><Warning>Warning!</Warning><DownloadBlocked>Blocked</DownloadBlocked></DefaultWebFilterNotificationSettings></Response>' }
+                }
+                else {
+                    [PSCustomObject]@{ Content = '<Response><DefaultWebFilterNotificationSettings><Status code="200">OK</Status></DefaultWebFilterNotificationSettings></Response>' }
+                }
+            }
+        }
+
+        It 'Should change only the requested field and resend the rest unchanged' {
+            Set-SfosDefaultWebFilterNotificationSettings -Message @{ Warning = 'Achtung!' } @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Warning>Achtung!</Warning>' -and
+                $InnerXml -match '<DownloadBlocked>Blocked</DownloadBlocked>'
+            }
+        }
+
+        It 'Should throw on an unknown field name before sending any Set request' {
+            { Set-SfosDefaultWebFilterNotificationSettings -Message @{ NotARealField = 'x' } @conn -Confirm:$false } | Should -Throw '*not a known*'
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -Times 1 -Exactly -ParameterFilter { $InnerXml -match '<Get>' }
+        }
+    }
+}

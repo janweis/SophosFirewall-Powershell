@@ -457,6 +457,280 @@ Describe 'Read-Modify-Write - AuthenticationServer secret preservation' {
     }
 }
 
+Describe 'AuthenticationServer family - Remove nested under AuthenticationServer/<Type>' {
+    # Measured: Remove, like Get, addresses these four server types nested under
+    # <AuthenticationServer>, unlike the flat New/Set status path used by LDAPServer.
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    BeforeEach {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+            [PSCustomObject]@{ Content = '<Response><AuthenticationServer><ActiveDirectory><Status code="200">Configuration applied successfully.</Status></ActiveDirectory></AuthenticationServer></Response>' }
+        }
+    }
+
+    It 'Remove-SfosActiveDirectoryServer should send Remove/AuthenticationServer/ActiveDirectory/ServerName' {
+        Remove-SfosActiveDirectoryServer -ServerName 'CorpAD' @conn -Confirm:$false
+
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -Times 1 -Exactly -ParameterFilter {
+            $InnerXml -match '<Remove>' -and
+            $InnerXml -match '<AuthenticationServer>\s*<ActiveDirectory>' -and
+            $InnerXml -match '<ServerName>CorpAD</ServerName>'
+        }
+    }
+
+    It 'Remove-SfosRADIUSServer should send Remove/AuthenticationServer/RADIUSServer/ServerName' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+            [PSCustomObject]@{ Content = '<Response><AuthenticationServer><RADIUSServer><Status code="200">Configuration applied successfully.</Status></RADIUSServer></AuthenticationServer></Response>' }
+        }
+
+        Remove-SfosRADIUSServer -ServerName 'CorpRadius' @conn -Confirm:$false
+
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -Times 1 -Exactly -ParameterFilter {
+            $InnerXml -match '<Remove>' -and
+            $InnerXml -match '<AuthenticationServer>\s*<RADIUSServer>' -and
+            $InnerXml -match '<ServerName>CorpRadius</ServerName>'
+        }
+    }
+
+    It 'Remove-SfosTACACSServer should send Remove/AuthenticationServer/TACACSServer/ServerName' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+            [PSCustomObject]@{ Content = '<Response><AuthenticationServer><TACACSServer><Status code="200">Configuration applied successfully.</Status></TACACSServer></AuthenticationServer></Response>' }
+        }
+
+        Remove-SfosTACACSServer -ServerName 'CorpTacacs' @conn -Confirm:$false
+
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -Times 1 -Exactly -ParameterFilter {
+            $InnerXml -match '<Remove>' -and
+            $InnerXml -match '<AuthenticationServer>\s*<TACACSServer>' -and
+            $InnerXml -match '<ServerName>CorpTacacs</ServerName>'
+        }
+    }
+
+    It 'Remove-SfosEDirectoryServer should send Remove/AuthenticationServer/EDirectory/ServerName' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+            [PSCustomObject]@{ Content = '<Response><AuthenticationServer><EDirectory><Status code="200">Configuration applied successfully.</Status></EDirectory></AuthenticationServer></Response>' }
+        }
+
+        Remove-SfosEDirectoryServer -ServerName 'CorpEDir' @conn -Confirm:$false
+
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -Times 1 -Exactly -ParameterFilter {
+            $InnerXml -match '<Remove>' -and
+            $InnerXml -match '<AuthenticationServer>\s*<EDirectory>' -and
+            $InnerXml -match '<ServerName>CorpEDir</ServerName>'
+        }
+    }
+
+    It 'Remove-SfosActiveDirectoryServer should throw when the removal fails' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+            [PSCustomObject]@{ Content = '<Response><AuthenticationServer><ActiveDirectory><Status code="528">Trying to update default entities which are not editable</Status></ActiveDirectory></AuthenticationServer></Response>' }
+        }
+
+        { Remove-SfosActiveDirectoryServer -ServerName 'NoSuchServer' @conn -Confirm:$false } | Should -Throw '*528*'
+    }
+}
+
+Describe 'LDAPServer - New/Set mandatory-Administrator client-side check, Remove' {
+    # Measured: with AnonymousLogin=Disable, omitting Administrator answers code 501 on both
+    # New and Set. Both cmdlets check the merged target values client-side and throw before
+    # calling the API, so the mock below never needs to simulate the 501 itself.
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    Context 'New-SfosLDAPServer' {
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+                [PSCustomObject]@{ Content = '<Response><LDAPServer><Status code="200">Configuration applied successfully.</Status></LDAPServer></Response>' }
+            }
+        }
+
+        It 'Should send operation="add" nested under AuthenticationServer/LDAPServer with the mandatory fields' {
+            New-SfosLDAPServer -ServerName 'CorpLDAP' -ServerAddress 'ldap.example.invalid' -ServerPort 389 `
+                -Version '3' -AnonymousLogin Enable -ConnectionSecurity Simple -BaseDN 'dc=corp,dc=example,dc=invalid' `
+                -AuthenticationAttribute 'sAMAccountName' -GroupNameAttribute 'memberOf' -ExpiryDateAttribute 'accountExpires' `
+                @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Set operation="add">' -and
+                $InnerXml -match '<AuthenticationServer>\s*<LDAPServer>' -and
+                $InnerXml -match '<ServerName>CorpLDAP</ServerName>' -and
+                $InnerXml -match '<AnonymousLogin>Enable</AnonymousLogin>' -and
+                $InnerXml -notmatch '<Administrator>'
+            }
+        }
+
+        It 'Should throw client-side, without calling Invoke-SfosApi, when AnonymousLogin is Disable and -Administrator is omitted' {
+            { New-SfosLDAPServer -ServerName 'CorpLDAP' -ServerAddress 'ldap.example.invalid' -ServerPort 389 `
+                    -Version '3' -AnonymousLogin Disable -ConnectionSecurity Simple -BaseDN 'dc=corp,dc=example,dc=invalid' `
+                    -AuthenticationAttribute 'sAMAccountName' -GroupNameAttribute 'memberOf' -ExpiryDateAttribute 'accountExpires' `
+                    @conn -Confirm:$false } | Should -Throw '*-Administrator is required*AnonymousLogin*Disable*'
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -Times 0 -Exactly
+        }
+    }
+
+    Context 'Set-SfosLDAPServer - Read-Modify-Write and the merged-target Administrator check' {
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+                if ($InnerXml -match '<Get>') {
+                    [PSCustomObject]@{ Content = @'
+<Response>
+  <Login><status>Authentication Successful</status></Login>
+  <AuthenticationServer>
+    <LDAPServer>
+      <ServerName>CorpLDAP</ServerName>
+      <ServerAddress>ldap.example.invalid</ServerAddress>
+      <Port>389</Port>
+      <Version>3</Version>
+      <AnonymousLogin>Disable</AnonymousLogin>
+      <Administrator>cn=bind,dc=corp,dc=example,dc=invalid</Administrator>
+      <ConnectionSecurity>Simple</ConnectionSecurity>
+      <BaseDN>dc=corp,dc=example,dc=invalid</BaseDN>
+      <AuthenticationAttribute>sAMAccountName</AuthenticationAttribute>
+      <GroupNameAttribute>memberOf</GroupNameAttribute>
+      <ExpiryDateAttribute>accountExpires</ExpiryDateAttribute>
+    </LDAPServer>
+  </AuthenticationServer>
+</Response>
+'@
+                    }
+                }
+                else {
+                    [PSCustomObject]@{ Content = '<Response><LDAPServer><Status code="200">Configuration applied successfully.</Status></LDAPServer></Response>' }
+                }
+            }
+        }
+
+        It 'Should send an empty Password and preserve Administrator/BaseDN when only ServerAddress changes' {
+            Set-SfosLDAPServer -ServerName 'CorpLDAP' -ServerAddress 'ldap2.example.invalid' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Set operation="update">' -and
+                $InnerXml -match '<ServerAddress>ldap2\.example\.invalid</ServerAddress>' -and
+                $InnerXml -match '<Password></Password>' -and
+                $InnerXml -match '<Administrator>cn=bind,dc=corp,dc=example,dc=invalid</Administrator>' -and
+                $InnerXml -match '<BaseDN>dc=corp,dc=example,dc=invalid</BaseDN>'
+            }
+        }
+
+        It 'Should throw client-side when the merged target has AnonymousLogin Disable and no Administrator anywhere' {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+                [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><AuthenticationServer><LDAPServer><ServerName>NoAdminLDAP</ServerName><AnonymousLogin>Disable</AnonymousLogin></LDAPServer></AuthenticationServer></Response>' }
+            }
+
+            { Set-SfosLDAPServer -ServerName 'NoAdminLDAP' -ServerAddress 'x' @conn -Confirm:$false } |
+                Should -Throw '*-Administrator is required*AnonymousLogin*Disable*'
+        }
+    }
+
+    Context 'Remove-SfosLDAPServer' {
+        It 'Should send Remove/AuthenticationServer/LDAPServer/ServerName' {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+                [PSCustomObject]@{ Content = '<Response><LDAPServer><Status code="200">Configuration applied successfully.</Status></LDAPServer></Response>' }
+            }
+
+            Remove-SfosLDAPServer -ServerName 'CorpLDAP' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Remove>' -and
+                $InnerXml -match '<AuthenticationServer>\s*<LDAPServer>' -and
+                $InnerXml -match '<ServerName>CorpLDAP</ServerName>'
+            }
+        }
+    }
+}
+
+Describe 'EDirectory - Set Read-Modify-Write (empty Password preserves bind password), Remove' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    Context 'Set-SfosEDirectoryServer' {
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+                if ($InnerXml -match '<Get>') {
+                    [PSCustomObject]@{ Content = @'
+<Response>
+  <Login><status>Authentication Successful</status></Login>
+  <AuthenticationServer>
+    <EDirectory>
+      <ServerName>CorpEDir</ServerName>
+      <ServerIpDomain>edir.example.invalid</ServerIpDomain>
+      <Port>636</Port>
+      <Username>cn=admin</Username>
+      <BaseDN>o=corp</BaseDN>
+      <ConnectionSecurity>SSL</ConnectionSecurity>
+    </EDirectory>
+  </AuthenticationServer>
+</Response>
+'@
+                    }
+                }
+                else {
+                    [PSCustomObject]@{ Content = '<Response><EDirectory><Status code="200">Configuration applied successfully.</Status></EDirectory></Response>' }
+                }
+            }
+        }
+
+        It 'Should send an empty Password and preserve BaseDN/ConnectionSecurity when only ServerIpDomain changes' {
+            Set-SfosEDirectoryServer -ServerName 'CorpEDir' -ServerIpDomain 'edir2.example.invalid' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Set operation="update">' -and
+                $InnerXml -match '<ServerIpDomain>edir2\.example\.invalid</ServerIpDomain>' -and
+                $InnerXml -match '<Password></Password>' -and
+                $InnerXml -match '<BaseDN>o=corp</BaseDN>' -and
+                $InnerXml -match '<ConnectionSecurity>SSL</ConnectionSecurity>'
+            }
+        }
+
+        It 'Should throw when the named server does not exist' {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+                [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><AuthenticationServer><EDirectory><Status>No. of records Zero.</Status></EDirectory></AuthenticationServer></Response>' }
+            }
+
+            { Set-SfosEDirectoryServer -ServerName 'DoesNotExist' -ServerIpDomain 'x' @conn -Confirm:$false } |
+                Should -Throw "*EDirectory authentication server 'DoesNotExist' was not found*"
+        }
+    }
+
+    Context 'Remove-SfosEDirectoryServer' {
+        It 'Should send Remove/AuthenticationServer/EDirectory/ServerName' {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+                [PSCustomObject]@{ Content = '<Response><AuthenticationServer><EDirectory><Status code="200">Configuration applied successfully.</Status></EDirectory></AuthenticationServer></Response>' }
+            }
+
+            Remove-SfosEDirectoryServer -ServerName 'CorpEDir' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Remove>' -and
+                $InnerXml -match '<AuthenticationServer>\s*<EDirectory>' -and
+                $InnerXml -match '<ServerName>CorpEDir</ServerName>'
+            }
+        }
+    }
+}
+
 Describe 'Read-Modify-Write - User' {
 
     BeforeAll {
@@ -527,6 +801,215 @@ Describe 'Read-Modify-Write - User' {
             $InnerXml -match '<Username>asmith</Username>' -and
             $InnerXml -notmatch '<AccountName>' -and
             $InnerXml -match '<LoginRestriction>AnyNode</LoginRestriction>'
+        }
+    }
+}
+
+Describe 'Remove-SfosUser - lowercased <Name>, not <Username>, with read-back' {
+    # Live-verified (see the function .NOTES / region header): the Delete User operation only
+    # honours <Name>, case-sensitively against the always-lowercase stored value. <Username>
+    # or the caller's original casing both answer a false 200 and remove nothing.
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    It 'Should send a lowercased <Name>, not <Username>, and succeed when the read-back is empty' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+            if ($InnerXml -match '<Remove>') {
+                [PSCustomObject]@{ Content = '<Response><User><Status code="200">Configuration applied successfully.</Status></User></Response>' }
+            }
+            else {
+                [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><User transactionid=""><Status>No. of records Zero.</Status></User></Response>' }
+            }
+        }
+
+        { Remove-SfosUser -AccountName 'JDoe' @conn -Confirm:$false } | Should -Not -Throw
+
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -ParameterFilter {
+            $InnerXml -match '<Remove>' -and
+            $InnerXml -match '<Name>jdoe</Name>' -and
+            $InnerXml -notmatch '<Username>jdoe</Username>'
+        }
+    }
+
+    It 'Should throw when the firewall reports success but the user is still present on read-back' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+            if ($InnerXml -match '<Remove>') {
+                [PSCustomObject]@{ Content = '<Response><User><Status code="200">Configuration applied successfully.</Status></User></Response>' }
+            }
+            else {
+                [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><User><Username>jdoe</Username><Name>Jane Doe</Name></User></Response>' }
+            }
+        }
+
+        { Remove-SfosUser -AccountName 'jdoe' @conn -Confirm:$false } |
+            Should -Throw "*User 'jdoe' is still present*"
+    }
+}
+
+Describe 'UserGroup - Set Read-Modify-Write, Remove with read-back' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    Context 'Set-SfosUserGroup' {
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+                if ($InnerXml -match '<Get>\s*<UserGroup>') {
+                    [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><UserGroup><GroupDetail><Name>Sales</Name><GroupType>Normal</GroupType><SurfingQuotaPolicy>Unlimited</SurfingQuotaPolicy><AccessTimePolicy>AllowedAllTheTime</AccessTimePolicy><QoSPolicy>None</QoSPolicy><QuarantineDigest>Enable</QuarantineDigest><LoginRestriction>AnyNode</LoginRestriction></GroupDetail></UserGroup></Response>' }
+                }
+                elseif ($InnerXml -match '<Get>\s*<User>') {
+                    [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><User transactionid=""><Status>No. of records Zero.</Status></User></Response>' }
+                }
+                else {
+                    [PSCustomObject]@{ Content = '<Response><GroupDetail><Status code="200">Configuration applied successfully.</Status></GroupDetail></Response>' }
+                }
+            }
+        }
+
+        It 'Should preserve AccessTimePolicy/QuarantineDigest/LoginRestriction when only QoSPolicy changes' {
+            Set-SfosUserGroup -Name 'Sales' -QoSPolicy 'Gold' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Set operation="update">' -and
+                $InnerXml -match '<QoSPolicy>Gold</QoSPolicy>' -and
+                $InnerXml -match '<AccessTimePolicy>AllowedAllTheTime</AccessTimePolicy>' -and
+                $InnerXml -match '<QuarantineDigest>Enable</QuarantineDigest>' -and
+                $InnerXml -match '<LoginRestriction>AnyNode</LoginRestriction>'
+            }
+        }
+
+        It 'Should throw when the named group does not exist' {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+                [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><UserGroup></UserGroup></Response>' }
+            }
+
+            { Set-SfosUserGroup -Name 'DoesNotExist' -QoSPolicy 'Gold' @conn -Confirm:$false } |
+                Should -Throw "*UserGroup object 'DoesNotExist' was not found*"
+        }
+    }
+
+    Context 'Remove-SfosUserGroup' {
+        It 'Should nest <Name> inside <GroupDetail> and succeed when the read-back is empty' {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+                if ($InnerXml -match '<Remove>') {
+                    [PSCustomObject]@{ Content = '<Response><UserGroup><GroupDetail><Status code="200">Configuration applied successfully.</Status></GroupDetail></UserGroup></Response>' }
+                }
+                elseif ($InnerXml -match '<Get>\s*<UserGroup>') {
+                    [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><UserGroup></UserGroup></Response>' }
+                }
+                else {
+                    [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><User transactionid=""><Status>No. of records Zero.</Status></User></Response>' }
+                }
+            }
+
+            { Remove-SfosUserGroup -Name 'Sales' @conn -Confirm:$false } | Should -Not -Throw
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -ParameterFilter {
+                $InnerXml -match '<Remove>' -and
+                $InnerXml -match '<UserGroup>\s*<GroupDetail>\s*<Name>Sales</Name>'
+            }
+        }
+
+        It 'Should throw when the firewall reports success (code 200) but the group is still present - the documented false-success defect' {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+                if ($InnerXml -match '<Remove>') {
+                    [PSCustomObject]@{ Content = '<Response><UserGroup><GroupDetail><Status code="200">Configuration applied successfully.</Status></GroupDetail></UserGroup></Response>' }
+                }
+                elseif ($InnerXml -match '<Get>\s*<UserGroup>') {
+                    [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><UserGroup><GroupDetail><Name>Sales</Name></GroupDetail></UserGroup></Response>' }
+                }
+                else {
+                    [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><User transactionid=""><Status>No. of records Zero.</Status></User></Response>' }
+                }
+            }
+
+            { Remove-SfosUserGroup -Name 'Sales' @conn -Confirm:$false } |
+                Should -Throw "*UserGroup 'Sales' is still present*"
+        }
+    }
+}
+
+Describe 'Add-/Remove-SfosFirewallAuthenticationMethodsMember' {
+    # NOT verified against the live firewall (see the functions'' .NOTES): this block controls
+    # the login path for every account, including the API user. Structural tests only.
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    Context 'Add-SfosFirewallAuthenticationMethodsMember' {
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+                if ($InnerXml -match '<Get>') {
+                    [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><FirewallAuthentication><AuthenticationMethods><DefaultGroup>Open Group</DefaultGroup><AuthenticationServerList><AuthenticationServer>Local</AuthenticationServer></AuthenticationServerList></AuthenticationMethods></FirewallAuthentication></Response>' }
+                }
+                else {
+                    [PSCustomObject]@{ Content = '<Response><AuthenticationMethods><Status code="200">Configuration applied successfully.</Status></AuthenticationMethods></Response>' }
+                }
+            }
+        }
+
+        It 'Should merge the new server into the existing list, preserving DefaultGroup' {
+            Add-SfosFirewallAuthenticationMethodsMember -Members 'CorpRadius' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Set operation="update">' -and
+                $InnerXml -match '<DefaultGroup>Open Group</DefaultGroup>' -and
+                $InnerXml -match '<AuthenticationServer>Local</AuthenticationServer>' -and
+                $InnerXml -match '<AuthenticationServer>CorpRadius</AuthenticationServer>'
+            }
+        }
+    }
+
+    Context 'Remove-SfosFirewallAuthenticationMethodsMember' {
+        It 'Should preserve DefaultGroup and the remaining server when removing one of two' {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+                if ($InnerXml -match '<Get>') {
+                    [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><FirewallAuthentication><AuthenticationMethods><DefaultGroup>Open Group</DefaultGroup><AuthenticationServerList><AuthenticationServer>Local</AuthenticationServer><AuthenticationServer>CorpRadius</AuthenticationServer></AuthenticationServerList></AuthenticationMethods></FirewallAuthentication></Response>' }
+                }
+                else {
+                    [PSCustomObject]@{ Content = '<Response><AuthenticationMethods><Status code="200">Configuration applied successfully.</Status></AuthenticationMethods></Response>' }
+                }
+            }
+
+            Remove-SfosFirewallAuthenticationMethodsMember -Members 'CorpRadius' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Set operation="update">' -and
+                $InnerXml -match '<AuthenticationServer>Local</AuthenticationServer>' -and
+                $InnerXml -notmatch '<AuthenticationServer>CorpRadius</AuthenticationServer>' -and
+                $InnerXml -match '<DefaultGroup>Open Group</DefaultGroup>'
+            }
+        }
+
+        It 'Should do nothing (no API write call) when the server list is already empty' {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+                [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><FirewallAuthentication><AuthenticationMethods><DefaultGroup>Open Group</DefaultGroup><AuthenticationServerList></AuthenticationServerList></AuthenticationMethods></FirewallAuthentication></Response>' }
+            }
+
+            Remove-SfosFirewallAuthenticationMethodsMember -Members 'Local' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Get>'
+            }
         }
     }
 }
@@ -832,6 +1315,42 @@ Describe 'Add-/Remove-SfosUserGroupMember write through the User object, not Gro
     }
 }
 
+Describe 'Get-SfosOTPSettings' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    It 'Should send Get/OTPSettings and parse otpUsers/algorithm/defaultTimeStep' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+            [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><OTPSettings><otp>1</otp><allUsers>0</allUsers><otpUsers><user>jdoe</user></otpUsers><algorithm>SHA1</algorithm><defaultTimeStep>30</defaultTimeStep></OTPSettings></Response>' }
+        }
+
+        $result = Get-SfosOTPSettings @conn
+        $result.Otp | Should -Be '1'
+        $result.OtpUsers | Should -Contain 'jdoe'
+        $result.Algorithm | Should -Be 'SHA1'
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -Times 1 -Exactly -ParameterFilter {
+            $InnerXml -match '<Get><OTPSettings></OTPSettings></Get>'
+        }
+    }
+
+    It 'Should return an empty OtpUsers array (not $null) when the element is absent (allUsers=1)' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+            [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><OTPSettings><otp>0</otp><allUsers>1</allUsers></OTPSettings></Response>' }
+        }
+
+        $result = Get-SfosOTPSettings @conn
+        , $result.OtpUsers | Should -Not -Be $null
+        @($result.OtpUsers).Count | Should -Be 0
+    }
+}
+
 Describe 'OTPSettings member management' {
 
     BeforeAll {
@@ -971,6 +1490,464 @@ Describe 'GuestUser - no update path exists' {
                 $InnerXml -match '<Remove>' -and
                 $InnerXml -match '<Username>guest-00001</Username>' -and
                 $InnerXml -notmatch '<Name>guest-00001</Name>'
+            }
+        }
+    }
+}
+
+Describe 'ClientlessUser - Get, New, Read-Modify-Write, Remove, and the duplicate-transactionid sanitiser' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    It 'ConvertTo-SfosClientlessUserSanitizedXml is not exported' {
+        Get-Command ConvertTo-SfosClientlessUserSanitizedXml -ErrorAction SilentlyContinue | Should -BeNullOrEmpty
+    }
+
+    Context 'Get-SfosClientlessUser' {
+        It 'Should return an empty array on "No. of records Zero."' {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+                [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><ClientlessUser transactionid=""><Status>No. of records Zero.</Status></ClientlessUser></Response>' }
+            }
+
+            $result = @(Get-SfosClientlessUser @conn)
+            $result.Count | Should -Be 0
+        }
+
+        It 'Should parse fields and expose AccountName as an alias of UserName' {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+                [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><ClientlessUser><UserName>jdoe</UserName><Name>Jane Doe</Name><IPAddress>203.0.113.10</IPAddress><ClientLessGroup>Clientless Group</ClientLessGroup><Email>jdoe@example.test</Email><Status>Active</Status></ClientlessUser></Response>' }
+            }
+
+            $result = @(Get-SfosClientlessUser @conn)
+            $result.Count | Should -Be 1
+            $result[0].UserName | Should -Be 'jdoe'
+            $result[0].AccountName | Should -Be 'jdoe'
+            $result[0].IPAddress | Should -Be '203.0.113.10'
+        }
+
+        It 'Should tolerate a doubled transactionid attribute that would otherwise break XML parsing' {
+            # Measured live: the response body can carry the root element's transactionid
+            # attribute twice, which System.Xml.XmlDocument rejects outright before any status
+            # or data node is ever reached.
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+                [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><ClientlessUser transactionid="" transactionid=""><UserName>jdoe</UserName><Name>Jane Doe</Name></ClientlessUser></Response>' }
+            }
+
+            $result = @(Get-SfosClientlessUser @conn)
+            $result.Count | Should -Be 1
+            $result[0].UserName | Should -Be 'jdoe'
+        }
+    }
+
+    Context 'New-SfosClientlessUser' {
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+                [PSCustomObject]@{ Content = '<Response><ClientlessUser><Status code="200">Configuration applied successfully.</Status></ClientlessUser></Response>' }
+            }
+        }
+
+        It 'Should send operation="add" with the wire element UserName, not AccountName' {
+            New-SfosClientlessUser -AccountName 'jdoe' -Name 'Jane Doe' -ClientLessGroup 'Clientless Group' -Email 'jdoe@example.test' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Set operation="add">' -and
+                $InnerXml -match '<UserName>jdoe</UserName>' -and
+                $InnerXml -notmatch '<AccountName>' -and
+                $InnerXml -match '<ClientLessGroup>Clientless Group</ClientLessGroup>'
+            }
+        }
+
+        It 'Should throw when the duplicated transactionid attribute wraps a real failure status' {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+                [PSCustomObject]@{ Content = '<Response><ClientlessUser transactionid="" transactionid=""><Status code="501">Configuration parameters validation failed.</Status></ClientlessUser></Response>' }
+            }
+
+            { New-SfosClientlessUser -AccountName 'jdoe' -Name 'Jane Doe' -ClientLessGroup 'Clientless Group' -Email 'jdoe@example.test' @conn -Confirm:$false } |
+                Should -Throw '*501*'
+        }
+    }
+
+    Context 'Set-SfosClientlessUser - Read-Modify-Write' {
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+                if ($InnerXml -match '<Get>') {
+                    [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><ClientlessUser><UserName>jdoe</UserName><Name>Jane Doe</Name><IPAddress>203.0.113.10</IPAddress><ClientLessGroup>Clientless Group</ClientLessGroup><Email>jdoe@example.test</Email><Status>Active</Status></ClientlessUser></Response>' }
+                }
+                else {
+                    [PSCustomObject]@{ Content = '<Response><ClientlessUser><Status code="200">Configuration applied successfully.</Status></ClientlessUser></Response>' }
+                }
+            }
+        }
+
+        It 'Should preserve ClientLessGroup/Email/Status when only Description changes' {
+            Set-SfosClientlessUser -AccountName 'jdoe' -Description 'Contractor access' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Set operation="update">' -and
+                $InnerXml -match '<Description>Contractor access</Description>' -and
+                $InnerXml -match '<ClientLessGroup>Clientless Group</ClientLessGroup>' -and
+                $InnerXml -match '<Email>jdoe@example\.test</Email>' -and
+                $InnerXml -match '<Status>Active</Status>'
+            }
+        }
+
+        It 'Should throw when the named user does not exist' {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+                [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><ClientlessUser transactionid=""><Status>No. of records Zero.</Status></ClientlessUser></Response>' }
+            }
+
+            { Set-SfosClientlessUser -AccountName 'ghost' -Description 'x' @conn -Confirm:$false } |
+                Should -Throw "*ClientlessUser object 'ghost' was not found*"
+        }
+    }
+
+    Context 'Remove-SfosClientlessUser' {
+        It 'Should send Remove/ClientlessUser/UserName' {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+                [PSCustomObject]@{ Content = '<Response><ClientlessUser><Status code="200">Configuration applied successfully.</Status></ClientlessUser></Response>' }
+            }
+
+            Remove-SfosClientlessUser -AccountName 'jdoe' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Remove>' -and
+                $InnerXml -match '<ClientlessUser>' -and
+                $InnerXml -match '<UserName>jdoe</UserName>'
+            }
+        }
+    }
+
+    Context 'New-SfosClientlessUserRange' {
+        It 'Should send operation="add" wrapped in the distinct ClientlessUserAddRange element' {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+                [PSCustomObject]@{ Content = '<Response><ClientlessUserAddRange><Status code="200">Configuration applied successfully.</Status></ClientlessUserAddRange></Response>' }
+            }
+
+            New-SfosClientlessUserRange -FromIPAddress '203.0.113.10' -ToIPAddress '203.0.113.20' -ClientLessGroup 'Clientless Group' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Set operation="add">' -and
+                $InnerXml -match '<ClientlessUserAddRange>' -and
+                $InnerXml -match '<FromIPAddress>203\.0\.113\.10</FromIPAddress>' -and
+                $InnerXml -match '<ToIPAddress>203\.0\.113\.20</ToIPAddress>' -and
+                $InnerXml -notmatch '<ClientlessUser>'
+            }
+        }
+    }
+}
+
+Describe 'SMSGateway - the firmware misspelling "Paramter" and numeric ResponseParameterName indexes' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    Context 'Get-SfosSMSGateway' {
+        It 'Should return an empty array on "No. of records Zero."' {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+                [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><SMSGateway transactionid=""><Status>No. of records Zero.</Status></SMSGateway></Response>' }
+            }
+
+            $result = @(Get-SfosSMSGateway @conn)
+            $result.Count | Should -Be 0
+        }
+
+        It 'Should parse the positionally-matched RequestParamter/ResponseParamter name/value arrays' {
+            # Measured: RequestParamterList/RequestParamter wraps N sibling <ParameterName>
+            # elements followed by N sibling <ParameterValue> elements - not N repeated
+            # name/value pairs. The wrapper spelling 'Paramter' is the firmware's own, kept
+            # verbatim; ParameterName/ParameterValue are spelled correctly.
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+                [PSCustomObject]@{ Content = @'
+<Response>
+  <Login><status>Authentication Successful</status></Login>
+  <SMSGateway>
+    <Name>ExampleGateway</Name>
+    <URL>https://sms.example.test/send</URL>
+    <HTTPMethod>Post</HTTPMethod>
+    <RequestParamterList>
+      <RequestParamter>
+        <ParameterName>to</ParameterName>
+        <ParameterName>msg</ParameterName>
+        <ParameterValue>{mobileno}</ParameterValue>
+        <ParameterValue>{msg}</ParameterValue>
+      </RequestParamter>
+    </RequestParamterList>
+    <ResponseFormat>{0}:{1}</ResponseFormat>
+    <ResponseParamterList>
+      <ResponseParamter>
+        <ParameterName>0</ParameterName>
+        <ParameterName>1</ParameterName>
+        <ParameterValue>status</ParameterValue>
+        <ParameterValue>id</ParameterValue>
+      </ResponseParamter>
+    </ResponseParamterList>
+  </SMSGateway>
+</Response>
+'@
+            }
+            }
+
+            $result = @(Get-SfosSMSGateway @conn)
+            $result.Count | Should -Be 1
+            $result[0].RequestParameterName | Should -Be @('to', 'msg')
+            $result[0].RequestParameterValue | Should -Be @('{mobileno}', '{msg}')
+            $result[0].ResponseParameterName | Should -Be @('0', '1')
+            $result[0].ResponseParameterValue | Should -Be @('status', 'id')
+        }
+    }
+
+    Context 'New-SfosSMSGateway' {
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+                [PSCustomObject]@{ Content = '<Response><SMSGateway><Status code="200">Configuration applied successfully.</Status></SMSGateway></Response>' }
+            }
+        }
+
+        It 'Should send the misspelled RequestParamterList/RequestParamter wrapper with ParameterName/ParameterValue spelled correctly' {
+            New-SfosSMSGateway -Name 'ExampleGateway' -URL 'https://sms.example.test/send' -HTTPMethod Post `
+                -RequestParameterName @('to', 'msg') -RequestParameterValue @('{mobileno}', '{msg}') `
+                -ResponseFormat '{0}:{1}' -ResponseParameterName @('0', '1') -ResponseParameterValue @('status', 'id') `
+                @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Set operation="add">' -and
+                $InnerXml -match '<RequestParamterList><RequestParamter>' -and
+                $InnerXml -match '<ParameterName>to</ParameterName>' -and
+                $InnerXml -match '<ParameterValue>\{mobileno\}</ParameterValue>' -and
+                $InnerXml -match '<ResponseParamterList><ResponseParamter>' -and
+                $InnerXml -match '<ParameterName>0</ParameterName>' -and
+                $InnerXml -match '<ParameterName>1</ParameterName>'
+            }
+        }
+
+        It 'Should throw client-side, without calling Invoke-SfosApi, when the request name/value array lengths differ' {
+            { New-SfosSMSGateway -Name 'Bad' -URL 'https://sms.example.test/send' `
+                    -RequestParameterName @('to', 'msg') -RequestParameterValue @('only-one') `
+                    @conn -Confirm:$false } | Should -Throw '*same number of elements*'
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -Times 0 -Exactly
+        }
+    }
+
+    Context 'Set-SfosSMSGateway - Read-Modify-Write' {
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+                if ($InnerXml -match '<Get>') {
+                    [PSCustomObject]@{ Content = @'
+<Response>
+  <Login><status>Authentication Successful</status></Login>
+  <SMSGateway>
+    <Name>ExampleGateway</Name>
+    <URL>https://sms.example.test/send</URL>
+    <HTTPMethod>Post</HTTPMethod>
+    <CellNumberPreFix>+1</CellNumberPreFix>
+    <RequestParamterList>
+      <RequestParamter>
+        <ParameterName>to</ParameterName>
+        <ParameterValue>{mobileno}</ParameterValue>
+      </RequestParamter>
+    </RequestParamterList>
+    <ResponseFormat>{0}</ResponseFormat>
+    <ResponseParamterList>
+      <ResponseParamter>
+        <ParameterName>0</ParameterName>
+        <ParameterValue>status</ParameterValue>
+      </ResponseParamter>
+    </ResponseParamterList>
+  </SMSGateway>
+</Response>
+'@
+                    }
+                }
+                else {
+                    [PSCustomObject]@{ Content = '<Response><SMSGateway><Status code="200">Configuration applied successfully.</Status></SMSGateway></Response>' }
+                }
+            }
+        }
+
+        It 'Should preserve the RequestParamter/ResponseParamter lists when only CellNumberPreFix changes' {
+            Set-SfosSMSGateway -Name 'ExampleGateway' -CellNumberPreFix '+44' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Set operation="update">' -and
+                $InnerXml -match '<CellNumberPreFix>\+44</CellNumberPreFix>' -and
+                $InnerXml -match '<RequestParamterList><RequestParamter>' -and
+                $InnerXml -match '<ParameterName>to</ParameterName>' -and
+                $InnerXml -match '<ResponseParamterList><ResponseParamter>' -and
+                $InnerXml -match '<ParameterName>0</ParameterName>' -and
+                $InnerXml -match '<URL>https://sms\.example\.test/send</URL>'
+            }
+        }
+
+        It 'Should throw when the named gateway does not exist' {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+                [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><SMSGateway transactionid=""><Status>No. of records Zero.</Status></SMSGateway></Response>' }
+            }
+
+            { Set-SfosSMSGateway -Name 'DoesNotExist' -CellNumberPreFix '+44' @conn -Confirm:$false } |
+                Should -Throw "*SMSGateway object 'DoesNotExist' was not found*"
+        }
+    }
+
+    Context 'Remove-SfosSMSGateway' {
+        It 'Should send Remove/SMSGateway/Name' {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+                [PSCustomObject]@{ Content = '<Response><SMSGateway><Status code="200">Configuration applied successfully.</Status></SMSGateway></Response>' }
+            }
+
+            Remove-SfosSMSGateway -Name 'ExampleGateway' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Remove>' -and
+                $InnerXml -match '<SMSGateway>' -and
+                $InnerXml -match '<Name>ExampleGateway</Name>'
+            }
+        }
+    }
+}
+
+Describe 'OTPTokens - Get, New (hex-secret validation), Read-Modify-Write, Remove' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    Context 'Get-SfosOTPTokens' {
+        It 'Should return an empty array on "No. of records Zero."' {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+                [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><OTPTokens transactionid=""><Status>No. of records Zero.</Status></OTPTokens></Response>' }
+            }
+
+            $result = @(Get-SfosOTPTokens @conn)
+            $result.Count | Should -Be 0
+        }
+
+        It 'Should parse the measured field set, using useCustomTokenTimeStep/timeStepOffset rather than the documented but nonexistent timeStep' {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+                [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><OTPTokens><tokenid>ABC123</tokenid><useCustomTokenTimeStep>Off</useCustomTokenTimeStep><timeStepOffset>0</timeStepOffset><algorithm>SHA1</algorithm><active>1</active><user>jdoe</user><comment>Issued</comment></OTPTokens></Response>' }
+            }
+
+            $result = @(Get-SfosOTPTokens @conn)
+            $result.Count | Should -Be 1
+            $result[0].TokenId | Should -Be 'ABC123'
+            $result[0].UseCustomTokenTimeStep | Should -Be 'Off'
+            $result[0].User | Should -Be 'jdoe'
+            $result[0].PSObject.Properties.Name | Should -Not -Contain 'Secret'
+        }
+
+        It 'Should combine TokenIdLike and UserLike with AND' {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+                [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><OTPTokens><tokenid>ABC123</tokenid><user>jdoe</user></OTPTokens><OTPTokens><tokenid>XYZ789</tokenid><user>jdoe</user></OTPTokens><OTPTokens><tokenid>ABC999</tokenid><user>asmith</user></OTPTokens></Response>' }
+            }
+
+            $result = @(Get-SfosOTPTokens -TokenIdLike 'ABC' -UserLike 'jdoe' @conn)
+            $result.Count | Should -Be 1
+            $result[0].TokenId | Should -Be 'ABC123'
+        }
+    }
+
+    Context 'New-SfosOTPTokens - hex-secret client-side validation' {
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+                [PSCustomObject]@{ Content = '<Response><OTPTokens><Status code="200">Configuration applied successfully.</Status></OTPTokens></Response>' }
+            }
+        }
+
+        It 'Should send operation="add" with the hexadecimal secret and the wire element <user>' {
+            $secret = ConvertTo-SecureString '0123456789abcdef0123456789abcdef' -AsPlainText -Force
+            New-SfosOTPTokens -User 'jdoe' -Secret $secret -Algorithm SHA1 @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Set operation="add">' -and
+                $InnerXml -match '<user>jdoe</user>' -and
+                $InnerXml -match '<secret>0123456789abcdef0123456789abcdef</secret>' -and
+                $InnerXml -match '<algorithm>SHA1</algorithm>'
+            }
+        }
+
+        It 'Should throw client-side, without calling Invoke-SfosApi, on a non-hexadecimal secret' {
+            $secret = ConvertTo-SecureString 'NOTHEXADECIMAL-VALUE-ZZZZZZZZZZZ' -AsPlainText -Force
+            { New-SfosOTPTokens -User 'jdoe' -Secret $secret @conn -Confirm:$false } | Should -Throw '*hexadecimal*'
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -Times 0 -Exactly
+        }
+
+        It 'Should throw client-side on a secret shorter than 32 characters' {
+            $secret = ConvertTo-SecureString '0123456789abcdef' -AsPlainText -Force
+            { New-SfosOTPTokens -User 'jdoe' -Secret $secret @conn -Confirm:$false } | Should -Throw '*32 to 120 characters*'
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -Times 0 -Exactly
+        }
+    }
+
+    Context 'Set-SfosOTPTokens - Read-Modify-Write, no -Secret parameter' {
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+                if ($InnerXml -match '<Get>') {
+                    [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><OTPTokens><tokenid>ABC123</tokenid><useCustomTokenTimeStep>Off</useCustomTokenTimeStep><algorithm>SHA1</algorithm><active>1</active><user>jdoe</user><comment>Issued</comment></OTPTokens></Response>' }
+                }
+                else {
+                    [PSCustomObject]@{ Content = '<Response><OTPTokens><Status code="200">Configuration applied successfully.</Status></OTPTokens></Response>' }
+                }
+            }
+        }
+
+        It 'Should preserve algorithm/user when only Comment changes, and never send a secret element' {
+            Set-SfosOTPTokens -TokenId 'ABC123' -Comment 'Reissued' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Set operation="update">' -and
+                $InnerXml -match '<comment>Reissued</comment>' -and
+                $InnerXml -match '<algorithm>SHA1</algorithm>' -and
+                $InnerXml -match '<user>jdoe</user>' -and
+                $InnerXml -notmatch '<secret>'
+            }
+        }
+
+        It 'Set-SfosOTPTokens has no -Secret parameter' {
+            (Get-Command Set-SfosOTPTokens).Parameters.Keys | Should -Not -Contain 'Secret'
+        }
+
+        It 'Should throw when the named token does not exist' {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+                [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><OTPTokens transactionid=""><Status>No. of records Zero.</Status></OTPTokens></Response>' }
+            }
+
+            { Set-SfosOTPTokens -TokenId 'GHOST' -Comment 'x' @conn -Confirm:$false } |
+                Should -Throw "*OTPTokens object 'GHOST' was not found*"
+        }
+    }
+
+    Context 'Remove-SfosOTPTokens' {
+        It 'Should send Remove/OTPTokens/tokenid' {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+                [PSCustomObject]@{ Content = '<Response><OTPTokens><Status code="200">Configuration applied successfully.</Status></OTPTokens></Response>' }
+            }
+
+            Remove-SfosOTPTokens -TokenId 'ABC123' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Remove>' -and
+                $InnerXml -match '<OTPTokens>' -and
+                $InnerXml -match '<tokenid>ABC123</tokenid>'
             }
         }
     }
@@ -1951,6 +2928,376 @@ Describe 'DefaultCaptivePortal - Set, Read-Modify-Write, error path' {
         }
 
         { Set-SfosDefaultCaptivePortal -UserPrompt 'x' @conn -Confirm:$false } | Should -Throw '*501*'
+    }
+}
+
+Describe 'Get-* singletons - status-less lenient Get pattern, parsing' {
+    # All of these entities answer a successful Get with no <Status> node at all
+    # (Assert-SfosApiReturnSuccess falls through as success), so the parsing test is what
+    # actually proves the cmdlet reads the right node.
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    It 'Get-SfosAdminAuthentication should send Get/AdminAuthentication and parse AuthenticationMethods/AuthenticationServerList' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+            [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><AdminAuthentication><AuthenticationServerList><AuthenticationServer>Local</AuthenticationServer></AuthenticationServerList><AuthenticationMethods>Custom</AuthenticationMethods></AdminAuthentication></Response>' }
+        }
+
+        $result = Get-SfosAdminAuthentication @conn
+        $result.AuthenticationMethods | Should -Be 'Custom'
+        $result.AuthenticationServerList | Should -Contain 'Local'
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -Times 1 -Exactly -ParameterFilter {
+            $InnerXml -match '<Get><AdminAuthentication></AdminAuthentication></Get>'
+        }
+    }
+
+    It 'Get-SfosVPNAuthentication should parse VPNAuthenticationMethods/VPNAuthenticationServerList' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+            [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><VPNAuthentication><VPNAuthenticationMethods>Custom</VPNAuthenticationMethods><VPNAuthenticationServerList><AuthenticationServer>Local</AuthenticationServer></VPNAuthenticationServerList></VPNAuthentication></Response>' }
+        }
+
+        $result = Get-SfosVPNAuthentication @conn
+        $result.VPNAuthenticationMethods | Should -Be 'Custom'
+        $result.VPNAuthenticationServerList | Should -Contain 'Local'
+    }
+
+    It 'Get-SfosSSLVPNAuthentication should parse SSLVPNAuthenticationMethods/SSLVPNAuthenticationServerList' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+            [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><SSLVPNAuthentication><SSLVPNAuthenticationMethods>Custom</SSLVPNAuthenticationMethods><SSLVPNAuthenticationServerList><AuthenticationServer>Local</AuthenticationServer></SSLVPNAuthenticationServerList></SSLVPNAuthentication></Response>' }
+        }
+
+        $result = Get-SfosSSLVPNAuthentication @conn
+        $result.SSLVPNAuthenticationMethods | Should -Be 'Custom'
+        $result.SSLVPNAuthenticationServerList | Should -Contain 'Local'
+    }
+
+    It 'Get-SfosDirectWebProxyAuthentication should parse PerConnectionAuth/MultiUserHostList' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+            [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><DirectWebProxyAuthentication><PerConnectionAuth>Disable</PerConnectionAuth><MultiUserHosts><Host>TS-Server1</Host></MultiUserHosts></DirectWebProxyAuthentication></Response>' }
+        }
+
+        $result = Get-SfosDirectWebProxyAuthentication @conn
+        $result.PerConnectionAuth | Should -Be 'Disable'
+        $result.MultiUserHostList | Should -Contain 'TS-Server1'
+    }
+
+    It 'Get-SfosWebAuthenticationSettings should send Get/WebAuthentication and parse the settings' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+            [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><WebAuthentication><WebAuthenticationSettings><DisplayCaptivePortalLink>Enable</DisplayCaptivePortalLink><UseHTTPS>Enable</UseHTTPS><LogOutUserSetting>Portal closed</LogOutUserSetting><DisplayUserPortalLink>Enable</DisplayUserPortalLink><DisplayWebpageAfterLogin>Enable</DisplayWebpageAfterLogin><UseKerberosForADSSO>Enable</UseKerberosForADSSO><OpenWebpageInNewWindow>Enable</OpenWebpageInNewWindow><WebpageToDisplay>User requested URL</WebpageToDisplay></WebAuthenticationSettings></WebAuthentication></Response>' }
+        }
+
+        $result = Get-SfosWebAuthenticationSettings @conn
+        $result.UseHTTPS | Should -Be 'Enable'
+        $result.WebpageToDisplay | Should -Be 'User requested URL'
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -Times 1 -Exactly -ParameterFilter {
+            $InnerXml -match '<Get><WebAuthentication></WebAuthentication></Get>'
+        }
+    }
+
+    It 'Get-SfosCaptivePortalAppearance should parse the nested DefaultLayout/CustomLayout fields' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+            [PSCustomObject]@{ Content = @'
+<Response>
+  <Login><status>Authentication Successful</status></Login>
+  <WebAuthentication>
+    <CaptivePortalAppearance>
+      <UseCustomLayout>Disable</UseCustomLayout>
+      <DefaultLayout>
+        <BackgroundColor>FAFAFA</BackgroundColor>
+        <LoginButtonLabel>Sign in</LoginButtonLabel>
+        <UserPortalLinkFontColor>1987CB</UserPortalLinkFontColor>
+        <UserPrompt>Please sign in</UserPrompt>
+      </DefaultLayout>
+    </CaptivePortalAppearance>
+  </WebAuthentication>
+</Response>
+'@
+            }
+        }
+
+        $result = Get-SfosCaptivePortalAppearance @conn
+        $result.UseCustomLayout | Should -Be 'Disable'
+        $result.BackgroundColor | Should -Be 'FAFAFA'
+        $result.UserPortalLinkFontColor | Should -Be '1987CB'
+    }
+
+    It 'Get-SfosDefaultCaptivePortal should parse a flat top-level entity' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+            [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><DefaultCaptivePortal><UserPrompt>Sign in to access this network</UserPrompt><LoginButtonLabel>Sign in</LoginButtonLabel></DefaultCaptivePortal></Response>' }
+        }
+
+        $result = Get-SfosDefaultCaptivePortal @conn
+        $result.UserPrompt | Should -Be 'Sign in to access this network'
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -Times 1 -Exactly -ParameterFilter {
+            $InnerXml -match '<Get><DefaultCaptivePortal></DefaultCaptivePortal></Get>' -or $InnerXml -match '<Get>\s*<DefaultCaptivePortal>'
+        }
+    }
+
+    It 'Get-SfosFirewallAuthenticationGlobalSettings should send Get/FirewallAuthentication and parse GlobalSettings' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+            [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><FirewallAuthentication><GlobalSettings><SimultaneousLogins>Unlimited</SimultaneousLogins><MaximumSessionTimeoutMinutes>Unlimited</MaximumSessionTimeoutMinutes></GlobalSettings></FirewallAuthentication></Response>' }
+        }
+
+        $result = Get-SfosFirewallAuthenticationGlobalSettings @conn
+        $result.SimultaneousLogins | Should -Be 'Unlimited'
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -Times 1 -Exactly -ParameterFilter {
+            $InnerXml -match '<Get><FirewallAuthentication></FirewallAuthentication></Get>'
+        }
+    }
+
+    It 'Get-SfosFirewallAuthenticationMethods should parse DefaultGroup/AuthenticationServerList' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+            [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><FirewallAuthentication><AuthenticationMethods><DefaultGroup>Open Group</DefaultGroup><AuthenticationServerList><AuthenticationServer>Local</AuthenticationServer></AuthenticationServerList></AuthenticationMethods></FirewallAuthentication></Response>' }
+        }
+
+        $result = Get-SfosFirewallAuthenticationMethods @conn
+        $result.DefaultGroup | Should -Be 'Open Group'
+        $result.AuthenticationServerList | Should -Contain 'Local'
+    }
+
+    It 'Get-SfosFirewallAuthenticationNTLMSettings should parse NTLMInActivtyTime/NTLMDataTransferThreshold/NTLMChallegeRedirect' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+            [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><FirewallAuthentication><NTLMSettings><NTLMInActivtyTime>6</NTLMInActivtyTime><NTLMDataTransferThreshold>1024</NTLMDataTransferThreshold><NTLMChallegeRedirect>Enable</NTLMChallegeRedirect></NTLMSettings></FirewallAuthentication></Response>' }
+        }
+
+        $result = Get-SfosFirewallAuthenticationNTLMSettings @conn
+        $result.NTLMInActivtyTime | Should -Be 6
+        $result.NTLMChallegeRedirect | Should -Be 'Enable'
+    }
+
+    It 'Get-SfosFirewallAuthenticationCTASSettings should parse CTASUserInactivity/CTASInActivtyTime/CTASDataTransferThreshold' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+            [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><FirewallAuthentication><CTASSettings><CTASUserInactivity>Enable</CTASUserInactivity><CTASInActivtyTime>6</CTASInActivtyTime><CTASDataTransferThreshold>1024</CTASDataTransferThreshold></CTASSettings></FirewallAuthentication></Response>' }
+        }
+
+        $result = Get-SfosFirewallAuthenticationCTASSettings @conn
+        $result.CTASUserInactivity | Should -Be 'Enable'
+        $result.CTASDataTransferThreshold | Should -Be '1024'
+    }
+
+    It 'Get-SfosFirewallAuthenticationiOSWebClientSettings should parse iOSWebClientInActivtyTime/iOSWebClientDataTransferThreshold' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+            [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><FirewallAuthentication><iOSWebClientSettings><iOSWebClientInActivtyTime>6</iOSWebClientInActivtyTime><iOSWebClientDataTransferThreshold>1024</iOSWebClientDataTransferThreshold></iOSWebClientSettings></FirewallAuthentication></Response>' }
+        }
+
+        $result = Get-SfosFirewallAuthenticationiOSWebClientSettings @conn
+        $result.iOSWebClientInActivtyTime | Should -Be 6
+        $result.iOSWebClientDataTransferThreshold | Should -Be 1024
+    }
+
+    It 'Get-SfosGuestUser should return an empty array on "No. of records Zero." and map fields otherwise' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+            [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><GuestUser transactionid=""><Status>No. of records Zero.</Status></GuestUser></Response>' }
+        }
+
+        $empty = @(Get-SfosGuestUser @conn)
+        $empty.Count | Should -Be 0
+
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+            [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><GuestUser><Username>guest-00001</Username><Name>visitor1</Name><UserValidity>24</UserValidity><Group>Guest Group</Group></GuestUser></Response>' }
+        }
+
+        $result = @(Get-SfosGuestUser @conn)
+        $result.Count | Should -Be 1
+        $result[0].Username | Should -Be 'guest-00001'
+        # Documented, not converted: UserValidity is written in days (New-SfosGuestUser) but
+        # read back in hours - the value here is exactly what the firewall returns, unscaled.
+        $result[0].UserValidity | Should -Be '24'
+    }
+}
+
+Describe 'AdminAuthentication member cmdlets' {
+    # NOT verified against the live firewall (see Set-SfosAdminAuthentication .NOTES): this
+    # entity controls the API user's own login path. Structural tests only.
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    Context 'Add-SfosAdminAuthenticationMember' {
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+                if ($InnerXml -match '<Get>') {
+                    [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><AdminAuthentication><AuthenticationServerList><AuthenticationServer>Local</AuthenticationServer></AuthenticationServerList><AuthenticationMethods>Custom</AuthenticationMethods></AdminAuthentication></Response>' }
+                }
+                else {
+                    [PSCustomObject]@{ Content = '<Response><AdminAuthentication><Status code="200">Configuration applied successfully.</Status></AdminAuthentication></Response>' }
+                }
+            }
+        }
+
+        It 'Should merge the new server into the existing list, preserving AuthenticationMethods' {
+            Add-SfosAdminAuthenticationMember -Members 'CorpRadius' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Set operation="update">' -and
+                $InnerXml -match '<AuthenticationMethods>Custom</AuthenticationMethods>' -and
+                $InnerXml -match '<AuthenticationServer>Local</AuthenticationServer>' -and
+                $InnerXml -match '<AuthenticationServer>CorpRadius</AuthenticationServer>'
+            }
+        }
+    }
+
+    Context 'Remove-SfosAdminAuthenticationMember' {
+        It 'Should preserve the remaining server and AuthenticationMethods when removing one of two' {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+                if ($InnerXml -match '<Get>') {
+                    [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><AdminAuthentication><AuthenticationServerList><AuthenticationServer>Local</AuthenticationServer><AuthenticationServer>CorpRadius</AuthenticationServer></AuthenticationServerList><AuthenticationMethods>Custom</AuthenticationMethods></AdminAuthentication></Response>' }
+                }
+                else {
+                    [PSCustomObject]@{ Content = '<Response><AdminAuthentication><Status code="200">Configuration applied successfully.</Status></AdminAuthentication></Response>' }
+                }
+            }
+
+            Remove-SfosAdminAuthenticationMember -Members 'CorpRadius' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Set operation="update">' -and
+                $InnerXml -match '<AuthenticationServer>Local</AuthenticationServer>' -and
+                $InnerXml -notmatch '<AuthenticationServer>CorpRadius</AuthenticationServer>' -and
+                $InnerXml -match '<AuthenticationMethods>Custom</AuthenticationMethods>'
+            }
+        }
+
+        It 'Should do nothing (no API write call) when the server list is already empty' {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+                [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><AdminAuthentication><AuthenticationServerList></AuthenticationServerList><AuthenticationMethods>Custom</AuthenticationMethods></AdminAuthentication></Response>' }
+            }
+
+            Remove-SfosAdminAuthenticationMember -Members 'Local' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Get>'
+            }
+        }
+    }
+}
+
+Describe 'AzureADSSO - Get parsing, Read-Modify-Write, Remove' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    It 'Get-SfosAzureADSSO should parse ServerName/ApplicationID/ClientSecretHash and the RoleMapping sub-object' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+            [PSCustomObject]@{ Content = @'
+<Response>
+  <Login><status>Authentication Successful</status></Login>
+  <AzureADSSO>
+    <ServerName>CorpEntraAdmin</ServerName>
+    <ApplicationID>app-id</ApplicationID>
+    <TenantID>tenant-id</TenantID>
+    <ClientSecret hashform="mode1">$sfos$7$0$hashedvalue</ClientSecret>
+    <RedirectURI>fw.example.invalid</RedirectURI>
+    <DisplayName>upn</DisplayName>
+    <EmailAddress>email</EmailAddress>
+    <FallbackUserGroup>Open Group</FallbackUserGroup>
+    <UserType>Administrator</UserType>
+    <RoleMapping>
+      <IdentifierTypeAndProfile>
+        <identifiertype>roles</identifiertype>
+        <identifiervalue>role.admin</identifiervalue>
+        <profileid>Administrator</profileid>
+      </IdentifierTypeAndProfile>
+    </RoleMapping>
+  </AzureADSSO>
+</Response>
+'@
+            }
+        }
+
+        $result = @(Get-SfosAzureADSSO @conn)
+        $result.Count | Should -Be 1
+        $result[0].ServerName | Should -Be 'CorpEntraAdmin'
+        $result[0].ClientSecretHash | Should -Be '$sfos$7$0$hashedvalue'
+        $result[0].ClientSecretHashForm | Should -Be 'mode1'
+        $result[0].RoleMappingIdentifierType | Should -Be 'roles'
+        $result[0].RoleMappingProfileID | Should -Be 'Administrator'
+    }
+
+    It 'Set-SfosAzureADSSO should resend the hashed ClientSecret and the existing RoleMapping when only FallbackUserGroup changes' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+            if ($InnerXml -match '<Get>') {
+                [PSCustomObject]@{ Content = @'
+<Response>
+  <Login><status>Authentication Successful</status></Login>
+  <AzureADSSO>
+    <ServerName>CorpEntraAdmin</ServerName>
+    <ApplicationID>app-id</ApplicationID>
+    <TenantID>tenant-id</TenantID>
+    <ClientSecret hashform="mode1">$sfos$7$0$hashedvalue</ClientSecret>
+    <RedirectURI>fw.example.invalid</RedirectURI>
+    <DisplayName>upn</DisplayName>
+    <EmailAddress>email</EmailAddress>
+    <FallbackUserGroup>Open Group</FallbackUserGroup>
+    <UserType>Administrator</UserType>
+    <RoleMapping>
+      <IdentifierTypeAndProfile>
+        <identifiertype>roles</identifiertype>
+        <identifiervalue>role.admin</identifiervalue>
+        <profileid>Administrator</profileid>
+      </IdentifierTypeAndProfile>
+    </RoleMapping>
+  </AzureADSSO>
+</Response>
+'@
+                }
+            }
+            else {
+                [PSCustomObject]@{ Content = '<Response><AzureADSSO><Status code="200">Configuration applied successfully.</Status></AzureADSSO></Response>' }
+            }
+        }
+
+        Set-SfosAzureADSSO -ServerName 'CorpEntraAdmin' -FallbackUserGroup 'New Group' @conn -Confirm:$false
+
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -Times 1 -Exactly -ParameterFilter {
+            $InnerXml -match '<Set operation="update">' -and
+            $InnerXml -match '<FallbackUserGroup>New Group</FallbackUserGroup>' -and
+            $InnerXml -match '<ClientSecret hashform="mode1">\$sfos\$7\$0\$hashedvalue</ClientSecret>' -and
+            $InnerXml -match '<identifiertype>roles</identifiertype>' -and
+            $InnerXml -match '<profileid>Administrator</profileid>'
+        }
+    }
+
+    It 'Set-SfosAzureADSSO should throw when the named server does not exist' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+            [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login></Response>' }
+        }
+
+        { Set-SfosAzureADSSO -ServerName 'DoesNotExist' -FallbackUserGroup 'x' @conn -Confirm:$false } |
+            Should -Throw "*AzureADSSO object 'DoesNotExist' was not found*"
+    }
+
+    It 'Remove-SfosAzureADSSO should send Remove/AzureADSSO/ServerName' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -MockWith {
+            [PSCustomObject]@{ Content = '<Response><AzureADSSO><Status code="200">Configuration applied successfully.</Status></AzureADSSO></Response>' }
+        }
+
+        Remove-SfosAzureADSSO -ServerName 'CorpEntraAdmin' @conn -Confirm:$false
+
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Authentication -Times 1 -Exactly -ParameterFilter {
+            $InnerXml -match '<Remove>' -and
+            $InnerXml -match '<AzureADSSO>' -and
+            $InnerXml -match '<ServerName>CorpEntraAdmin</ServerName>'
+        }
     }
 }
 

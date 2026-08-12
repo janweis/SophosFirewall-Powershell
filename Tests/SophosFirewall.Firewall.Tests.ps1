@@ -170,6 +170,67 @@ Describe 'Request XML Generation' {
         }
     }
 
+    Context 'Remove-SfosFirewallRule' {
+        It 'Should build a Remove request with the FirewallRule root and the target name' {
+            Remove-SfosFirewallRule -Name 'Allow-LAN-to-WAN' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Firewall -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Remove>' -and
+                $InnerXml -match '<FirewallRule>' -and
+                $InnerXml -match '<Name>Allow-LAN-to-WAN</Name>'
+            }
+        }
+    }
+
+    Context 'Remove-SfosFirewallRuleGroup' {
+        It 'Should build a Remove request with the FirewallRuleGroup root and the target name' {
+            Remove-SfosFirewallRuleGroup -Name 'Outbound' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Firewall -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Remove>' -and
+                $InnerXml -match '<FirewallRuleGroup>' -and
+                $InnerXml -match '<Name>Outbound</Name>'
+            }
+        }
+    }
+
+    Context 'Remove-SfosNATRule' {
+        It 'Should build a Remove request with the NATRule root and the target name' {
+            Remove-SfosNATRule -Name 'SNAT-LAN-to-WAN' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Firewall -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Remove>' -and
+                $InnerXml -match '<NATRule>' -and
+                $InnerXml -match '<Name>SNAT-LAN-to-WAN</Name>'
+            }
+        }
+    }
+
+    Context 'New-SfosSSLTLSInspectionRule Position handling' {
+        # Regression for the client-side crash fixed 2026-08-12: an unbound -Position used to be
+        # forwarded unconditionally into ConvertTo-SfosSSLTLSInspectionRuleEntityXml, whose
+        # -Position parameter carries ValidateSet('Top','Bottom') - an unbound PowerShell
+        # parameter binds as an empty string, which violates the set and the call never reached
+        # the API. This is exactly the call in the module's own README quickstart and .EXAMPLE.
+        It 'Should build valid Add XML with no Position element when -Position is omitted' {
+            { New-SfosSSLTLSInspectionRule -Name 'Bypass-Banking' -Enable No @conn -Confirm:$false } | Should -Not -Throw
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Firewall -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Set operation="add">' -and
+                $InnerXml -match '<SSLTLSInspectionRule>' -and
+                $InnerXml -notmatch '<Position>'
+            }
+        }
+
+        It 'Should include the Position element when -Position Bottom is supplied' {
+            New-SfosSSLTLSInspectionRule -Name 'Bypass-Banking' -Enable No -Position Bottom @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Firewall -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Position>Bottom</Position>'
+            }
+        }
+    }
+
     Context 'Write cmdlets never send an unsupported Set operation' {
         It 'New-SfosFirewallRule should send operation="add", never anything else' {
             $np = New-SfosFirewallRuleNetworkPolicy
@@ -495,6 +556,120 @@ Describe 'Read-Modify-Write' {
             }
         }
     }
+
+    Context 'Set-SfosSSLTLSInspectionSettings' {
+        # This entity is on the never-write-live list (module .NOTES); verified here only
+        # against a mock. Read-modify-write matters just as much on a singleton: a Set that
+        # resent only the changed field would reset every other device-wide TLS setting to
+        # whatever the firewall treats as its default - the same PharmingProtection-reset class
+        # of defect documented in CLAUDE.md for WebFilterProtectionSettings.
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Firewall -MockWith {
+                if ($InnerXml -match '<Get>') {
+                    [PSCustomObject]@{ Content = @'
+<Response>
+  <Login><status>Authentication Successful</status></Login>
+  <SSLTLSInspectionSettings>
+    <RSACA>ExampleRSACA</RSACA>
+    <ECCA>ExampleECCA</ECCA>
+    <SSLv2SSLv3>Drop</SSLv2SSLv3>
+    <SSLCompression>Drop</SSLCompression>
+    <SSLConnectionsExceeded>Allow without decryption</SSLConnectionsExceeded>
+    <TLS13Decryption>Decrypt as 1.3</TLS13Decryption>
+    <SSLTLSEngine>Enabled</SSLTLSEngine>
+    <SSLTLSInspection>Enabled</SSLTLSInspection>
+  </SSLTLSInspectionSettings>
+</Response>
+'@
+                    }
+                }
+                else {
+                    [PSCustomObject]@{ Content = '<Response><SSLTLSInspectionSettings><Status code="200">OK</Status></SSLTLSInspectionSettings></Response>' }
+                }
+            }
+        }
+
+        It 'Should change only RSACA and keep every other device-wide field' {
+            Set-SfosSSLTLSInspectionSettings -RSACA 'NewIssuingCA' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Firewall -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Set operation="update">' -and
+                $InnerXml -match '<RSACA>NewIssuingCA</RSACA>' -and
+                $InnerXml -match '<ECCA>ExampleECCA</ECCA>' -and
+                $InnerXml -match '<SSLv2SSLv3>Drop</SSLv2SSLv3>' -and
+                $InnerXml -match '<SSLCompression>Drop</SSLCompression>' -and
+                $InnerXml -match '<SSLConnectionsExceeded>Allow without decryption</SSLConnectionsExceeded>' -and
+                $InnerXml -match '<TLS13Decryption>Decrypt as 1.3</TLS13Decryption>' -and
+                $InnerXml -match '<SSLTLSEngine>Enabled</SSLTLSEngine>' -and
+                $InnerXml -match '<SSLTLSInspection>Enabled</SSLTLSInspection>'
+            }
+        }
+    }
+}
+
+Describe 'Add-SfosFirewallRuleGroupMember' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    Context 'Adding a member to a group that already has one' {
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Firewall -MockWith {
+                if ($InnerXml -match '<Get>') {
+                    [PSCustomObject]@{ Content = @'
+<Response>
+  <Login><status>Authentication Successful</status></Login>
+  <FirewallRuleGroup>
+    <Name>Outbound</Name>
+    <Description>Original description</Description>
+    <SecurityPolicyList><SecurityPolicy>Allow-LAN-to-WAN</SecurityPolicy></SecurityPolicyList>
+  </FirewallRuleGroup>
+</Response>
+'@
+                    }
+                }
+                else {
+                    [PSCustomObject]@{ Content = '<Response><FirewallRuleGroup><Status code="200">OK</Status></FirewallRuleGroup></Response>' }
+                }
+            }
+        }
+
+        It 'Should resend the existing member together with the new one and keep the description' {
+            Add-SfosFirewallRuleGroupMember -Name 'Outbound' -members 'Allow-LAN-to-DMZ' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Firewall -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Set operation="update">' -and
+                $InnerXml -match '<Description>Original description</Description>' -and
+                $InnerXml -match '<SecurityPolicy>Allow-LAN-to-WAN</SecurityPolicy>' -and
+                $InnerXml -match '<SecurityPolicy>Allow-LAN-to-DMZ</SecurityPolicy>'
+            }
+        }
+    }
+
+    Context 'Adding a member to a group that does not exist' {
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Firewall -MockWith {
+                [PSCustomObject]@{ Content = @'
+<Response>
+  <Login><status>Authentication Successful</status></Login>
+  <FirewallRuleGroup><Status>No. of records Zero.</Status></FirewallRuleGroup>
+</Response>
+'@
+                }
+            }
+        }
+
+        It 'Should throw naming the group' {
+            { Add-SfosFirewallRuleGroupMember -Name 'DoesNotExist' -members 'Allow-LAN-to-WAN' @conn -Confirm:$false } |
+                Should -Throw '*FirewallRuleGroup*DoesNotExist*'
+        }
+    }
 }
 
 Describe 'Error Paths' {
@@ -637,6 +812,147 @@ Describe 'Error Paths' {
                 Should -Throw '*RuleA*is still a member*'
         }
     }
+
+    Context 'Remove-SfosFirewallRule on a non-existent rule' {
+        # Known open defect (CLAUDE.md "Still open" table, applies to all Remove-Sfos*): the
+        # raw firewall answer is passed through unchanged rather than a "was not found" message.
+        # Measured wording for this class of error on this module: 528 "Trying to update
+        # default entities which are not editable". This test locks in that the cmdlet still
+        # throws - 528 is in the documented 500-599 failure range - even though the message is
+        # misleading; it does not report a false success.
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Firewall -MockWith {
+                [PSCustomObject]@{ Content = @'
+<Response>
+  <Login><status>Authentication Successful</status></Login>
+  <FirewallRule><Status code="528">Trying to update default entities which are not editable</Status></FirewallRule>
+</Response>
+'@
+                }
+            }
+        }
+
+        It 'Should throw rather than silently succeed' {
+            { Remove-SfosFirewallRule -Name 'DoesNotExist' @conn -Confirm:$false } | Should -Throw
+        }
+    }
+}
+
+Describe 'Get-SfosSSLTLSInspectionRule parsing' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    Context 'A rule with website references and zone lists' {
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Firewall -MockWith {
+                [PSCustomObject]@{ Content = @'
+<Response>
+  <Login><status>Authentication Successful</status></Login>
+  <SSLTLSInspectionRule>
+    <Name>Exclusions by website or category</Name>
+    <IsDefault>Yes</IsDefault>
+    <Description>Default</Description>
+    <Enable>Yes</Enable>
+    <LogConnections>Enable</LogConnections>
+    <SourceZones><Zone>LAN</Zone></SourceZones>
+    <DestinationZones><Zone>WAN</Zone></DestinationZones>
+    <Websites>
+      <Activity><Name>Banking</Name><Type>Web Category</Type></Activity>
+    </Websites>
+    <DecryptAction>Do not decrypt</DecryptAction>
+  </SSLTLSInspectionRule>
+</Response>
+'@
+                }
+            }
+        }
+
+        It 'Should parse the top-level fields, the zone lists and the website references' {
+            $result = @(Get-SfosSSLTLSInspectionRule @conn)
+
+            $result.Count | Should -Be 1
+            $result[0].IsDefault | Should -Be 'Yes'
+            $result[0].DecryptAction | Should -Be 'Do not decrypt'
+            $result[0].SourceZones.Count | Should -Be 1
+            $result[0].SourceZones[0] | Should -Be 'LAN'
+            $result[0].DestinationZones.Count | Should -Be 1
+            $result[0].DestinationZones[0] | Should -Be 'WAN'
+            $result[0].Website.Count | Should -Be 1
+            $result[0].Website[0].Name | Should -Be 'Banking'
+            $result[0].Website[0].Type | Should -Be 'Web Category'
+        }
+    }
+
+    Context 'No SSLTLSInspectionRule records exist' {
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Firewall -MockWith {
+                [PSCustomObject]@{ Content = @'
+<Response>
+  <Login><status>Authentication Successful</status></Login>
+  <SSLTLSInspectionRule><Status>No. of records Zero.</Status></SSLTLSInspectionRule>
+</Response>
+'@
+                }
+            }
+        }
+
+        It 'Should return an empty array rather than throwing' {
+            $result = @(Get-SfosSSLTLSInspectionRule @conn)
+
+            $result.Count | Should -Be 0
+        }
+    }
+}
+
+Describe 'Get-SfosSSLTLSInspectionSettings parsing' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    BeforeEach {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Firewall -MockWith {
+            [PSCustomObject]@{ Content = @'
+<Response>
+  <Login><status>Authentication Successful</status></Login>
+  <SSLTLSInspectionSettings>
+    <RSACA>ExampleRSACA</RSACA>
+    <ECCA>ExampleECCA</ECCA>
+    <SSLv2SSLv3>Drop</SSLv2SSLv3>
+    <SSLCompression>Drop</SSLCompression>
+    <SSLConnectionsExceeded>Allow without decryption</SSLConnectionsExceeded>
+    <TLS13Decryption>Decrypt as 1.3</TLS13Decryption>
+    <SSLTLSEngine>Enabled</SSLTLSEngine>
+    <SSLTLSInspection>Enabled</SSLTLSInspection>
+  </SSLTLSInspectionSettings>
+</Response>
+'@
+            }
+        }
+    }
+
+    It 'Should return the singleton as a single object with every documented field' {
+        $result = Get-SfosSSLTLSInspectionSettings @conn
+
+        $result.RSACA | Should -Be 'ExampleRSACA'
+        $result.ECCA | Should -Be 'ExampleECCA'
+        $result.SSLv2SSLv3 | Should -Be 'Drop'
+        $result.TLS13Decryption | Should -Be 'Decrypt as 1.3'
+        $result.SSLTLSEngine | Should -Be 'Enabled'
+        $result.SSLTLSInspection | Should -Be 'Enabled'
+    }
 }
 
 Describe 'Empty Lists' {
@@ -754,5 +1070,36 @@ Describe 'WhatIf' {
         Remove-SfosNATRule -Name 'Example' @conn -WhatIf
 
         Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Firewall -Times 0 -Exactly
+    }
+
+    It 'Set-SfosSSLTLSInspectionSettings should read the current settings but never write with -WhatIf' {
+        # This entity is on the never-write-live list; -WhatIf is the only way this suite
+        # exercises the write path at all. The read-modify-write still has to fetch the
+        # current settings first (a <Get>), so only the <Set operation="update"> half must be
+        # suppressed by ShouldProcess.
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Firewall -MockWith {
+            [PSCustomObject]@{ Content = @'
+<Response>
+  <Login><status>Authentication Successful</status></Login>
+  <SSLTLSInspectionSettings>
+    <RSACA>ExampleRSACA</RSACA>
+    <ECCA>ExampleECCA</ECCA>
+    <SSLv2SSLv3>Drop</SSLv2SSLv3>
+    <SSLCompression>Drop</SSLCompression>
+    <SSLConnectionsExceeded>Allow without decryption</SSLConnectionsExceeded>
+    <TLS13Decryption>Decrypt as 1.3</TLS13Decryption>
+    <SSLTLSEngine>Enabled</SSLTLSEngine>
+    <SSLTLSInspection>Enabled</SSLTLSInspection>
+  </SSLTLSInspectionSettings>
+</Response>
+'@
+            }
+        }
+
+        Set-SfosSSLTLSInspectionSettings -SSLTLSEngine Enabled @conn -WhatIf
+
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Firewall -ParameterFilter {
+            $InnerXml -match '<Set operation="update">'
+        } -Times 0 -Exactly
     }
 }

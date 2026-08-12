@@ -309,6 +309,35 @@ Describe 'Add-/Remove-SfosATPHostException and -SfosATPThreatException' {
 
             { Remove-SfosATPThreatException -Threat 'Ghost' @conn -Confirm:$false } | Should -Throw '*was not found*'
         }
+
+        It 'Remove-SfosATPThreatException throws when the threat is still present after the write (append-only guard)' {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.ActiveThreatResponse -MockWith {
+                # Every Get - before and after the write - still reports the threat, simulating
+                # a firewall that silently ignored the removal.
+                if ($InnerXml -notmatch '<Get>') {
+                    return [PSCustomObject]@{ Content = '<Response><ATP><Status code="200">Configuration applied successfully.</Status></ATP></Response>' }
+                }
+                [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><ATP transactionid=""><ThreatProtectionStatus>Enable</ThreatProtectionStatus><InspectContent>untrusted</InspectContent><Policy>Log and Drop</Policy><ThreatException><Threat>C2/Generic-A</Threat></ThreatException></ATP></Response>' }
+            }
+
+            { Remove-SfosATPThreatException -Threat 'C2/Generic-A' @conn -Confirm:$false } | Should -Throw '*still present*'
+        }
+
+        It 'Remove-SfosATPThreatException removes the threat and completes without throwing when the follow-up Get confirms it is gone' {
+            $script:removed = $false
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.ActiveThreatResponse -MockWith {
+                if ($InnerXml -match '<Set operation="update">') {
+                    $script:removed = $true
+                    return [PSCustomObject]@{ Content = '<Response><ATP><Status code="200">Configuration applied successfully.</Status></ATP></Response>' }
+                }
+                if ($script:removed) {
+                    return [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><ATP transactionid=""><ThreatProtectionStatus>Enable</ThreatProtectionStatus><InspectContent>untrusted</InspectContent><Policy>Log and Drop</Policy></ATP></Response>' }
+                }
+                [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><ATP transactionid=""><ThreatProtectionStatus>Enable</ThreatProtectionStatus><InspectContent>untrusted</InspectContent><Policy>Log and Drop</Policy><ThreatException><Threat>C2/Generic-A</Threat></ThreatException></ATP></Response>' }
+            }
+
+            { Remove-SfosATPThreatException -Threat 'C2/Generic-A' @conn -Confirm:$false } | Should -Not -Throw
+        }
     }
 }
 
@@ -525,6 +554,15 @@ Describe 'Set-SfosThirdPartyFeed - read-modify-write' {
 
             { Set-SfosThirdPartyFeed -Name 'SwitchFeed' -Authorization basicAuthentication -FeedUsername 'x' @conn -Confirm:$false } |
                 Should -Throw '*basicAuthentication*FeedPassword*'
+        }
+
+        It 'throws client-side when switching to apiKey without -ApiKeyValue' {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.ActiveThreatResponse -MockWith {
+                [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><ThirdPartyFeed transactionid=""><Id>id-3b</Id><Name>SwitchFeed2</Name><Description></Description><Action>monitor</Action><IndicatorType>ip</IndicatorType><ExternalURL>https://feeds.example.com/blocklist.txt</ExternalURL><Authorization>noAuthentication</Authorization><ValidateServerCertificate>1</ValidateServerCertificate><PollingInterval>1h</PollingInterval><Enabled>1</Enabled></ThirdPartyFeed></Response>' }
+            }
+
+            { Set-SfosThirdPartyFeed -Name 'SwitchFeed2' -Authorization apiKey -ApiKeyName 'X-Api-Key' @conn -Confirm:$false } |
+                Should -Throw '*apiKey*ApiKeyName*ApiKeyValue*AddTo*'
         }
     }
 

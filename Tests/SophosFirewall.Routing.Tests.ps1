@@ -558,6 +558,95 @@ Describe 'Read-Modify-Write' {
             }
         }
     }
+
+    Context 'Set-SfosHealthCheckProfile' {
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Routing -MockWith {
+                if ($InnerXml -match '<Get>') {
+                    [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><HealthCheckProfile transactionid=""><Name>ZZHCPRmw</Name><IPFamily>IPv4</IPFamily><ProbeInterval>60</ProbeInterval><ResponseTimeout>2</ResponseTimeout><ProbesResponseFailure>1</ProbesResponseFailure><ProbeResponseSuccess>3</ProbeResponseSuccess><Status>1</Status><ProbeTargets><ProbeTarget><conditionid>1</conditionid><monitorip>198.51.100.5</monitorip><monitormethod>PING</monitormethod><operator>|</operator><port>0</port></ProbeTarget></ProbeTargets></HealthCheckProfile></Response>' }
+                }
+                else {
+                    [PSCustomObject]@{ Content = '<Response><HealthCheckProfile><Status code="200">Configuration applied successfully.</Status></HealthCheckProfile></Response>' }
+                }
+            }
+        }
+
+        It 'preserves ResponseTimeout, ProbesResponseFailure, ProbeResponseSuccess and ProbeTargets when only ProbeInterval changes' {
+            Set-SfosHealthCheckProfile -Name 'ZZHCPRmw' -ProbeInterval 30 @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Routing -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Set operation="update">' -and
+                $InnerXml -match '<ProbeInterval>30</ProbeInterval>' -and
+                $InnerXml -match '<ResponseTimeout>2</ResponseTimeout>' -and
+                $InnerXml -match '<ProbesResponseFailure>1</ProbesResponseFailure>' -and
+                $InnerXml -match '<ProbeResponseSuccess>3</ProbeResponseSuccess>' -and
+                $InnerXml -match '<ProbeTarget><monitormethod>PING</monitormethod><monitorip>198\.51\.100\.5</monitorip><port>0</port><operator>\|</operator></ProbeTarget>'
+            }
+        }
+    }
+
+    Context 'Set-SfosMulticastRoute' {
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Routing -MockWith {
+                if ($InnerXml -match '<Get>') {
+                    [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><MulticastRoute transactionid=""><SourceIPAddress>198.51.100.70</SourceIPAddress><SourceInterface>Port1</SourceInterface><MulticastAddress>239.1.1.7</MulticastAddress><DestinationInterfaceList><DestinationInterface><Interface>Port2</Interface><TunnelType>GRE</TunnelType></DestinationInterface></DestinationInterfaceList></MulticastRoute></Response>' }
+                }
+                else {
+                    [PSCustomObject]@{ Content = '<Response><MulticastRoute><Status code="200">Configuration applied successfully.</Status></MulticastRoute></Response>' }
+                }
+            }
+        }
+
+        # Regression test for a defect found by this suite and fixed 2026-08-12: assigning
+        # straight from `if (...) { A } else { B }` unwraps a one-element array to a scalar
+        # even when the branch wraps in @() - the fix wraps the WHOLE if/else in @(). With
+        # exactly ONE preserved destination interface (the common case), the old code
+        # character-indexed the collapsed string and sent 'P'/'G' instead of 'Port2'/'GRE'.
+        It 'preserves a single DestinationInterface/TunnelType intact (regression: single-element array unwrap)' {
+            Set-SfosMulticastRoute -SourceIPAddress '198.51.100.70' -MulticastAddress '239.1.1.7' -SourceInterface 'Port3' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Routing -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Set operation="update">' -and
+                $InnerXml -match '<SourceInterface>Port3</SourceInterface>' -and
+                $InnerXml -match '<DestinationInterface><Interface>Port2</Interface><TunnelType>GRE</TunnelType></DestinationInterface>'
+            }
+        }
+
+        It 'preserves DestinationInterfaceList intact when there are two or more destination interfaces (single-element array-unwrap does not trigger)' {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Routing -MockWith {
+                if ($InnerXml -match '<Get>') {
+                    [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><MulticastRoute transactionid=""><SourceIPAddress>198.51.100.72</SourceIPAddress><SourceInterface>Port1</SourceInterface><MulticastAddress>239.1.1.9</MulticastAddress><DestinationInterfaceList><DestinationInterface><Interface>Port2</Interface><TunnelType>GRE</TunnelType></DestinationInterface><DestinationInterface><Interface>Port5</Interface><TunnelType>IPSec</TunnelType></DestinationInterface></DestinationInterfaceList></MulticastRoute></Response>' }
+                }
+                else {
+                    [PSCustomObject]@{ Content = '<Response><MulticastRoute><Status code="200">Configuration applied successfully.</Status></MulticastRoute></Response>' }
+                }
+            }
+
+            Set-SfosMulticastRoute -SourceIPAddress '198.51.100.72' -MulticastAddress '239.1.1.9' -SourceInterface 'Port3' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Routing -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<DestinationInterface><Interface>Port2</Interface><TunnelType>GRE</TunnelType></DestinationInterface>' -and
+                $InnerXml -match '<DestinationInterface><Interface>Port5</Interface><TunnelType>IPSec</TunnelType></DestinationInterface>'
+            }
+        }
+
+        It 'throws when the target route does not exist' {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Routing -MockWith {
+                [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><MulticastRoute transactionid=""><Status>No. of records Zero.</Status></MulticastRoute></Response>' }
+            }
+
+            { Set-SfosMulticastRoute -SourceIPAddress '198.51.100.71' -MulticastAddress '239.1.1.8' -SourceInterface 'Port3' @conn -Confirm:$false } |
+                Should -Throw '*was not found*'
+        }
+
+        It 'throws client-side, before any API call, when -DestinationInterface and -DestinationTunnelType counts differ' {
+            { Set-SfosMulticastRoute -SourceIPAddress '198.51.100.70' -MulticastAddress '239.1.1.7' `
+                    -DestinationInterface 'Port1', 'Port2' -DestinationTunnelType 'GRE' @conn -Confirm:$false } |
+                Should -Throw '*same number of entries*'
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Routing -Times 0 -Exactly
+        }
+    }
 }
 
 Describe 'Measured special-case behaviours' {
@@ -790,6 +879,189 @@ Describe 'Error handling common to every Get-*' {
 
         $result = @(Get-SfosSDWANPolicyRoute @conn)
         $result.Count | Should -Be 0
+    }
+}
+
+Describe 'Remove-* XML generation and cmdlet-specific error paths' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    Context 'Remove-SfosGatewayHost' {
+        It 'reads the object first and sends <Remove><GatewayHost><Name>' {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Routing -MockWith {
+                if ($InnerXml -match '<Get>') {
+                    [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><GatewayHost transactionid=""><Name>ZZGWRemove</Name><IPFamily>IPv4</IPFamily><GatewayIP>198.51.100.1</GatewayIP><Interface>Port1</Interface></GatewayHost></Response>' }
+                }
+                else {
+                    [PSCustomObject]@{ Content = '<Response><GatewayHost><Status code="200">Configuration applied successfully.</Status></GatewayHost></Response>' }
+                }
+            }
+
+            Remove-SfosGatewayHost -Name 'ZZGWRemove' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Routing -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Remove>\s*<GatewayHost>\s*<Name>ZZGWRemove</Name>'
+            }
+        }
+
+        It 'throws "was not found" and sends no Remove request when the object does not exist' {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Routing -MockWith {
+                [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><GatewayHost transactionid=""><Status>No. of records Zero.</Status></GatewayHost></Response>' }
+            }
+
+            { Remove-SfosGatewayHost -Name 'Ghost' @conn -Confirm:$false } | Should -Throw '*was not found*'
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Routing -Times 1 -Exactly
+        }
+    }
+
+    Context 'Remove-SfosHealthCheckProfile - deliberately no pre-check, see module NOTES' {
+        It 'sends <Remove><HealthCheckProfile><Name> directly, without a prior Get' {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Routing -MockWith {
+                [PSCustomObject]@{ Content = '<Response><HealthCheckProfile><Status code="200">Configuration applied successfully.</Status></HealthCheckProfile></Response>' }
+            }
+
+            Remove-SfosHealthCheckProfile -Name 'ZZHCPRemove' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Routing -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Remove>\s*<HealthCheckProfile>\s*<Name>ZZHCPRemove</Name>'
+            }
+        }
+
+        It 'throws on the measured code-less "Operation could not be performed on Entity." status for a name that was never created' {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Routing -MockWith {
+                [PSCustomObject]@{ Content = '<Response><HealthCheckProfile><Status>Operation could not be performed on Entity.</Status></HealthCheckProfile></Response>' }
+            }
+
+            { Remove-SfosHealthCheckProfile -Name 'Ghost' @conn -Confirm:$false } | Should -Throw '*could not be performed*'
+        }
+    }
+
+    Context 'Remove-SfosSDWANProfile' {
+        It 'sends <Remove><SDWANProfile><Name> with no pre-check' {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Routing -MockWith {
+                [PSCustomObject]@{ Content = '<Response><SDWANProfile><Status code="200">Configuration applied successfully.</Status></SDWANProfile></Response>' }
+            }
+
+            Remove-SfosSDWANProfile -Name 'ZZProfileRemove' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Routing -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -eq '<Remove><SDWANProfile><Name>ZZProfileRemove</Name></SDWANProfile></Remove>'
+            }
+        }
+    }
+
+    Context 'Remove-SfosSDWANPolicyRoute' {
+        It 'sends <Remove><SDWANPolicyRoute><Name> with no pre-check' {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Routing -MockWith {
+                [PSCustomObject]@{ Content = '<Response><SDWANPolicyRoute><Status code="200">Configuration applied successfully.</Status></SDWANPolicyRoute></Response>' }
+            }
+
+            Remove-SfosSDWANPolicyRoute -Name 'ZZRouteRemove' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Routing -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -eq '<Remove><SDWANPolicyRoute><Name>ZZRouteRemove</Name></SDWANPolicyRoute></Remove>'
+            }
+        }
+    }
+
+    Context 'Remove-SfosUnicastRoute' {
+        It 'reads the object first and resends the full set of fields (Interface, Distance, AdministrativeDistance, Status)' {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Routing -MockWith {
+                if ($InnerXml -match '<Get>') {
+                    [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><UnicastRoute transactionid=""><IPFamily>IPv4</IPFamily><DestinationIP>198.51.100.130</DestinationIP><Netmask>255.255.255.255</Netmask><Interface>Port1</Interface><Distance>0</Distance><AdministrativeDistance>1</AdministrativeDistance><Status>ON</Status><Description>original</Description></UnicastRoute></Response>' }
+                }
+                else {
+                    [PSCustomObject]@{ Content = '<Response><UnicastRoute><Status code="200">Configuration applied successfully.</Status></UnicastRoute></Response>' }
+                }
+            }
+
+            Remove-SfosUnicastRoute -DestinationIP '198.51.100.130' -Netmask '255.255.255.255' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Routing -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Remove>' -and
+                $InnerXml -match '<DestinationIP>198\.51\.100\.130</DestinationIP>' -and
+                $InnerXml -match '<Netmask>255\.255\.255\.255</Netmask>' -and
+                $InnerXml -match '<Interface>Port1</Interface>' -and
+                $InnerXml -match '<Distance>0</Distance>' -and
+                $InnerXml -match '<AdministrativeDistance>1</AdministrativeDistance>' -and
+                $InnerXml -match '<Status>ON</Status>'
+            }
+        }
+
+        It 'throws "was not found" and sends no Remove request when the route does not exist' {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Routing -MockWith {
+                [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><UnicastRoute transactionid=""><Status>No. of records Zero.</Status></UnicastRoute></Response>' }
+            }
+
+            { Remove-SfosUnicastRoute -DestinationIP '198.51.100.131' -Netmask '255.255.255.255' @conn -Confirm:$false } |
+                Should -Throw '*was not found*'
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Routing -Times 1 -Exactly
+        }
+    }
+
+    Context 'Remove-SfosMulticastRoute' {
+        It 'sends <Remove><MulticastRoute><SourceIPAddress>/<MulticastAddress> with no pre-check' {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Routing -MockWith {
+                [PSCustomObject]@{ Content = '<Response><MulticastRoute><Status code="200">Configuration applied successfully.</Status></MulticastRoute></Response>' }
+            }
+
+            Remove-SfosMulticastRoute -SourceIPAddress '198.51.100.90' -MulticastAddress '239.1.1.9' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Routing -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Remove>\s*<MulticastRoute>\s*<SourceIPAddress>198\.51\.100\.90</SourceIPAddress>\s*<MulticastAddress>239\.1\.1\.9</MulticastAddress>'
+            }
+        }
+    }
+}
+
+Describe 'MulticastRoute write paths - every documented variant answers 500 on this firmware [measured]' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    It 'New-SfosMulticastRoute throws on the measured 500 "Operation could not be performed on Entity."' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Routing -MockWith {
+            [PSCustomObject]@{ Content = '<Response><MulticastRoute><Status code="500">Operation could not be performed on Entity.</Status></MulticastRoute></Response>' }
+        }
+
+        { New-SfosMulticastRoute -SourceIPAddress '198.51.100.80' -MulticastAddress '239.1.1.8' -DestinationInterface 'Port1' @conn -Confirm:$false } |
+            Should -Throw '*500*'
+    }
+
+    It 'Set-SfosMulticastRoute throws on the measured 500 after a successful read of the existing route' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Routing -MockWith {
+            if ($InnerXml -match '<Get>') {
+                [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><MulticastRoute transactionid=""><SourceIPAddress>198.51.100.80</SourceIPAddress><MulticastAddress>239.1.1.8</MulticastAddress><DestinationInterfaceList><DestinationInterface><Interface>Port1</Interface></DestinationInterface></DestinationInterfaceList></MulticastRoute></Response>' }
+            }
+            else {
+                [PSCustomObject]@{ Content = '<Response><MulticastRoute><Status code="500">Operation could not be performed on Entity.</Status></MulticastRoute></Response>' }
+            }
+        }
+
+        { Set-SfosMulticastRoute -SourceIPAddress '198.51.100.80' -MulticastAddress '239.1.1.8' -SourceInterface 'Port2' @conn -Confirm:$false } |
+            Should -Throw '*500*'
+    }
+
+    It 'Remove-SfosMulticastRoute throws on the measured 500, whether the key ever existed or not' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Routing -MockWith {
+            [PSCustomObject]@{ Content = '<Response><MulticastRoute><Status code="500">Operation could not be performed on Entity.</Status></MulticastRoute></Response>' }
+        }
+
+        { Remove-SfosMulticastRoute -SourceIPAddress '198.51.100.80' -MulticastAddress '239.1.1.8' @conn -Confirm:$false } |
+            Should -Throw '*500*'
     }
 }
 

@@ -445,6 +445,91 @@ Describe 'Resolve-SfosParameters - Explicit Values Win' {
     }
 }
 
+Describe 'Assert-SfosApiReturnSuccess - Full status code table' {
+
+    # CLAUDE.md SS5 status table: 200/216 success, 201/203/211-215 warn, 204-210 fail,
+    # 217/222 warn (measured, undocumented), the rest of 217-499 throws, 500-599 throws.
+    # No 202 anywhere (covered separately above).
+
+    Context 'Warn-but-succeed codes (201, 203, 211-215)' {
+        # Pester's -ForEach on It, not a plain 'foreach' around the It block: the It body is
+        # deferred to the Run phase, and a plain loop variable is shared by reference across
+        # every iteration's closure, so every generated test ends up seeing the loop's final
+        # value instead of its own. -ForEach binds $_ per test correctly.
+        It 'Should warn but not throw on code <_>' -ForEach @(201, 203, 211, 212, 213, 214, 215) {
+            $xml = [xml]("<Response><Status code=""{0}""><Msg>Operation partially successful.</Msg></Status></Response>" -f $_)
+            { Assert-SfosApiReturnSuccess -Xml $xml -WarningAction SilentlyContinue } | Should -Not -Throw
+        }
+
+        It 'Should emit a warning on code <_>' -ForEach @(201, 203, 211, 212, 213, 214, 215) {
+            $xml = [xml]("<Response><Status code=""{0}""><Msg>Operation partially successful.</Msg></Status></Response>" -f $_)
+            Assert-SfosApiReturnSuccess -Xml $xml -WarningVariable warnings -WarningAction SilentlyContinue
+            $warnings.Count | Should -BeGreaterThan 0
+        }
+    }
+
+    Context 'Failing codes (204-210, "Operation partially failed")' {
+        It 'Should throw on code <_>' -ForEach @(204, 205, 206, 207, 208, 209, 210) {
+            $xml = [xml]("<Response><Status code=""{0}""><Msg>Operation partially failed.</Msg></Status></Response>" -f $_)
+            { Assert-SfosApiReturnSuccess -Xml $xml -ErrorAction Stop } | Should -Throw
+        }
+    }
+
+    Context 'Undocumented gap 217-499' {
+        It 'Should warn but not throw on the measured code 217' {
+            $xml = [xml]'<Response><Status code="217">Unable to get status message</Status></Response>'
+            { Assert-SfosApiReturnSuccess -Xml $xml -WarningAction SilentlyContinue } | Should -Not -Throw
+        }
+
+        It 'Should warn but not throw on the measured code 222' {
+            $xml = [xml]'<Response><Status code="222">Unable to get status message</Status></Response>'
+            { Assert-SfosApiReturnSuccess -Xml $xml -WarningAction SilentlyContinue } | Should -Not -Throw
+        }
+
+        It 'Should throw on the unmeasured gap code <_> - waving it through would fail open' -ForEach @(220, 250, 300, 450, 499) {
+            $xml = [xml]("<Response><Status code=""{0}""><Msg>Unrecognised</Msg></Status></Response>" -f $_)
+            { Assert-SfosApiReturnSuccess -Xml $xml -ErrorAction Stop } | Should -Throw
+        }
+    }
+
+    Context '5xx failure codes' {
+        It 'Should throw on code <_>' -ForEach @(500, 526, 528, 529, 530) {
+            $code = $_
+            $xml = [xml]("<Response><Status code=""{0}""><Msg>Failure</Msg></Status></Response>" -f $code)
+            { Assert-SfosApiReturnSuccess -Xml $xml -ErrorAction Stop } | Should -Throw "*$code*"
+        }
+    }
+}
+
+Describe 'Resolve-SfosParameters - Precedence and Missing Values' {
+
+    AfterEach {
+        Disconnect-SfosFirewall
+    }
+
+    It 'Should let every explicit connection parameter override a stored session' {
+        $sessionCred = New-Object System.Management.Automation.PSCredential('sessionuser', (ConvertTo-SecureString 'sessionpw' -AsPlainText -Force))
+        Connect-SfosFirewall -Firewall 'session.example.test' -Port 4444 -Credential $sessionCred | Out-Null
+
+        $explicitPassword = ConvertTo-SecureString 'explicitpw' -AsPlainText -Force
+        $resolved = Resolve-SfosParameters -BoundParameters @{
+            Firewall = 'explicit.example.test'
+            Port     = 8443
+            Username = 'explicituser'
+            Password = $explicitPassword
+        }
+
+        $resolved.Firewall | Should -Be 'explicit.example.test'
+        $resolved.Port | Should -Be 8443
+        $resolved.Username | Should -Be 'explicituser'
+        $resolved.Password | Should -Be $explicitPassword
+    }
+
+    It 'Should throw when neither explicit parameters nor an active session are available' {
+        { Resolve-SfosParameters -BoundParameters @{} } | Should -Throw '*No active Sophos Firewall connection*'
+    }
+}
+
 Describe 'SophosFirewall.Core Integration Tests' {
     
     Context 'XML API Request Pattern Validation' {

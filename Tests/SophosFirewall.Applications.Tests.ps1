@@ -386,3 +386,710 @@ Describe 'Error handling common to every Get-*' {
         $result.Count | Should -Be 0
     }
 }
+
+Describe 'Get-SfosApplicationFilterPolicy - XML parsing' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    It 'parses Name, Description, DefaultAction, MicroAppSupport and a nested Rule' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Applications -MockWith {
+            [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><ApplicationFilterPolicy transactionid=""><Name>BranchOfficeApps</Name><Description>Test policy</Description><DefaultAction>Allow</DefaultAction><MicroAppSupport>True</MicroAppSupport><RuleList><Rule><SelectAllRule>Disable</SelectAllRule><ApplicationList><Application>Lantern</Application></ApplicationList><SmartFilter></SmartFilter><Action>Deny</Action><Schedule>All The Time</Schedule></Rule></RuleList></ApplicationFilterPolicy></Response>' }
+        }
+
+        $result = Get-SfosApplicationFilterPolicy @conn
+
+        $result.Name | Should -Be 'BranchOfficeApps'
+        $result.Description | Should -Be 'Test policy'
+        $result.DefaultAction | Should -Be 'Allow'
+        $result.MicroAppSupport | Should -Be 'True'
+        $result.RuleList.Count | Should -Be 1
+        $result.RuleList[0].SelectAllRule | Should -Be 'Disable'
+        $result.RuleList[0].ApplicationList | Should -Be @('Lantern')
+        $result.RuleList[0].Action | Should -Be 'Deny'
+        $result.RuleList[0].Schedule | Should -Be 'All The Time'
+    }
+
+    It 'returns RuleList as @() for a policy with no RuleList element at all (measured shape)' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Applications -MockWith {
+            [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><ApplicationFilterPolicy transactionid=""><Name>EmptyPolicy</Name><Description></Description><DefaultAction>Deny</DefaultAction><MicroAppSupport>True</MicroAppSupport></ApplicationFilterPolicy></Response>' }
+        }
+
+        $result = Get-SfosApplicationFilterPolicy @conn
+        @($result.RuleList).Count | Should -Be 0
+    }
+}
+
+Describe 'Get-SfosApplicationObject - XML parsing' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    It 'parses Name, SelectAllRule and a multi-entry ApplicationList' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Applications -MockWith {
+            [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><ApplicationObject transactionid=""><Name>KnownProxyApp</Name><SelectAllRule>Disable</SelectAllRule><ApplicationList><Application>Lantern</Application><Application>TurboVPN</Application></ApplicationList><SmartFilter></SmartFilter></ApplicationObject></Response>' }
+        }
+
+        $result = Get-SfosApplicationObject @conn
+
+        $result.Name | Should -Be 'KnownProxyApp'
+        $result.SelectAllRule | Should -Be 'Disable'
+        $result.ApplicationList | Should -Be @('Lantern', 'TurboVPN')
+    }
+}
+
+Describe 'Get-SfosApplicationFilterCategory - XML parsing' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    It 'parses Name, QoSPolicy, BandwidthUsageType, Description and a nested ApplicationSettings override' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Applications -MockWith {
+            [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><ApplicationFilterCategory transactionid=""><Name>Mobile Applications</Name><QoSPolicy>Streaming Video - Limit to SD Quality</QoSPolicy><BandwidthUsageType>Individual</BandwidthUsageType><Description>Mobile apps category</Description><ApplicationSettings><Application><Name>Instagram</Name><QoSPolicy>Streaming Video - Limit to SD Quality</QoSPolicy></Application></ApplicationSettings></ApplicationFilterCategory></Response>' }
+        }
+
+        $result = Get-SfosApplicationFilterCategory @conn
+
+        $result.Name | Should -Be 'Mobile Applications'
+        $result.QoSPolicy | Should -Be 'Streaming Video - Limit to SD Quality'
+        $result.BandwidthUsageType | Should -Be 'Individual'
+        $result.ApplicationSettings.Count | Should -Be 1
+        $result.ApplicationSettings[0].Name | Should -Be 'Instagram'
+        $result.ApplicationSettings[0].QoSPolicy | Should -Be 'Streaming Video - Limit to SD Quality'
+    }
+
+    It 'returns ApplicationSettings as @() when the category has no per-application override' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Applications -MockWith {
+            [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><ApplicationFilterCategory transactionid=""><Name>Gaming</Name><QoSPolicy>None</QoSPolicy><BandwidthUsageType></BandwidthUsageType><Description></Description></ApplicationFilterCategory></Response>' }
+        }
+
+        $result = Get-SfosApplicationFilterCategory @conn
+        @($result.ApplicationSettings).Count | Should -Be 0
+    }
+}
+
+Describe 'Get-SfosApplicationClassificationAssignment - XML parsing and client-side filtering' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    BeforeEach {
+        # Measured: server-side filtering is a no-op for both Application and Classification
+        # keys on this entity, so the mock always returns every row.
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Applications -MockWith {
+            [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><ApplicationClassificationAssignment transactionid=""><Application>10Web</Application><Classification>New</Classification></ApplicationClassificationAssignment><ApplicationClassificationAssignment transactionid=""><Application>1Password</Application><Classification>New</Classification></ApplicationClassificationAssignment></Response>' }
+        }
+    }
+
+    It 'parses every Application/Classification pair' {
+        $result = @(Get-SfosApplicationClassificationAssignment @conn)
+        $result.Count | Should -Be 2
+        $result[0].Application | Should -Be '10Web'
+        $result[0].Classification | Should -Be 'New'
+    }
+
+    It 'filters client-side on -ApplicationLike, since server-side filtering is a no-op for this entity' {
+        $result = @(Get-SfosApplicationClassificationAssignment -ApplicationLike '10Web' @conn)
+        $result.Count | Should -Be 1
+        $result[0].Application | Should -Be '10Web'
+    }
+}
+
+Describe 'Get-SfosApplicationClassification - XML parsing' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    It 'parses ACTION On' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Applications -MockWith {
+            [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><ApplicationClassification transactionid=""><ACTION>On</ACTION></ApplicationClassification></Response>' }
+        }
+
+        (Get-SfosApplicationClassification @conn).ACTION | Should -Be 'On'
+    }
+
+    It 'throws on an ACTION value that is neither On nor Off' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Applications -MockWith {
+            [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><ApplicationClassification transactionid=""><ACTION>Maybe</ACTION></ApplicationClassification></Response>' }
+        }
+
+        { Get-SfosApplicationClassification @conn } | Should -Throw '*unrecognised*'
+    }
+}
+
+Describe 'New-SfosApplicationObject - XML generation and client-side guard' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    It 'builds the add XML for a Disable/Application-mode object' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Applications -MockWith {
+            [PSCustomObject]@{ Content = '<Response><ApplicationObject><Status code="200">Configuration applied successfully.</Status></ApplicationObject></Response>' }
+        }
+
+        New-SfosApplicationObject -Name 'KnownProxyApp' -SelectAllRule Disable -Application 'Lantern' @conn -Confirm:$false
+
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Applications -Times 1 -Exactly -ParameterFilter {
+            $InnerXml -match '<Set operation="add">' -and
+            $InnerXml -match '<Name>KnownProxyApp</Name>' -and
+            $InnerXml -match '<SelectAllRule>Disable</SelectAllRule>' -and
+            $InnerXml -match '<ApplicationList><Application>Lantern</Application></ApplicationList>'
+        }
+    }
+
+    It 'throws client-side when SelectAllRule Disable has no Application entry, without calling the API' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Applications
+
+        { New-SfosApplicationObject -Name 'Empty' -SelectAllRule Disable @conn -Confirm:$false } | Should -Throw '*at least one -Application entry*'
+
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Applications -Times 0 -Exactly
+    }
+}
+
+Describe 'Set-SfosApplicationObject - Read-Modify-Write preservation' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    It 'keeps the existing ApplicationList when only SmartFilter is changed' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Applications -MockWith {
+            if ($InnerXml -match '<Get>') {
+                [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><ApplicationObject transactionid=""><Name>KnownProxyApp</Name><SelectAllRule>Disable</SelectAllRule><ApplicationList><Application>Lantern</Application><Application>TurboVPN</Application></ApplicationList><SmartFilter></SmartFilter></ApplicationObject></Response>' }
+            }
+            else {
+                [PSCustomObject]@{ Content = '<Response><ApplicationObject><Status code="200">Configuration applied successfully.</Status></ApplicationObject></Response>' }
+            }
+        }
+
+        Set-SfosApplicationObject -Name 'KnownProxyApp' -SmartFilter 'unused' @conn -Confirm:$false
+
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Applications -ParameterFilter {
+            $InnerXml -match '<Set operation="update">' -and
+            $InnerXml -match '<ApplicationList><Application>Lantern</Application><Application>TurboVPN</Application></ApplicationList>' -and
+            $InnerXml -match '<SmartFilter>unused</SmartFilter>'
+        }
+    }
+
+    It 'throws "was not found" for a nonexistent object' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Applications -MockWith {
+            [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><ApplicationObject transactionid=""><Status>No. of records Zero.</Status></ApplicationObject></Response>' }
+        }
+
+        { Set-SfosApplicationObject -Name 'DoesNotExist' -SmartFilter 'x' @conn -Confirm:$false } | Should -Throw '*was not found*'
+    }
+
+    It 'throws client-side rather than sending a Disable object with an empty ApplicationList' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Applications -MockWith {
+            [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><ApplicationObject transactionid=""><Name>KnownProxyApp</Name><SelectAllRule>Disable</SelectAllRule><ApplicationList><Application>Lantern</Application></ApplicationList><SmartFilter></SmartFilter></ApplicationObject></Response>' }
+        }
+
+        { Set-SfosApplicationObject -Name 'KnownProxyApp' -Application @() @conn -Confirm:$false } | Should -Throw '*no -Application entries*'
+    }
+}
+
+Describe 'Remove-SfosApplicationObject' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    It 'throws "was not found" without attempting a Remove call' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Applications -MockWith {
+            [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><ApplicationObject transactionid=""><Status>No. of records Zero.</Status></ApplicationObject></Response>' }
+        }
+
+        { Remove-SfosApplicationObject -Name 'DoesNotExist' @conn -Confirm:$false } | Should -Throw '*was not found*'
+
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Applications -Times 1 -Exactly -ParameterFilter {
+            $InnerXml -match '<Get>'
+        }
+    }
+
+    It 'sends the Remove XML with the escaped Name for an existing object' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Applications -MockWith {
+            if ($InnerXml -match '<Get>') {
+                [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><ApplicationObject transactionid=""><Name>Proxy &amp; VPN</Name><SelectAllRule>Disable</SelectAllRule><ApplicationList><Application>Lantern</Application></ApplicationList><SmartFilter></SmartFilter></ApplicationObject></Response>' }
+            }
+            else {
+                [PSCustomObject]@{ Content = '<Response><ApplicationObject><Status code="200">Configuration applied successfully.</Status></ApplicationObject></Response>' }
+            }
+        }
+
+        Remove-SfosApplicationObject -Name 'Proxy & VPN' @conn -Confirm:$false
+
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Applications -ParameterFilter {
+            $InnerXml -match '<Remove><ApplicationObject><Name>Proxy &amp; VPN</Name></ApplicationObject></Remove>'
+        }
+    }
+}
+
+Describe 'New-SfosApplicationFilterPolicyRule - InputObject editing path' {
+
+    It 'changes only the bound parameter, preserving every other field from a piped -InputObject' {
+        $existingRule = [PSCustomObject]@{
+            SelectAllRule       = 'Disable'
+            CategoryList        = @()
+            RiskList            = @()
+            CharacteristicsList = @()
+            TechnologyList      = @()
+            ApplicationList     = @('Lantern')
+            SmartFilter         = ''
+            Action              = 'Deny'
+            Schedule            = 'All The Time'
+        }
+
+        $edited = $existingRule | New-SfosApplicationFilterPolicyRule -Action 'Allow'
+
+        $edited.Action | Should -Be 'Allow'
+        $edited.SelectAllRule | Should -Be 'Disable'
+        $edited.ApplicationList | Should -Be @('Lantern')
+        $edited.Schedule | Should -Be 'All The Time'
+    }
+
+    It 'accepts -InputObject as a direct parameter as well as via the pipeline' {
+        $existingRule = [PSCustomObject]@{
+            SelectAllRule       = 'Enable'
+            CategoryList        = @('Gaming')
+            RiskList            = @()
+            CharacteristicsList = @()
+            TechnologyList      = @()
+            ApplicationList     = @()
+            SmartFilter         = ''
+            Action              = 'Deny'
+            Schedule            = 'All The Time'
+        }
+
+        $edited = New-SfosApplicationFilterPolicyRule -InputObject $existingRule -Schedule 'Work Hours'
+
+        $edited.Schedule | Should -Be 'Work Hours'
+        $edited.CategoryList | Should -Be @('Gaming')
+        $edited.SelectAllRule | Should -Be 'Enable'
+    }
+}
+
+Describe 'Add-SfosApplicationFilterPolicyRule - preserves existing rules while appending' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    It 'sends a RuleList containing both the existing rule and the new one' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Applications -MockWith {
+            if ($InnerXml -match '<Get>') {
+                [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><ApplicationFilterPolicy transactionid=""><Name>BranchOfficeApps</Name><Description></Description><DefaultAction>Allow</DefaultAction><MicroAppSupport>True</MicroAppSupport><RuleList><Rule><SelectAllRule>Disable</SelectAllRule><ApplicationList><Application>Existing1</Application></ApplicationList><SmartFilter></SmartFilter><Action>Deny</Action><Schedule>All The Time</Schedule></Rule></RuleList></ApplicationFilterPolicy></Response>' }
+            }
+            else {
+                [PSCustomObject]@{ Content = '<Response><ApplicationFilterPolicy><Status code="200">Configuration applied successfully.</Status></ApplicationFilterPolicy></Response>' }
+            }
+        }
+
+        $newRule = New-SfosApplicationFilterPolicyRule -SelectAllRule Disable -Application 'NewApp' -Action Allow
+
+        Add-SfosApplicationFilterPolicyRule -Name 'BranchOfficeApps' -Rule $newRule @conn -Confirm:$false
+
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Applications -ParameterFilter {
+            $InnerXml -match '<Set operation="update">' -and
+            $InnerXml -match '<ApplicationList><Application>Existing1</Application></ApplicationList>' -and
+            $InnerXml -match '<ApplicationList><Application>NewApp</Application></ApplicationList>' -and
+            ([regex]::Matches($InnerXml, '<Rule>').Count -eq 2)
+        }
+    }
+
+    It 'throws "was not found" for a nonexistent policy' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Applications -MockWith {
+            [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><ApplicationFilterPolicy transactionid=""><Status>No. of records Zero.</Status></ApplicationFilterPolicy></Response>' }
+        }
+
+        $newRule = New-SfosApplicationFilterPolicyRule -SelectAllRule Disable -Application 'NewApp'
+
+        { Add-SfosApplicationFilterPolicyRule -Name 'DoesNotExist' -Rule $newRule @conn -Confirm:$false } | Should -Throw '*was not found*'
+    }
+}
+
+Describe 'Remove-SfosApplicationFilterPolicyRule - RuleList preservation and confirm-after-write' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    BeforeEach {
+        $script:RemoveRuleGetCount = 0
+    }
+
+    It 'throws when Index is out of range, without ever calling Set' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Applications -MockWith {
+            [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><ApplicationFilterPolicy transactionid=""><Name>OneRulePolicy</Name><Description></Description><DefaultAction>Allow</DefaultAction><MicroAppSupport>True</MicroAppSupport><RuleList><Rule><SelectAllRule>Disable</SelectAllRule><ApplicationList><Application>OnlyApp</Application></ApplicationList><SmartFilter></SmartFilter><Action>Deny</Action><Schedule>All The Time</Schedule></Rule></RuleList></ApplicationFilterPolicy></Response>' }
+        }
+
+        { Remove-SfosApplicationFilterPolicyRule -Name 'OneRulePolicy' -Index 5 @conn -Confirm:$false } | Should -Throw '*out of range*'
+
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Applications -Times 1 -Exactly -ParameterFilter {
+            $InnerXml -match '<Get>'
+        }
+    }
+
+    It 'removes only the targeted rule and resends the remaining one unchanged' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Applications -MockWith {
+            if ($InnerXml -match '<Get>') {
+                $script:RemoveRuleGetCount++
+                if ($script:RemoveRuleGetCount -eq 1) {
+                    [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><ApplicationFilterPolicy transactionid=""><Name>TwoRulePolicy</Name><Description></Description><DefaultAction>Allow</DefaultAction><MicroAppSupport>True</MicroAppSupport><RuleList><Rule><SelectAllRule>Disable</SelectAllRule><ApplicationList><Application>AppA</Application></ApplicationList><SmartFilter></SmartFilter><Action>Deny</Action><Schedule>All The Time</Schedule></Rule><Rule><SelectAllRule>Disable</SelectAllRule><ApplicationList><Application>AppB</Application></ApplicationList><SmartFilter></SmartFilter><Action>Allow</Action><Schedule>All The Time</Schedule></Rule></RuleList></ApplicationFilterPolicy></Response>' }
+                }
+                else {
+                    [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><ApplicationFilterPolicy transactionid=""><Name>TwoRulePolicy</Name><Description></Description><DefaultAction>Allow</DefaultAction><MicroAppSupport>True</MicroAppSupport><RuleList><Rule><SelectAllRule>Disable</SelectAllRule><ApplicationList><Application>AppB</Application></ApplicationList><SmartFilter></SmartFilter><Action>Allow</Action><Schedule>All The Time</Schedule></Rule></RuleList></ApplicationFilterPolicy></Response>' }
+                }
+            }
+            else {
+                [PSCustomObject]@{ Content = '<Response><ApplicationFilterPolicy><Status code="200">Configuration applied successfully.</Status></ApplicationFilterPolicy></Response>' }
+            }
+        }
+
+        Remove-SfosApplicationFilterPolicyRule -Name 'TwoRulePolicy' -Index 0 @conn -Confirm:$false
+
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Applications -ParameterFilter {
+            $InnerXml -match '<Set operation="update">' -and
+            $InnerXml -match '<Application>AppB</Application>' -and
+            $InnerXml -notmatch '<Application>AppA</Application>'
+        }
+    }
+
+    It 'throws when the follow-up Get still reports the original rule count (a 200 that changed nothing)' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Applications -MockWith {
+            if ($InnerXml -match '<Get>') {
+                # Both reads return the same 2-rule state - the removal did not take effect.
+                [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><ApplicationFilterPolicy transactionid=""><Name>StuckPolicy</Name><Description></Description><DefaultAction>Allow</DefaultAction><MicroAppSupport>True</MicroAppSupport><RuleList><Rule><SelectAllRule>Disable</SelectAllRule><ApplicationList><Application>AppA</Application></ApplicationList><SmartFilter></SmartFilter><Action>Deny</Action><Schedule>All The Time</Schedule></Rule><Rule><SelectAllRule>Disable</SelectAllRule><ApplicationList><Application>AppB</Application></ApplicationList><SmartFilter></SmartFilter><Action>Allow</Action><Schedule>All The Time</Schedule></Rule></RuleList></ApplicationFilterPolicy></Response>' }
+            }
+            else {
+                [PSCustomObject]@{ Content = '<Response><ApplicationFilterPolicy><Status code="200">Configuration applied successfully.</Status></ApplicationFilterPolicy></Response>' }
+            }
+        }
+
+        { Remove-SfosApplicationFilterPolicyRule -Name 'StuckPolicy' -Index 0 @conn -Confirm:$false } | Should -Throw '*instead of the expected*'
+    }
+}
+
+Describe 'Set-SfosApplicationFilterPolicy - Read-Modify-Write preservation' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    It 'keeps RuleList and DefaultAction intact when only Description is changed' {
+        # The most valuable test class per this suite's own framework doc: this entity
+        # replaces itself wholesale on update, so an update that forgets RuleList would
+        # silently delete every rule while reporting 200.
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Applications -MockWith {
+            if ($InnerXml -match '<Get>') {
+                [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><ApplicationFilterPolicy transactionid=""><Name>BranchOfficeApps</Name><Description>Old description</Description><DefaultAction>Allow</DefaultAction><MicroAppSupport>True</MicroAppSupport><RuleList><Rule><SelectAllRule>Disable</SelectAllRule><ApplicationList><Application>Lantern</Application></ApplicationList><SmartFilter></SmartFilter><Action>Deny</Action><Schedule>All The Time</Schedule></Rule></RuleList></ApplicationFilterPolicy></Response>' }
+            }
+            else {
+                [PSCustomObject]@{ Content = '<Response><ApplicationFilterPolicy><Status code="200">Configuration applied successfully.</Status></ApplicationFilterPolicy></Response>' }
+            }
+        }
+
+        Set-SfosApplicationFilterPolicy -Name 'BranchOfficeApps' -Description 'New description' @conn -Confirm:$false
+
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Applications -Times 1 -Exactly -ParameterFilter {
+            $InnerXml -match '<Set operation="update">' -and
+            $InnerXml -match '<Description>New description</Description>' -and
+            $InnerXml -match '<DefaultAction>Allow</DefaultAction>' -and
+            $InnerXml -match '<Rule><SelectAllRule>Disable</SelectAllRule><ApplicationList><Application>Lantern</Application></ApplicationList><SmartFilter></SmartFilter><Action>Deny</Action><Schedule>All The Time</Schedule></Rule>'
+        }
+    }
+
+    It 'throws "was not found" for a nonexistent policy' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Applications -MockWith {
+            [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><ApplicationFilterPolicy transactionid=""><Status>No. of records Zero.</Status></ApplicationFilterPolicy></Response>' }
+        }
+
+        { Set-SfosApplicationFilterPolicy -Name 'DoesNotExist' -Description 'x' @conn -Confirm:$false } | Should -Throw '*was not found*'
+    }
+}
+
+Describe 'Set-SfosApplicationClassificationAssignment' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    It 'sends the update XML for an existing assignment' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Applications -MockWith {
+            if ($InnerXml -match '<Get>') {
+                [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><ApplicationClassificationAssignment transactionid=""><Application>10Web</Application><Classification>New</Classification></ApplicationClassificationAssignment></Response>' }
+            }
+            else {
+                [PSCustomObject]@{ Content = '<Response><ApplicationClassificationAssignment><Status code="200">Configuration applied successfully.</Status></ApplicationClassificationAssignment></Response>' }
+            }
+        }
+
+        Set-SfosApplicationClassificationAssignment -Application '10Web' -Classification 'New' @conn -Confirm:$false
+
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Applications -ParameterFilter {
+            $InnerXml -match '<Set operation="update">' -and
+            $InnerXml -match '<Application>10Web</Application>' -and
+            $InnerXml -match '<Classification>New</Classification>'
+        }
+    }
+
+    It 'throws "was not found" for an application with no assignment' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Applications -MockWith {
+            [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><ApplicationClassificationAssignment transactionid=""><Status>No. of records Zero.</Status></ApplicationClassificationAssignment></Response>' }
+        }
+
+        { Set-SfosApplicationClassificationAssignment -Application 'DoesNotExist' -Classification 'New' @conn -Confirm:$false } | Should -Throw '*was not found*'
+    }
+}
+
+Describe 'Set-SfosApplicationClassificationAssignmentBatch - edge cases' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    It 'does not call the API when no input objects were collected' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Applications
+
+        @() | Set-SfosApplicationClassificationAssignmentBatch @conn -Confirm:$false
+
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Applications -Times 0 -Exactly
+    }
+
+    It 'throws when an input object is missing Application or Classification' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Applications
+
+        { [PSCustomObject]@{ Application = '10Web' } | Set-SfosApplicationClassificationAssignmentBatch @conn -Confirm:$false } |
+            Should -Throw '*Application and Classification*'
+    }
+}
+
+Describe 'Add-SfosApplicationFilterCategoryMember - QoSPolicy None client-side guard (regression)' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    It 'throws at parameter binding for -QoSPolicy None and never calls the API' {
+        # Regression test for the ValidateScript fix on -QoSPolicy: 'None' is a silent no-op
+        # on the firewall (200, nothing stored), so it must be rejected before any API call.
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Applications
+
+        { Add-SfosApplicationFilterCategoryMember -Name 'Mobile Applications' -Application 'Instagram' -QoSPolicy 'None' @conn -Confirm:$false } |
+            Should -Throw '*silent no-op*'
+
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Applications -Times 0 -Exactly
+    }
+
+    It 'upserts a new member while preserving an existing per-application override' {
+        # Two existing/target entries deliberately, not one: PowerShell 5.1 has a measured
+        # defect (see the dedicated Describe below) where a genuine single-element array
+        # assigned through Set-SfosApplicationFilterCategory's
+        # '$x = if (cond) { @($y) } else {...}' idiom collapses back to a bare scalar, which
+        # would make this specific assertion fail on PS 5.1 for reasons unrelated to what
+        # this test is actually checking (RuleList-style Read-Modify-Write preservation).
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Applications -MockWith {
+            if ($InnerXml -match '<Get>') {
+                [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><ApplicationFilterCategory transactionid=""><Name>Mobile Applications</Name><QoSPolicy>None</QoSPolicy><BandwidthUsageType></BandwidthUsageType><Description>Mobile apps</Description><ApplicationSettings><Application><Name>WhatsApp</Name><QoSPolicy>Streaming Video - Limit to SD Quality</QoSPolicy></Application></ApplicationSettings></ApplicationFilterCategory></Response>' }
+            }
+            else {
+                [PSCustomObject]@{ Content = '<Response><ApplicationFilterCategory><Status code="200">Configuration applied successfully.</Status></ApplicationFilterCategory></Response>' }
+            }
+        }
+
+        Add-SfosApplicationFilterCategoryMember -Name 'Mobile Applications' -Application 'Instagram' -QoSPolicy 'Streaming Video - Limit to SD Quality' @conn -Confirm:$false
+
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Applications -ParameterFilter {
+            $InnerXml -match '<Set operation="update">' -and
+            $InnerXml -match '<Application><Name>WhatsApp</Name><QoSPolicy>Streaming Video - Limit to SD Quality</QoSPolicy></Application>' -and
+            $InnerXml -match '<Application><Name>Instagram</Name><QoSPolicy>Streaming Video - Limit to SD Quality</QoSPolicy></Application>' -and
+            $InnerXml -match '<Description>Mobile apps</Description>'
+        }
+    }
+}
+
+Describe 'Set-SfosApplicationFilterCategory - single-element ApplicationSettings (regression)' {
+    # Regression test for a defect found by this suite and fixed 2026-08-12: under Windows
+    # PowerShell 5.1, assigning straight from `if (...) { @(A) } else { @(B) }` collapsed a
+    # genuine single-element array back to a bare scalar, the scalar had no .Count, and the
+    # whole ApplicationSettings wrapper was silently omitted from the request - so the FIRST
+    # per-app override of a category could never be added on 5.1 (fine on PS 7, fine on both
+    # engines with two or more entries). The fix wraps the WHOLE if/else in @(), same class
+    # and same-day fix as Set-SfosMulticastRoute in the Routing module. This test asserts
+    # the correct behavior on both engines.
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    It 'adds the first override to a category without any, on both engines' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Applications -MockWith {
+            if ($InnerXml -match '<Get>') {
+                [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><ApplicationFilterCategory transactionid=""><Name>Mobile Applications</Name><QoSPolicy>None</QoSPolicy><BandwidthUsageType></BandwidthUsageType><Description>Mobile apps</Description></ApplicationFilterCategory></Response>' }
+            }
+            else {
+                [PSCustomObject]@{ Content = '<Response><ApplicationFilterCategory><Status code="200">Configuration applied successfully.</Status></ApplicationFilterCategory></Response>' }
+            }
+        }
+
+        Add-SfosApplicationFilterCategoryMember -Name 'Mobile Applications' -Application 'Instagram' -QoSPolicy 'Streaming Video - Limit to SD Quality' @conn -Confirm:$false
+
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Applications -ParameterFilter {
+            $InnerXml -match '<Set operation="update">' -and
+            $InnerXml -match '<Application><Name>Instagram</Name><QoSPolicy>Streaming Video - Limit to SD Quality</QoSPolicy></Application>'
+        }
+    }
+}
+
+Describe 'Remove-SfosApplicationFilterCategoryMember' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    It 'throws when the application has no override on the category, without calling Set' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Applications -MockWith {
+            [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><ApplicationFilterCategory transactionid=""><Name>Mobile Applications</Name><QoSPolicy>None</QoSPolicy><BandwidthUsageType></BandwidthUsageType><Description></Description></ApplicationFilterCategory></Response>' }
+        }
+
+        { Remove-SfosApplicationFilterCategoryMember -Name 'Mobile Applications' -Application 'Instagram' @conn -Confirm:$false } |
+            Should -Throw '*has no QoS override*'
+
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Applications -Times 1 -Exactly -ParameterFilter {
+            $InnerXml -match '<Get>'
+        }
+    }
+
+    It 'throws when the member is still present after the confirming Get (a 200 that changed nothing)' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Applications -MockWith {
+            if ($InnerXml -match '<Get>') {
+                # Every read still shows the override - the removal did not take effect.
+                [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><ApplicationFilterCategory transactionid=""><Name>Mobile Applications</Name><QoSPolicy>None</QoSPolicy><BandwidthUsageType></BandwidthUsageType><Description></Description><ApplicationSettings><Application><Name>Instagram</Name><QoSPolicy>Streaming Video - Limit to SD Quality</QoSPolicy></Application></ApplicationSettings></ApplicationFilterCategory></Response>' }
+            }
+            else {
+                [PSCustomObject]@{ Content = '<Response><ApplicationFilterCategory><Status code="200">Configuration applied successfully.</Status></ApplicationFilterCategory></Response>' }
+            }
+        }
+
+        { Remove-SfosApplicationFilterCategoryMember -Name 'Mobile Applications' -Application 'Instagram' @conn -Confirm:$false } |
+            Should -Throw '*is still present*'
+    }
+}
+
+Describe 'Set-SfosApplicationFilterCategory - additional validation' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    It 'throws on an invalid BandwidthUsageType value, without calling Set' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Applications -MockWith {
+            [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><ApplicationFilterCategory transactionid=""><Name>Mobile Applications</Name><QoSPolicy>None</QoSPolicy><BandwidthUsageType></BandwidthUsageType><Description></Description></ApplicationFilterCategory></Response>' }
+        }
+
+        { Set-SfosApplicationFilterCategory -Name 'Mobile Applications' -BandwidthUsageType 'Bogus' @conn -Confirm:$false } |
+            Should -Throw "*'Individual', 'Shared'*"
+
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Applications -Times 1 -Exactly -ParameterFilter {
+            $InnerXml -match '<Get>'
+        }
+    }
+
+    It 'throws "was not found" for a nonexistent category' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Applications -MockWith {
+            [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><ApplicationFilterCategory transactionid=""><Status>No. of records Zero.</Status></ApplicationFilterCategory></Response>' }
+        }
+
+        { Set-SfosApplicationFilterCategory -Name 'DoesNotExist' -QoSPolicy 'None' @conn -Confirm:$false } | Should -Throw '*was not found*'
+    }
+}

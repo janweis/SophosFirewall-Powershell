@@ -1413,3 +1413,537 @@ Describe 'ShouldProcess - -WhatIf prevents every write cmdlet from sending a wri
         Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -Times 0 -Exactly -ParameterFilter $writeFilter
     }
 }
+
+Describe 'Additional coverage (2026-08-12 test-ausbau) - functions without a prior XML-generation or error-path test' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    Context 'New-/Set-/Remove-SfosL2TPConnection - fail-open regression fix (2026-08-12)' {
+        # Measured 2026-08-12: the firewall reports a create/update failure for this entity
+        # FLAT at Response/Configuration/Status, with no L2TPConnection wrapper at all - unlike
+        # every other write on this entity's own Get/Remove, which nest one level deeper.
+        # Before the fix, New-/Set-SfosL2TPConnection called Assert-SfosApiReturnSuccess with
+        # -ObjectName 'L2TPConnection/Configuration'; against this exact response that XPath
+        # finds zero status nodes, which the "no status at all" rule reads as an empty result,
+        # i.e. success - so the cmdlet reported success while creating/updating nothing. The
+        # fix uses the flat -ObjectName 'Configuration' for New-/Set-, matching what the wire
+        # actually returns.
+        BeforeAll {
+            # A bare assignment in the Context body only lives through Pester's Discovery
+            # phase and is $null again once the It blocks run - the same trap the
+            # 'ShouldProcess' Describe block above documents for $writeFilter. BeforeAll is
+            # required here, not a Context-level statement.
+            $psk = ConvertTo-SecureString 'L2TPFailOpenSecret1' -AsPlainText -Force
+        }
+
+        It 'New-SfosL2TPConnection throws on the measured flat Response/Configuration/Status path (no L2TPConnection wrapper)' {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -MockWith {
+                [PSCustomObject]@{ Content = '<Response><Configuration><Status code="501">Operation could not be performed on Entity.</Status></Configuration></Response>' }
+            }
+
+            { New-SfosL2TPConnection -Name 'ZZFailOpenL2TP' -ActionOnVPNRestart Disable -AuthenticationType PresharedKey `
+                    -PresharedKey $psk -AliasLocalWANPort 'Port2' -LocalID '198.51.100.1' -RemoteHost '198.51.100.2' `
+                    -RemoteLANNetwork 'ZZRemoteLAN' -RemoteID '198.51.100.2' -LocalPort 1701 -RemotePort '*' @conn -Confirm:$false } |
+                Should -Throw '*501*'
+        }
+
+        It 'Set-SfosL2TPConnection throws on the same flat status path' {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -MockWith {
+                if ($InnerXml -match '<Get>') {
+                    [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><L2TPConnection><Configuration><Name>ZZFailOpenL2TPSet</Name><Description></Description><ActionOnVPNRestart>Disable</ActionOnVPNRestart><AuthenticationType>PresharedKey</AuthenticationType><AliasLocalWANPort>Port2</AliasLocalWANPort><LocalID>198.51.100.1</LocalID><RemoteHost>198.51.100.2</RemoteHost><AllowNATTraversal>Enable</AllowNATTraversal><RemoteID>198.51.100.2</RemoteID><LocalPort>1701</LocalPort><RemotePort>*</RemotePort></Configuration></L2TPConnection></Response>' }
+                }
+                else {
+                    [PSCustomObject]@{ Content = '<Response><Configuration><Status code="501">Operation could not be performed on Entity.</Status></Configuration></Response>' }
+                }
+            }
+
+            { Set-SfosL2TPConnection -Name 'ZZFailOpenL2TPSet' -PresharedKey $psk @conn -Confirm:$false } | Should -Throw '*501*'
+        }
+
+        It 'Remove-SfosL2TPConnection succeeds on the measured nested Response/L2TPConnection/Configuration/Status path' {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -MockWith {
+                if ($InnerXml -match '<Remove>') {
+                    [PSCustomObject]@{ Content = '<Response><L2TPConnection><Configuration><Status code="200">Configuration applied successfully.</Status></Configuration></L2TPConnection></Response>' }
+                }
+                else {
+                    [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><L2TPConnection><Configuration><Name>ZZFailOpenL2TPRemove</Name></Configuration></L2TPConnection></Response>' }
+                }
+            }
+
+            { Remove-SfosL2TPConnection -Name 'ZZFailOpenL2TPRemove' @conn -Confirm:$false } | Should -Not -Throw
+        }
+    }
+
+    Context 'Set-SfosIPsecConnection -Status toggle - exact VPNIPSecConnection/Active wrapper shape' {
+        BeforeEach {
+            $script:ipsecToggleCalls = New-Object System.Collections.Generic.List[string]
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -MockWith {
+                $script:ipsecToggleCalls.Add($InnerXml)
+                if ($InnerXml -match '<Get>') {
+                    [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><VPNIPSecConnection><Configuration><Name>ZZToggleIPsec</Name><Description></Description><ConnectionType>TunnelInterface</ConnectionType><AliasLocalWANPort>Port2</AliasLocalWANPort><AuthenticationType>PresharedKey</AuthenticationType><SubnetFamily>Dual</SubnetFamily><LocalIDType>IP Address</LocalIDType><LocalID>198.51.100.1</LocalID><RemoteIDType>IP Address</RemoteIDType><RemoteID>198.51.100.10</RemoteID><UserAuthenticationMode>Disable</UserAuthenticationMode><Protocol>ALL</Protocol><LocalPort>*</LocalPort><RemotePort>*</RemotePort><LocalWANPort>Port2</LocalWANPort><Status>Deactive</Status></Configuration></VPNIPSecConnection></Response>' }
+                }
+                elseif ($InnerXml -match '<Active>') {
+                    [PSCustomObject]@{ Content = '<Response><Active><Status code="200">Configuration applied successfully.</Status></Active></Response>' }
+                }
+                else {
+                    [PSCustomObject]@{ Content = '<Response><Configuration><Status code="200">Configuration applied successfully.</Status></Configuration></Response>' }
+                }
+            }
+        }
+
+        It 'sends the toggle as exactly Set/VPNIPSecConnection/Active/Name, with no Configuration sibling' {
+            Set-SfosIPsecConnection -Name 'ZZToggleIPsec' -Status Active @conn -Confirm:$false
+
+            $toggleCall = $script:ipsecToggleCalls | Where-Object { $_ -match '<Active>' }
+            $toggleCall | Should -Be '<Set operation="update"><VPNIPSecConnection><Active><Name>ZZToggleIPsec</Name></Active></VPNIPSecConnection></Set>'
+        }
+    }
+
+    Context 'Set-SfosSSLVPNPolicy - read-modify-write preservation (Tunnel)' {
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -MockWith {
+                if ($InnerXml -match '<Get>') {
+                    [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><SSLVPNPolicy><TunnelPolicy><Name>ZZRmwPolicy</Name><Description>original</Description><PolicyMembers><Member>ZZExistingGroup</Member></PolicyMembers><UseAsDefaultGateway>On</UseAsDefaultGateway><PermittedNetworkResourcesIPv4><Resource>ZZExistingNet</Resource></PermittedNetworkResourcesIPv4><PermittedNetworkResourcesIPv6></PermittedNetworkResourcesIPv6><DisconnectIdleClients>On</DisconnectIdleClients><OverrideGlobalTimeout>60</OverrideGlobalTimeout></TunnelPolicy></SSLVPNPolicy></Response>' }
+                }
+                else {
+                    [PSCustomObject]@{ Content = '<Response><SSLVPNPolicy><TunnelPolicy><Status code="200">Configuration applied successfully.</Status></TunnelPolicy></SSLVPNPolicy></Response>' }
+                }
+            }
+        }
+
+        It 'preserves PolicyMembers, PermittedNetworkResourcesIPv4 and UseAsDefaultGateway when only Description changes' {
+            Set-SfosSSLVPNPolicy -Name 'ZZRmwPolicy' -Description 'updated' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Set operation="update">' -and
+                $InnerXml -match '<Description>updated</Description>' -and
+                $InnerXml -match '<PolicyMembers><Member>ZZExistingGroup</Member></PolicyMembers>' -and
+                $InnerXml -match '<PermittedNetworkResourcesIPv4><Resource>ZZExistingNet</Resource></PermittedNetworkResourcesIPv4>' -and
+                $InnerXml -match '<UseAsDefaultGateway>On</UseAsDefaultGateway>' -and
+                $InnerXml -match '<OverrideGlobalTimeout>60</OverrideGlobalTimeout>'
+            }
+        }
+    }
+
+    Context 'Remove-SfosSSLVPNPolicy - referencing UserGroup blocks delete (measured 500)' {
+        It 'throws when the firewall answers 500 "Deleted some configurations. Couldn''t delete all."' {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -MockWith {
+                if ($InnerXml -match '<Remove>') {
+                    [PSCustomObject]@{ Content = '<Response><SSLVPNPolicy><TunnelPolicy><Status code="500">Deleted some configurations. Couldn''t delete all.</Status></TunnelPolicy></SSLVPNPolicy></Response>' }
+                }
+                else {
+                    [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><SSLVPNPolicy><TunnelPolicy><Name>ZZBlockedPolicy</Name><Description></Description><PolicyMembers><Member>ZZTestGroup</Member></PolicyMembers><UseAsDefaultGateway>Off</UseAsDefaultGateway></TunnelPolicy></SSLVPNPolicy></Response>' }
+                }
+            }
+
+            { Remove-SfosSSLVPNPolicy -Name 'ZZBlockedPolicy' @conn -Confirm:$false } | Should -Throw '*500*'
+        }
+    }
+
+    Context 'Set-SfosSSLBookmark - never resends the literal element-object text as a password' {
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -MockWith {
+                if ($InnerXml -match '<Get>') {
+                    [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><SSLBookmark><Name>ZZLiteralBookmark</Name><Description></Description><Type>RDP</Type><URL>rdp.example</URL><ShareSession>Disable</ShareSession><AutoLogin>Enable</AutoLogin><UserName>rdpuser</UserName><Password hashform="mode1">$sfos$7$0$deadbeef</Password><Port>3389</Port></SSLBookmark></Response>' }
+                }
+                else {
+                    [PSCustomObject]@{ Content = '<Response><SSLBookmark><Status code="200">Configuration applied successfully.</Status></SSLBookmark></Response>' }
+                }
+            }
+        }
+
+        It 'never sends the CLR type name "System.Xml.XmlElement" as the Password value' {
+            Set-SfosSSLBookmark -Name 'ZZLiteralBookmark' -Description 'x' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Set operation="update">' -and $InnerXml -notmatch 'System\.Xml\.XmlElement'
+            }
+        }
+    }
+
+    Context 'New-SfosSiteToSiteClient - measured field-less 500 (transport cannot carry the required file upload)' {
+        It 'throws on the field-less 500 the firewall answers for every variant tried' {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -MockWith {
+                [PSCustomObject]@{ Content = '<Response><SiteToSiteClient><Status code="500">Operation could not be performed on Entity.</Status></SiteToSiteClient></Response>' }
+            }
+
+            { New-SfosSiteToSiteClient -Name 'ZZFieldlessS2SClient' -ServerConfigurationFile 'placeholder' @conn -Confirm:$false } |
+                Should -Throw '*500*'
+        }
+    }
+
+    Context 'Set-SfosSiteToSiteClient - read-modify-write preservation' {
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -MockWith {
+                if ($InnerXml -match '<Get>') {
+                    [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><SiteToSiteClient><Name>ZZRmwS2SClient</Name><Description>original</Description><HttpProxyServer>Enable</HttpProxyServer><ProxyServer>proxy.example</ProxyServer><ProxyPort>8080</ProxyPort><ProxyAuthentication>Disable</ProxyAuthentication><Username></Username><PeerHost>Disable</PeerHost><HostName></HostName><Status>On</Status></SiteToSiteClient></Response>' }
+                }
+                else {
+                    [PSCustomObject]@{ Content = '<Response><SiteToSiteClient><Status code="200">Configuration applied successfully.</Status></SiteToSiteClient></Response>' }
+                }
+            }
+        }
+
+        It 'preserves HttpProxyServer, ProxyServer/ProxyPort and Status when only Description changes' {
+            Set-SfosSiteToSiteClient -Name 'ZZRmwS2SClient' -Description 'updated' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Set operation="update">' -and
+                $InnerXml -match '<Description>updated</Description>' -and
+                $InnerXml -match '<HttpProxyServer>Enable</HttpProxyServer>' -and
+                $InnerXml -match '<ProxyServer>proxy\.example</ProxyServer>' -and
+                $InnerXml -match '<ProxyPort>8080</ProxyPort>' -and
+                $InnerXml -match '<Status>On</Status>'
+            }
+        }
+    }
+
+    Context 'Remove-SfosSiteToSiteClient - XML shape' {
+        It 'sends the flat Remove/SiteToSiteClient/Name shape' {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -MockWith {
+                if ($InnerXml -match '<Remove>') {
+                    [PSCustomObject]@{ Content = '<Response><SiteToSiteClient><Status code="200">Configuration applied successfully.</Status></SiteToSiteClient></Response>' }
+                }
+                else {
+                    [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><SiteToSiteClient><Name>ZZRemoveS2SClient</Name><Description></Description><HttpProxyServer>Disable</HttpProxyServer><ProxyAuthentication>Disable</ProxyAuthentication><PeerHost>Disable</PeerHost></SiteToSiteClient></Response>' }
+                }
+            }
+
+            Remove-SfosSiteToSiteClient -Name 'ZZRemoveS2SClient' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -eq '<Remove><SiteToSiteClient><Name>ZZRemoveS2SClient</Name></SiteToSiteClient></Remove>'
+            }
+        }
+    }
+
+    Context 'Set-SfosSiteToSiteServer - read-modify-write preservation with single-element network lists' {
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -MockWith {
+                if ($InnerXml -match '<Get>') {
+                    [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><SiteToSiteServer><Name>ZZRmwS2SServer</Name><Description>original</Description><StaticIP>Disable</StaticIP><LocalNetworks><Network>ZZExistingLocal</Network></LocalNetworks><RemoteNetworks><Network>ZZExistingRemote</Network></RemoteNetworks><Status>On</Status></SiteToSiteServer></Response>' }
+                }
+                else {
+                    [PSCustomObject]@{ Content = '<Response><SiteToSiteServer><Status code="200">Configuration applied successfully.</Status></SiteToSiteServer></Response>' }
+                }
+            }
+        }
+
+        It 'preserves a single-element LocalNetworks/RemoteNetworks list and escapes a "&" in Description' {
+            Set-SfosSiteToSiteServer -Name 'ZZRmwS2SServer' -Description 'R&D link' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Set operation="update">' -and
+                $InnerXml -match '<Description>R&amp;D link</Description>' -and
+                $InnerXml -match '<LocalNetworks><Network>ZZExistingLocal</Network></LocalNetworks>' -and
+                $InnerXml -match '<RemoteNetworks><Network>ZZExistingRemote</Network></RemoteNetworks>' -and
+                $InnerXml -match '<Status>On</Status>'
+            }
+        }
+    }
+
+    Context 'Remove-SfosSiteToSiteServer - XML shape and the measured empty-code failure path' {
+        It 'sends the flat Remove/SiteToSiteServer/Name shape' {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -MockWith {
+                if ($InnerXml -match '<Remove>') {
+                    [PSCustomObject]@{ Content = '<Response><SiteToSiteServer><Status code="200">Configuration applied successfully.</Status></SiteToSiteServer></Response>' }
+                }
+                else {
+                    [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><SiteToSiteServer><Name>ZZRemoveS2SServer</Name><Description></Description><StaticIP>Disable</StaticIP><LocalNetworks><Network>Net1</Network></LocalNetworks><RemoteNetworks><Network>Net2</Network></RemoteNetworks></SiteToSiteServer></Response>' }
+                }
+            }
+
+            Remove-SfosSiteToSiteServer -Name 'ZZRemoveS2SServer' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -eq '<Remove><SiteToSiteServer><Name>ZZRemoveS2SServer</Name></SiteToSiteServer></Remove>'
+            }
+        }
+
+        It 'throws on the measured empty-code "Operation could not be performed on Entity." status (removing an already-gone object)' {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -MockWith {
+                if ($InnerXml -match '<Remove>') {
+                    [PSCustomObject]@{ Content = '<Response><SiteToSiteServer><Status code="">Operation could not be performed on Entity.</Status></SiteToSiteServer></Response>' }
+                }
+                else {
+                    [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><SiteToSiteServer><Name>ZZStuckS2SServer</Name><Description></Description><StaticIP>Disable</StaticIP><LocalNetworks><Network>Net1</Network></LocalNetworks><RemoteNetworks><Network>Net2</Network></RemoteNetworks></SiteToSiteServer></Response>' }
+                }
+            }
+
+            { Remove-SfosSiteToSiteServer -Name 'ZZStuckS2SServer' @conn -Confirm:$false } | Should -Throw '*status without a code*'
+        }
+    }
+
+    Context 'Add-/Remove-SfosL2TPConfigurationMember - XML shape and error path' {
+        # Unlike VPNFailoverGroup/SSLBookmarkGroup member cmdlets, this pair does NOT read the
+        # current member list and write a full replacement back - each call sends a single
+        # direct add/remove of one UserName element, confirmed by reading the module source.
+        # There is therefore no read-modify-write "single-element list" hazard to test here.
+        It 'Add sends Set/L2TPConfiguration/L2TPMembers/UserName, status path L2TPMembers' {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -MockWith {
+                [PSCustomObject]@{ Content = '<Response><L2TPMembers><Status code="201">Operation partially successful.</Status></L2TPMembers></Response>' }
+            }
+
+            Add-SfosL2TPConfigurationMember -MemberName 'ZZL2TPUser' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Set operation="update">' -and
+                $InnerXml -match '<L2TPConfiguration>\s*<L2TPMembers>\s*<UserName>ZZL2TPUser</UserName>\s*</L2TPMembers>\s*</L2TPConfiguration>'
+            }
+        }
+
+        It 'Add throws on the measured 500 for a nonexistent local user' {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -MockWith {
+                [PSCustomObject]@{ Content = '<Response><L2TPMembers><Status code="500">Operation could not be performed on Entity.</Status></L2TPMembers></Response>' }
+            }
+
+            { Add-SfosL2TPConfigurationMember -MemberName 'ZZNoSuchUser' @conn -Confirm:$false } | Should -Throw '*500*'
+        }
+
+        It 'Remove sends Remove/L2TPConfiguration/L2TPMembers/UserName, status path nested one level deeper than Add' {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -MockWith {
+                [PSCustomObject]@{ Content = '<Response><L2TPConfiguration><L2TPMembers><Status code="200">Configuration applied successfully.</Status></L2TPMembers></L2TPConfiguration></Response>' }
+            }
+
+            Remove-SfosL2TPConfigurationMember -MemberName 'ZZL2TPUser' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Remove>\s*<L2TPConfiguration>\s*<L2TPMembers>\s*<UserName>ZZL2TPUser</UserName>\s*</L2TPMembers>\s*</L2TPConfiguration>\s*</Remove>'
+            }
+        }
+    }
+
+    Context 'Add-/Remove-SfosPPTPConfigurationMember - XML shape (mirrors L2TPConfigurationMember)' {
+        It 'Add sends Set/PPTPConfiguration/PPTPMembers/UserName, status path PPTPMembers' {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -MockWith {
+                [PSCustomObject]@{ Content = '<Response><PPTPMembers><Status code="201">Operation partially successful.</Status></PPTPMembers></Response>' }
+            }
+
+            Add-SfosPPTPConfigurationMember -MemberName 'ZZPPTPUser' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Set operation="update">' -and
+                $InnerXml -match '<PPTPConfiguration>\s*<PPTPMembers>\s*<UserName>ZZPPTPUser</UserName>\s*</PPTPMembers>\s*</PPTPConfiguration>'
+            }
+        }
+
+        It 'Remove sends Remove/PPTPConfiguration/PPTPMembers/UserName, status path nested one level deeper than Add' {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -MockWith {
+                [PSCustomObject]@{ Content = '<Response><PPTPConfiguration><PPTPMembers><Status code="200">Configuration applied successfully.</Status></PPTPMembers></PPTPConfiguration></Response>' }
+            }
+
+            Remove-SfosPPTPConfigurationMember -MemberName 'ZZPPTPUser' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Remove>\s*<PPTPConfiguration>\s*<PPTPMembers>\s*<UserName>ZZPPTPUser</UserName>\s*</PPTPMembers>\s*</PPTPConfiguration>\s*</Remove>'
+            }
+        }
+    }
+
+    Context 'Remove-SfosVPNProfile' {
+        It 'sends the flat Remove/VPNProfile/Name shape' {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -MockWith {
+                if ($InnerXml -match '<Remove>') {
+                    [PSCustomObject]@{ Content = '<Response><VPNProfile><Status code="200">Configuration applied successfully.</Status></VPNProfile></Response>' }
+                }
+                else {
+                    [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><VPNProfile><Name>ZZRemoveProfile</Name></VPNProfile></Response>' }
+                }
+            }
+
+            Remove-SfosVPNProfile -Name 'ZZRemoveProfile' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Remove>\s*<VPNProfile>\s*<Name>ZZRemoveProfile</Name>\s*</VPNProfile>\s*</Remove>'
+            }
+        }
+    }
+
+    Context 'Set-SfosVPNFailoverGroup' {
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -MockWith {
+                if ($InnerXml -match '<Get>') {
+                    [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><VPNFailoverGroup><GroupDetail><Name>ZZRmwFailover</Name><MemberConnections><Connection>ZZExistingConn</Connection></MemberConnections><MailNotification>Enable</MailNotification><AutomaticFailback>Disable</AutomaticFailback></GroupDetail></VPNFailoverGroup></Response>' }
+                }
+                else {
+                    [PSCustomObject]@{ Content = '<Response><GroupDetail><Status code="200">Configuration applied successfully.</Status></GroupDetail></Response>' }
+                }
+            }
+        }
+
+        It 'preserves a single-element MemberConnectionList and AutomaticFailback when only MailNotification changes' {
+            Set-SfosVPNFailoverGroup -Name 'ZZRmwFailover' -MailNotification Disable @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Set operation="update">' -and
+                $InnerXml -match '<MemberConnections><Connection>ZZExistingConn</Connection></MemberConnections>' -and
+                $InnerXml -match '<MailNotification>Disable</MailNotification>' -and
+                $InnerXml -match '<AutomaticFailback>Disable</AutomaticFailback>'
+            }
+        }
+
+        It 'throws client-side when -Connection is explicitly emptied' {
+            { Set-SfosVPNFailoverGroup -Name 'ZZRmwFailover' -Connection @() @conn -Confirm:$false } |
+                Should -Throw '*at least one member Connection*'
+        }
+    }
+
+    Context 'Add-/Remove-SfosVPNFailoverGroupMember' {
+        It 'Add reads the current single-element member list and writes both connections back' {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -MockWith {
+                if ($InnerXml -match '<Get>') {
+                    [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><VPNFailoverGroup><GroupDetail><Name>ZZAddMemberFailover</Name><MemberConnections><Connection>ZZExistingConn</Connection></MemberConnections><MailNotification>Enable</MailNotification></GroupDetail></VPNFailoverGroup></Response>' }
+                }
+                else {
+                    [PSCustomObject]@{ Content = '<Response><GroupDetail><Status code="200">Configuration applied successfully.</Status></GroupDetail></Response>' }
+                }
+            }
+
+            Add-SfosVPNFailoverGroupMember -Name 'ZZAddMemberFailover' -Connection 'ZZNewConn' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Set operation="update">' -and
+                $InnerXml -match '<MemberConnections><Connection>ZZExistingConn</Connection><Connection>ZZNewConn</Connection></MemberConnections>'
+            }
+        }
+
+        It 'Remove reads a two-element member list and writes the remaining one back' {
+            $script:failoverUpdated = $false
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -MockWith {
+                if ($InnerXml -match '<Set operation="update">') {
+                    $script:failoverUpdated = $true
+                    return [PSCustomObject]@{ Content = '<Response><GroupDetail><Status code="200">Configuration applied successfully.</Status></GroupDetail></Response>' }
+                }
+                if ($script:failoverUpdated) {
+                    return [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><VPNFailoverGroup><GroupDetail><Name>ZZRemoveMemberFailover</Name><MemberConnections><Connection>ZZConnA</Connection></MemberConnections><MailNotification>Enable</MailNotification></GroupDetail></VPNFailoverGroup></Response>' }
+                }
+                return [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><VPNFailoverGroup><GroupDetail><Name>ZZRemoveMemberFailover</Name><MemberConnections><Connection>ZZConnA</Connection><Connection>ZZConnB</Connection></MemberConnections><MailNotification>Enable</MailNotification></GroupDetail></VPNFailoverGroup></Response>' }
+            }
+
+            Remove-SfosVPNFailoverGroupMember -Name 'ZZRemoveMemberFailover' -Connection 'ZZConnB' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Set operation="update">' -and
+                $InnerXml -match '<MemberConnections><Connection>ZZConnA</Connection></MemberConnections>'
+            }
+        }
+
+        It 'Remove throws client-side rather than emptying the mandatory member list' {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -MockWith {
+                [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><VPNFailoverGroup><GroupDetail><Name>ZZLastMemberFailover</Name><MemberConnections><Connection>ZZOnlyConn</Connection></MemberConnections><MailNotification>Enable</MailNotification></GroupDetail></VPNFailoverGroup></Response>' }
+            }
+
+            { Remove-SfosVPNFailoverGroupMember -Name 'ZZLastMemberFailover' -Connection 'ZZOnlyConn' @conn -Confirm:$false } |
+                Should -Throw '*only remaining member*'
+        }
+    }
+
+    Context 'Remove-SfosVPNFailoverGroup' {
+        It 'sends the flat Remove/VPNFailoverGroup/Name shape (not nested under GroupDetail, unlike Get)' {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -MockWith {
+                if ($InnerXml -match '<Remove>') {
+                    [PSCustomObject]@{ Content = '<Response><GroupDetail><Status code="200">Configuration applied successfully.</Status></GroupDetail></Response>' }
+                }
+                else {
+                    [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><VPNFailoverGroup><GroupDetail><Name>ZZRemoveFailover</Name><MemberConnections><Connection>ZZConn</Connection></MemberConnections></GroupDetail></VPNFailoverGroup></Response>' }
+                }
+            }
+
+            Remove-SfosVPNFailoverGroup -Name 'ZZRemoveFailover' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Remove>\s*<VPNFailoverGroup>\s*<Name>ZZRemoveFailover</Name>\s*</VPNFailoverGroup>\s*</Remove>'
+            }
+        }
+    }
+
+    Context 'Set-SfosSSLBookmarkGroup' {
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -MockWith {
+                if ($InnerXml -match '<Get>') {
+                    [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><SSLBookmarkGroup><Name>ZZRmwBookmarkGroup</Name><Description>original</Description><BookmarkList><Bookmark>ZZExistingBookmark</Bookmark></BookmarkList></SSLBookmarkGroup></Response>' }
+                }
+                else {
+                    [PSCustomObject]@{ Content = '<Response><SSLBookmarkGroup><Status code="200">Configuration applied successfully.</Status></SSLBookmarkGroup></Response>' }
+                }
+            }
+        }
+
+        It 'preserves a single-element BookmarkList and escapes a "&" in Description' {
+            Set-SfosSSLBookmarkGroup -Name 'ZZRmwBookmarkGroup' -Description 'R&D group' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Set operation="update">' -and
+                $InnerXml -match '<Description>R&amp;D group</Description>' -and
+                $InnerXml -match '<BookmarkList><Bookmark>ZZExistingBookmark</Bookmark></BookmarkList>'
+            }
+        }
+    }
+
+    Context 'Add-/Remove-SfosSSLBookmarkGroupMember' {
+        It 'Add reads the current single-element bookmark list and writes both bookmarks back' {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -MockWith {
+                if ($InnerXml -match '<Get>') {
+                    [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><SSLBookmarkGroup><Name>ZZAddMemberBookmarkGroup</Name><Description></Description><BookmarkList><Bookmark>ZZExistingBookmark</Bookmark></BookmarkList></SSLBookmarkGroup></Response>' }
+                }
+                else {
+                    [PSCustomObject]@{ Content = '<Response><SSLBookmarkGroup><Status code="200">Configuration applied successfully.</Status></SSLBookmarkGroup></Response>' }
+                }
+            }
+
+            Add-SfosSSLBookmarkGroupMember -GroupName 'ZZAddMemberBookmarkGroup' -Bookmark 'ZZNewBookmark' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Set operation="update">' -and
+                $InnerXml -match '<BookmarkList><Bookmark>ZZExistingBookmark</Bookmark><Bookmark>ZZNewBookmark</Bookmark></BookmarkList>'
+            }
+        }
+
+        It 'Remove reads a two-element bookmark list and writes the remaining one back' {
+            $script:bookmarkGroupUpdated = $false
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -MockWith {
+                if ($InnerXml -match '<Set operation="update">') {
+                    $script:bookmarkGroupUpdated = $true
+                    return [PSCustomObject]@{ Content = '<Response><SSLBookmarkGroup><Status code="200">Configuration applied successfully.</Status></SSLBookmarkGroup></Response>' }
+                }
+                if ($script:bookmarkGroupUpdated) {
+                    return [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><SSLBookmarkGroup><Name>ZZRemoveMemberBookmarkGroup</Name><Description></Description><BookmarkList><Bookmark>ZZBookmarkA</Bookmark></BookmarkList></SSLBookmarkGroup></Response>' }
+                }
+                return [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><SSLBookmarkGroup><Name>ZZRemoveMemberBookmarkGroup</Name><Description></Description><BookmarkList><Bookmark>ZZBookmarkA</Bookmark><Bookmark>ZZBookmarkB</Bookmark></BookmarkList></SSLBookmarkGroup></Response>' }
+            }
+
+            Remove-SfosSSLBookmarkGroupMember -GroupName 'ZZRemoveMemberBookmarkGroup' -Bookmark 'ZZBookmarkB' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Set operation="update">' -and
+                $InnerXml -match '<BookmarkList><Bookmark>ZZBookmarkA</Bookmark></BookmarkList>'
+            }
+        }
+    }
+
+    Context 'Remove-SfosSSLBookmarkGroup' {
+        It 'sends the flat Remove/SSLBookmarkGroup/Name shape' {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -MockWith {
+                if ($InnerXml -match '<Remove>') {
+                    [PSCustomObject]@{ Content = '<Response><SSLBookmarkGroup><Status code="200">Configuration applied successfully.</Status></SSLBookmarkGroup></Response>' }
+                }
+                else {
+                    [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><SSLBookmarkGroup><Name>ZZRemoveBookmarkGroup</Name><Description></Description><BookmarkList><Bookmark>ZZBookmark</Bookmark></BookmarkList></SSLBookmarkGroup></Response>' }
+                }
+            }
+
+            Remove-SfosSSLBookmarkGroup -Name 'ZZRemoveBookmarkGroup' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -eq '<Remove><SSLBookmarkGroup><Name>ZZRemoveBookmarkGroup</Name></SSLBookmarkGroup></Remove>'
+            }
+        }
+    }
+}

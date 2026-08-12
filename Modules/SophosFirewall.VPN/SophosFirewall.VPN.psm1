@@ -7725,7 +7725,11 @@ function New-SfosL2TPConnection {
     }
 
     $XmlResponse = [xml]$response.Content
-    Assert-SfosApiReturnSuccess -Xml $XmlResponse -ObjectName 'L2TPConnection/Configuration' -Action 'create' -Target $Name
+    # Measured 2026-08-12 (acceptance run): the write status for L2TPConnection lands FLAT
+    # at /Response/Configuration/Status for create and update - NOT nested under
+    # L2TPConnection like Get and Remove report. The nested path here made a 500/501 answer
+    # invisible and the cmdlet fail-open (reported success, created nothing).
+    Assert-SfosApiReturnSuccess -Xml $XmlResponse -ObjectName 'Configuration' -Action 'create' -Target $Name
 }
 
 <#
@@ -8015,7 +8019,8 @@ function Set-SfosL2TPConnection {
         }
 
         $XmlResponse = [xml]$response.Content
-        Assert-SfosApiReturnSuccess -Xml $XmlResponse -ObjectName 'L2TPConnection/Configuration' -Action 'update' -Target $Name
+        # Same measured flat path as create - see the comment there (2026-08-12).
+        Assert-SfosApiReturnSuccess -Xml $XmlResponse -ObjectName 'Configuration' -Action 'update' -Target $Name
     }
 }
 

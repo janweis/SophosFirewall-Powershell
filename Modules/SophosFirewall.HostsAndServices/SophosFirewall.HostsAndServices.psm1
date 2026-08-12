@@ -6485,11 +6485,16 @@ function New-SfosService {
         }
         'ICMP' {
             $Type = 'ICMP'
-            $detailXml = "<ICMPType>$($ICMPType -join ',')</ICMPType><ICMPCode>$($ICMPCode -join ',')</ICMPCode>" 
+            # An omitted code must go on the wire as -1 ("Any Code"): an empty <ICMPCode/>
+            # is rejected with 501 by the firewall (measured 2026-08-12).
+            $codeWire = if ($PSBoundParameters.ContainsKey('ICMPCode')) { $ICMPCode -join ',' } else { '-1' }
+            $detailXml = "<ICMPType>$($ICMPType -join ',')</ICMPType><ICMPCode>$codeWire</ICMPCode>"
         }
         'ICMPv6' {
             $Type = 'ICMPv6'
-            $detailXml = "<ICMPv6Type>$($ICMPv6Type -join ',')</ICMPv6Type><ICMPv6Code>$($ICMPv6Code -join ',')</ICMPv6Code>" 
+            # Same rule as ICMP: omitted code -> -1 ("Any Code"), empty element -> 501.
+            $codeWire6 = if ($PSBoundParameters.ContainsKey('ICMPv6Code')) { $ICMPv6Code -join ',' } else { '-1' }
+            $detailXml = "<ICMPv6Type>$($ICMPv6Type -join ',')</ICMPv6Type><ICMPv6Code>$codeWire6</ICMPv6Code>"
         }
     }
 

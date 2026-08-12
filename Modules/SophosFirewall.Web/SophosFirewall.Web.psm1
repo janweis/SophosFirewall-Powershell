@@ -1712,8 +1712,11 @@ function Get-SfosWebFilterCategory {
             QoSPolicy                    = $node.QoSPolicy
             Description                  = $node.Description
             DomainList                   = [string[]]($node.DomainList | Select-Object -ExpandProperty Domain)
-            KeywordList                  = [string[]]($node.KeywordList | Select-Object -ExpandProperty Keyword)
-            URLList                      = [string[]]($node.URLList | Select-Object -ExpandProperty URL)
+            # @(...) plus the empty-filter is required: without it a missing wrapper yields
+            # $null / @('') instead of the @() that section 7 guarantees (defect found by
+            # the per-function test build-out 2026-08-12; the sibling parsers already did it).
+            KeywordList                  = [string[]]@($node.KeywordList | Select-Object -ExpandProperty Keyword | Where-Object { $_ })
+            URLList                      = [string[]]@($node.URLList | Select-Object -ExpandProperty URL | Where-Object { $_ })
             OverrideDefaultDeniedMessage = $node.OverrideDefaultDeniedMessage
             DefaultDeniedMessage         = $node.DefaultDeniedMessage
             Notification                 = $node.Notification
@@ -2203,8 +2206,10 @@ function Set-SfosWebFilterCategory {
         $xmlKeywordList = ''
         $xmlUrlList = ''
         if ($ConfigureCategory -eq 'Local') {
-            $targetDomain = if ($PSBoundParameters.ContainsKey('Domain')) { @($Domain) } else { @($existing[0].DomainList) }
-            $targetKeyword = if ($PSBoundParameters.ContainsKey('Keyword')) { @($Keyword) } else { @($existing[0].KeywordList) }
+            # @() wraps the whole if/else: a one-element array from a branch unrolls to a scalar
+            # on assignment (measured on PS 5.1; two real data-loss bugs of this class were fixed 2026-08-12).
+            $targetDomain = @(if ($PSBoundParameters.ContainsKey('Domain')) { $Domain } else { $existing[0].DomainList })
+            $targetKeyword = @(if ($PSBoundParameters.ContainsKey('Keyword')) { $Keyword } else { $existing[0].KeywordList })
 
             $domainXml = ''
             foreach ($domainItem in $targetDomain) {
@@ -2231,7 +2236,7 @@ function Set-SfosWebFilterCategory {
             $xmlKeywordList = "<KeywordList>$keywordXml</KeywordList>"
         }
         else {
-            $targetUrl = if ($PSBoundParameters.ContainsKey('Url')) { @($Url) } else { @($existing[0].URLList) }
+            $targetUrl = @(if ($PSBoundParameters.ContainsKey('Url')) { $Url } else { $existing[0].URLList })
 
             # Known firmware defect (see comment-based help): URLList updates are
             # append-only on this firmware, so sending fewer entries than currently stored
@@ -7869,7 +7874,7 @@ function Set-SfosWebFilterSettings {
     $targetOverrideMsg = if ($bp.ContainsKey('DefaultOverrideMessage')) { $DefaultOverrideMessage } else { $existing.DefaultOverrideMessage }
     $targetOverrideQuota = if ($bp.ContainsKey('OverrideDefaultQuotaMessage')) { $OverrideDefaultQuotaMessage } else { $existing.OverrideDefaultQuotaMessage }
     $targetQuotaMsg = if ($bp.ContainsKey('DefaultQuotaMessage')) { $DefaultQuotaMessage } else { $existing.DefaultQuotaMessage }
-    $targetPua = if ($bp.ContainsKey('PUAWhitelist')) { @($PUAWhitelist) } else { @($existing.PUAWhitelist) }
+    $targetPua = @(if ($bp.ContainsKey('PUAWhitelist')) { $PUAWhitelist } else { $existing.PUAWhitelist })
 
     if (-not $PSCmdlet.ShouldProcess("WebFilterSettings on $($params.Firewall)", 'Update')) {
         return
@@ -8162,7 +8167,7 @@ function Set-SfosWebFilterProtectionSettings {
     $targetBlockUnscannable = if ($bp.ContainsKey('BlockUnscannableContent')) { $BlockUnscannableContent } else { $existing.BlockUnscannableContent }
     $targetPharming = if ($bp.ContainsKey('PharmingProtection')) { $PharmingProtection } else { $existing.PharmingProtection }
     $targetPuaDetection = if ($bp.ContainsKey('PUADetection')) { $PUADetection } else { $existing.PUADetection }
-    $targetPua = if ($bp.ContainsKey('PUAWhitelist')) { @($PUAWhitelist) } else { @($existing.PUAWhitelist) }
+    $targetPua = @(if ($bp.ContainsKey('PUAWhitelist')) { $PUAWhitelist } else { $existing.PUAWhitelist })
 
     if (-not $PSCmdlet.ShouldProcess("WebFilterProtectionSettings on $($params.Firewall)", 'Update')) {
         return
@@ -8399,7 +8404,7 @@ function Set-SfosWebFilterAdvancedSettings {
     $targetWebCaching = if ($bp.ContainsKey('WebCaching')) { $WebCaching } else { $existing.WebCaching }
     $targetProxyPort = if ($bp.ContainsKey('WebProxyPort')) { $WebProxyPort } else { $existing.WebProxyPort }
     $targetTlsVersion = if ($bp.ContainsKey('WebProxyMinimumTLSVersion')) { $WebProxyMinimumTLSVersion } else { $existing.WebProxyMinimumTLSVersion }
-    $targetTrustedPorts = if ($bp.ContainsKey('TrustedPort')) { @($TrustedPort) } else { @($existing.TrustedPorts) }
+    $targetTrustedPorts = @(if ($bp.ContainsKey('TrustedPort')) { $TrustedPort } else { $existing.TrustedPorts })
 
     if (-not $PSCmdlet.ShouldProcess("WebFilterAdvancedSettings on $($params.Firewall)", 'Update')) {
         return

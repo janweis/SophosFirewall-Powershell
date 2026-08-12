@@ -3357,8 +3357,10 @@ function Set-SfosNATRule {
         $targetTranslatedDestination = if ($PSBoundParameters.ContainsKey('TranslatedDestination')) { $TranslatedDestination } else { [string]$existing[0].TranslatedDestination }
         $targetTranslatedService = if ($PSBoundParameters.ContainsKey('TranslatedService')) { $TranslatedService } else { [string]$existing[0].TranslatedService }
         $targetOverride = if ($PSBoundParameters.ContainsKey('OverrideInterfaceNATPolicy')) { $OverrideInterfaceNATPolicy } else { [string]$existing[0].OverrideInterfaceNATPolicy }
-        $targetInbound = if ($PSBoundParameters.ContainsKey('InboundInterfaces')) { @($InboundInterfaces) } else { @($existing[0].InboundInterfaces) }
-        $targetOutbound = if ($PSBoundParameters.ContainsKey('OutboundInterfaces')) { @($OutboundInterfaces) } else { @($existing[0].OutboundInterfaces) }
+        # @() wraps the whole if/else: a one-element array from a branch unrolls to a scalar
+        # on assignment (measured on PS 5.1; two real data-loss bugs of this class were fixed 2026-08-12).
+        $targetInbound = @(if ($PSBoundParameters.ContainsKey('InboundInterfaces')) { $InboundInterfaces } else { $existing[0].InboundInterfaces })
+        $targetOutbound = @(if ($PSBoundParameters.ContainsKey('OutboundInterfaces')) { $OutboundInterfaces } else { $existing[0].OutboundInterfaces })
 
         if ($targetPosition -eq 'After' -and -not $targetAfter) {
             throw "NATRule '$Name': Position 'After' requires -After to name the reference rule."
@@ -4058,7 +4060,12 @@ function New-SfosSSLTLSInspectionRule {
         DecryptionProfile   = $DecryptionProfile
     }
 
-    $inner = ConvertTo-SfosSSLTLSInspectionRuleEntityXml -Operation 'add' -Rule $ruleObject -Position $Position
+    # -Position only when the caller bound it: passing an unbound $Position forwards "",
+    # which violates the helper's ValidateSet('Top','Bottom') and crashes client-side
+    # before any API call (found by the per-function acceptance run 2026-08-12).
+    $builderArgs = @{ Operation = 'add'; Rule = $ruleObject }
+    if ($PSBoundParameters.ContainsKey('Position')) { $builderArgs['Position'] = $Position }
+    $inner = ConvertTo-SfosSSLTLSInspectionRuleEntityXml @builderArgs
 
     if (-not $PSCmdlet.ShouldProcess("SSLTLSInspectionRule '$Name' on $($params.Firewall)", 'Create')) {
         return

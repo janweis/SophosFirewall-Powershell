@@ -675,7 +675,9 @@ function Set-SfosActiveDirectoryServer {
         $targetDisplayNameAttribute = if ($PSBoundParameters.ContainsKey('DisplayNameAttribute')) { $DisplayNameAttribute } else { [string]$existing[0].DisplayNameAttribute }
         $targetEmailAddressAttribute = if ($PSBoundParameters.ContainsKey('EmailAddressAttribute')) { $EmailAddressAttribute } else { [string]$existing[0].EmailAddressAttribute }
         $targetDomainName = if ($PSBoundParameters.ContainsKey('DomainName')) { $DomainName } else { [string]$existing[0].DomainName }
-        $targetSearchQueries = if ($PSBoundParameters.ContainsKey('SearchQueries')) { @($SearchQueries) } else { @($existing[0].SearchQueries) }
+        # @() wraps the whole if/else: a one-element array from a branch unrolls to a scalar
+        # on assignment (measured on PS 5.1; two real data-loss bugs of this class were fixed 2026-08-12).
+        $targetSearchQueries = @(if ($PSBoundParameters.ContainsKey('SearchQueries')) { $SearchQueries } else { $existing[0].SearchQueries })
 
         # Measured: an empty <Password> on update is accepted and preserves the existing bind
         # password (see the .DESCRIPTION) - so no warning is needed when -BindPassword is
@@ -4152,7 +4154,7 @@ function Set-SfosUser {
         $targetUserType = if ($PSBoundParameters.ContainsKey('UserType')) { $UserType } else { [string]$existing[0].UserType }
         $targetProfile = if ($PSBoundParameters.ContainsKey('ProfileName')) { $ProfileName } else { [string]$existing[0].Profile }
         $targetDescription = if ($PSBoundParameters.ContainsKey('Description')) { $Description } else { [string]$existing[0].Description }
-        $targetEmailList = if ($PSBoundParameters.ContainsKey('EmailList')) { @($EmailList) } else { @($existing[0].EmailList) }
+        $targetEmailList = @(if ($PSBoundParameters.ContainsKey('EmailList')) { $EmailList } else { $existing[0].EmailList })
         $targetGroup = if ($PSBoundParameters.ContainsKey('Group')) { $Group } else { [string]$existing[0].Group }
         $targetSurfingQuotaPolicy = if ($PSBoundParameters.ContainsKey('SurfingQuotaPolicy')) { $SurfingQuotaPolicy } else { [string]$existing[0].SurfingQuotaPolicy }
         $targetAccessTimePolicy = if ($PSBoundParameters.ContainsKey('AccessTimePolicy')) { $AccessTimePolicy } else { [string]$existing[0].AccessTimePolicy }
@@ -7112,6 +7114,9 @@ function Get-SfosSMSGateway {
 
         .PARAMETER ResponseParameterName
         Optional array of response parameter names, matched positionally with -ResponseParameterValue.
+        Measured (acceptance run 2026-08-12): unlike the request parameters, these names must be
+        NUMERIC placeholder indexes ('0', '1', ...) matching {0}/{1} in -ResponseFormat - a
+        free-text name is rejected with 400. The three factory templates all follow this shape.
 
         .PARAMETER ResponseParameterValue
         Optional array of response parameter values, matched positionally with -ResponseParameterName. Must be the same length.
@@ -7307,7 +7312,10 @@ function New-SfosSMSGateway {
         Optional. If omitted, the existing value is kept.
 
         .PARAMETER ResponseParameterName
-        Optional array of response parameter names, matched positionally with -ResponseParameterValue. If neither -ResponseParameterName nor -ResponseParameterValue is passed, the existing list is kept.
+        Optional array of response parameter names, matched positionally with -ResponseParameterValue.
+        Measured (acceptance run 2026-08-12): unlike the request parameters, these names must be
+        NUMERIC placeholder indexes ('0', '1', ...) matching {0}/{1} in -ResponseFormat - a
+        free-text name is rejected with 400. The three factory templates all follow this shape. If neither -ResponseParameterName nor -ResponseParameterValue is passed, the existing list is kept.
 
         .PARAMETER ResponseParameterValue
         Optional array of response parameter values, matched positionally with -ResponseParameterName. Must be the same length.
@@ -7908,7 +7916,7 @@ function Set-SfosOTPSettings {
 
     $targetOtp = if ($PSBoundParameters.ContainsKey('Otp')) { $Otp } else { $existing.Otp }
     $targetAllUsers = if ($PSBoundParameters.ContainsKey('AllUsers')) { $AllUsers } else { $existing.AllUsers }
-    $targetMembers = if ($PSBoundParameters.ContainsKey('Members')) { @($Members) } else { @($existing.OtpUsers) }
+    $targetMembers = @(if ($PSBoundParameters.ContainsKey('Members')) { $Members } else { $existing.OtpUsers })
     $targetTokenAutoCreation = if ($PSBoundParameters.ContainsKey('TokenAutoCreation')) { $TokenAutoCreation } else { $existing.TokenAutoCreation }
     $targetOtpUserPortal = if ($PSBoundParameters.ContainsKey('OtpUserPortal')) { $OtpUserPortal } else { $existing.OtpUserPortal }
     $targetOtpVPNPortal = if ($PSBoundParameters.ContainsKey('OtpVPNPortal')) { $OtpVPNPortal } else { $existing.OtpVPNPortal }
@@ -15169,6 +15177,11 @@ function Get-SfosLiveUser {
         undocumented <Set operation="login"><LiveUser> shape with no <Admin> block, which the
         firewall accepted at the HTTP level but never answered with any status - see the
         region header for the full history.
+
+        Measured side effect (acceptance run 2026-08-12, reproduced twice): a login CREATES A
+        PERSISTENT User record (Group 'Open Group') for the given name if none exists.
+        Disconnect-SfosLiveUser ends only the live session and never removes that record -
+        clean up with Remove-SfosUser if the account is not wanted.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/API/CONFIGURE/Authentication/APIUserLogin/operations/APIUserLogin.html

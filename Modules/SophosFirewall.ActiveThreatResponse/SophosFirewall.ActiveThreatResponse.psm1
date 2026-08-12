@@ -277,8 +277,10 @@ function Set-SfosATPSettings {
     $targetThreatProtectionStatus = if ($bp.ContainsKey('ThreatProtectionStatus')) { $ThreatProtectionStatus } else { $current.ThreatProtectionStatus }
     $targetInspectContent = if ($bp.ContainsKey('InspectContent')) { $InspectContent } else { $current.InspectContent }
     $targetPolicy = if ($bp.ContainsKey('Policy')) { $Policy } else { $current.Policy }
-    $targetHostException = if ($bp.ContainsKey('HostException')) { @($HostException) } else { @($current.HostExceptionList) }
-    $targetThreatException = if ($bp.ContainsKey('ThreatException')) { @($ThreatException) } else { @($current.ThreatExceptionList) }
+    # @() wraps the whole if/else: a one-element array from a branch unrolls to a scalar
+    # on assignment (measured on PS 5.1; two real data-loss bugs of this class were fixed 2026-08-12).
+    $targetHostException = @(if ($bp.ContainsKey('HostException')) { $HostException } else { $current.HostExceptionList })
+    $targetThreatException = @(if ($bp.ContainsKey('ThreatException')) { $ThreatException } else { $current.ThreatExceptionList })
 
     if (-not $PSCmdlet.ShouldProcess("ATP settings on $($params.Firewall)", 'Update')) {
         return

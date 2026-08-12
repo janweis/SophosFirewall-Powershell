@@ -3081,9 +3081,11 @@ function Set-SfosSpoofPrevention {
             $targetRestrict = 'Disable'
         }
 
-        $targetIPSpoofing = if ($bp.ContainsKey('IPSpoofingZoneList')) { @($IPSpoofingZoneList) } else { @($existing.IPSpoofingZoneList) }
-        $targetMACFilter = if ($bp.ContainsKey('MACFilterZoneList')) { @($MACFilterZoneList) } else { @($existing.MACFilterZoneList) }
-        $targetIPMACFilter = if ($bp.ContainsKey('IPMACFilterZoneList')) { @($IPMACFilterZoneList) } else { @($existing.IPMACFilterZoneList) }
+        # @() wraps the whole if/else: a one-element array from a branch unrolls to a scalar
+        # on assignment (measured on PS 5.1; two real data-loss bugs of this class were fixed 2026-08-12).
+        $targetIPSpoofing = @(if ($bp.ContainsKey('IPSpoofingZoneList')) { $IPSpoofingZoneList } else { $existing.IPSpoofingZoneList })
+        $targetMACFilter = @(if ($bp.ContainsKey('MACFilterZoneList')) { $MACFilterZoneList } else { $existing.MACFilterZoneList })
+        $targetIPMACFilter = @(if ($bp.ContainsKey('IPMACFilterZoneList')) { $IPMACFilterZoneList } else { $existing.IPMACFilterZoneList })
 
         $ipSpoofingXml = ConvertTo-SfosSpoofPreventionZoneListXml -ZoneList $targetIPSpoofing
         $macFilterXml = ConvertTo-SfosSpoofPreventionZoneListXml -ZoneList $targetMACFilter

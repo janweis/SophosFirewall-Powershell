@@ -246,16 +246,28 @@ Measured against a live SFOS 22.0 appliance. Every read-modify-write `Set-*` in 
 exists because of the general finding that an update replaces the whole entity - see the
 points below for the exceptions and additional defects found on top of that.
 
-- **`New-SfosIPsecConnection` and `New-SfosL2TPConnection` are not satisfiable on this
-  firmware.** Both need `-AliasLocalWANPort` to reference a real, already-configured
-  interface Alias object; the lab's only WAN-zone interface passes that field's own
-  validation but every request then fails with an opaque, field-less code `545`. This holds
-  for every combination of the remaining fields tried, including distinct network objects for
-  local/remote and both ID fields supplied. Because no object of either type could ever be
-  created, whether `Get-SfosIPsecConnection`/`Get-SfosL2TPConnection` return the pre-shared
-  key on read is unknown; `Set-SfosIPsecConnection` and `Set-SfosL2TPConnection` accordingly
-  do not offer `-PresharedKey` for preservation - a field this module cannot read back is not
-  offered for write, so a read-modify-write update can never silently clear it.
+- **`New-SfosIPsecConnection` WORKS since the recipe was cracked** (two live firewalls,
+  see the cmdlet help): name without a hyphen, `Status Deactive` at create,
+  `LocalWANPort`+`AliasLocalWANPort` both on the WAN interface, `LocalPort`/`RemotePort`
+  present, and for route-based tunnels `ConnectionType TunnelInterface` with
+  `SubnetFamily Dual`/`Protocol ALL`/`UserAuthenticationMode Disable` and no subnets.
+  Activation is the separate `<Active>` toggle issued by `Set-SfosIPsecConnection -Status`.
+  **`New-SfosL2TPConnection` remains unsatisfiable on this firmware** — and since
+  2026-08-12 it fails loudly: the write status lands flat at
+  `/Response/Configuration/Status` (measured), which the cmdlet now asserts; the earlier
+  build looked at the nested path, missed the error and reported success while creating
+  nothing. `New-SfosVPNFailoverGroup` now fails with `400 "failed to bind json"` (the
+  cause moved after the IPsec fix; still unsatisfiable). Because no L2TP object could ever
+  be created, whether its `Get` returns the pre-shared key on read is unknown;
+  `Set-SfosIPsecConnection` and `Set-SfosL2TPConnection` accordingly do not offer
+  `-PresharedKey` for preservation - a field this module cannot read back is not offered
+  for write, so a read-modify-write update can never silently clear it.
+- **`Set-SfosL2TPConfiguration`/`Set-SfosPPTPConfiguration`: the original empty state is
+  unrecoverable.** Once any value has been written, sending empty elements is silently
+  ignored (measured three ways) - plan the first write deliberately.
+- **`Remove-SfosSSLVPNPolicy` answers `500` while a UserGroup still references the
+  policy** (the member side effect below wires groups to the policy) - remove or rewire
+  the referencing group first.
 - **`New-SfosSiteToSiteClient` cannot succeed through this transport.**
   `-ServerConfigurationFile` is a genuine file upload (`.apc`/`.epc`) per the vendor's own
   sample, not a text field; `Core` has no multipart transport, only the urlencoded `reqxml`
@@ -318,7 +330,7 @@ try {
 - **Object Not Found**: Use `Get-SfosVPNProfile | Select-Object Name` to list all available objects
 - **Permission Denied**: Verify API user has proper role assignments on the firewall
 - **Invalid Parameters**: Check exact parameter names - functions are entity-specific (VPNIPSecConnection, VPNProfile, VPNFailoverGroup, SSLVPNPolicy, SSLBookmark, SiteToSiteClient, SiteToSiteServer, L2TPConnection, ...)
-- **`New-SfosIPsecConnection`/`New-SfosL2TPConnection` fail with code 545**: See Known limitations - this is an unresolved environmental/firmware blocker on `-AliasLocalWANPort`, not a module defect
+- **`New-SfosIPsecConnection` fails**: check the recipe in Known limitations (no hyphen in the name, `Status Deactive` at create, both WAN-port fields); **`New-SfosL2TPConnection` fails**: unsatisfiable on this firmware - the error is now reported loudly, see Known limitations
 - **`New-SfosSiteToSiteClient` fails with an empty 500**: See Known limitations - `-ServerConfigurationFile` needs a multipart upload this module's transport cannot send
 - **`Remove-SfosSSLBookmark` throws even though the firewall answered success**: See Known limitations - the delete operation is a confirmed firmware no-op
 - **A UserGroup's SSL VPN policy assignment changed unexpectedly**: See Known limitations - `-Member` on `New-`/`Set-SfosSSLVPNPolicy` writes back onto that group

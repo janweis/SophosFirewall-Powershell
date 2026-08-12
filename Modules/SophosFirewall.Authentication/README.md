@@ -319,10 +319,11 @@ points below for the exceptions and additional defects found on top of that.
   a wrong write could lock out the API user needed to fix it. The cmdlets are implemented
   strictly to the documented request shape and to the pattern confirmed for
   `FirewallAuthentication`, but the write itself is unconfirmed - see the cmdlet `.NOTES`.
-- **`Connect-`/`Disconnect-SfosLiveUser` throw on this firmware.** The firewall accepts the
-  request (`HTTP 200`, a well-formed `<Response>`) but returns no `<Status>` element at all for
-  the `LiveUser` object, so neither cmdlet can confirm the login/logout took effect; both throw
-  rather than report success they cannot verify. Not usable on this firmware.
+- **`Connect-SfosLiveUser` leaves a persistent `User` record behind.** Both cmdlets work
+  (they target the documented `LiveUserLogin`/`LiveUserLogout` roots), but a login creates
+  a permanent user object (`Group=Open Group`) as a measured side effect, and
+  `Disconnect-SfosLiveUser` ends only the live session - the user record survives and has
+  to be removed with `Remove-SfosUser` if it is not wanted.
 - **Two specific fields are rejected outright.** `Set-SfosDirectWebProxyAuthentication
   -PerConnectionAuth Enable` and `Set-SfosWebAuthenticationSettings -OpenWebpageInNewWindow
   Disable` are both answered with `501` and an empty `<InvalidParams/>` - no field is named as
@@ -366,7 +367,7 @@ try {
 - **Invalid Parameters**: Check exact parameter names - functions are entity-specific (User, UserGroup, GuestUser, ClientlessUser, ...)
 - **A user unexpectedly moved between groups**: See Known limitations - group membership is a single value on the user, not a list on the group
 - **`Set-SfosGuestUserSettings` breaks `Get-SfosGuestUserSettings`**: See Known limitations - this is a known, unresolved firmware limitation, not a module defect
-- **`Connect-`/`Disconnect-SfosLiveUser` always throw**: See Known limitations - the firewall returns no status for this operation on this firmware
+- **A user object appears after `Connect-SfosLiveUser`**: See Known limitations - the login creates a persistent user record that `Disconnect-SfosLiveUser` does not remove; delete it with `Remove-SfosUser`
 
 ## See Also
 

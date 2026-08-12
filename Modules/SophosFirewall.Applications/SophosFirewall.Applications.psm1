@@ -2222,7 +2222,13 @@ function Set-SfosApplicationFilterCategory {
             throw "ApplicationFilterCategory '$Name': -BandwidthUsageType must be 'Individual', 'Shared' or an empty string, got '$targetBandwidth'."
         }
         $targetDescription = if ($bp.ContainsKey('Description')) { $Description } else { $existing.Description }
-        $targetAppSettings = if ($bp.ContainsKey('ApplicationSettings')) { @($ApplicationSettings) } else { @($existing.ApplicationSettings) }
+        # @() must wrap the WHOLE if/else: on Windows PowerShell 5.1 a one-element array
+        # produced inside a branch unrolls to a scalar on assignment, the scalar has no
+        # .Count, and the ApplicationSettings block silently vanished from the request -
+        # the first per-app override of a category could never be added on 5.1 (defect
+        # found by the per-function test build-out 2026-08-12; same class as the
+        # Set-SfosMulticastRoute fix of the same day).
+        $targetAppSettings = @(if ($bp.ContainsKey('ApplicationSettings')) { $ApplicationSettings } else { $existing.ApplicationSettings })
 
         if (-not $PSCmdlet.ShouldProcess("ApplicationFilterCategory '$Name' on $($params.Firewall)", 'Update')) {
             return

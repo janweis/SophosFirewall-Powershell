@@ -102,13 +102,14 @@
 #    individually (each produces a precise <InvalidParams><Params>/GatewayHost/Field</...>
 #    on a bad value) but does not name Healthcheck/MailNotification/Interval/Timeout in
 #    <InvalidParams> even when they are the reason a request is rejected.
-# 2. GatewayIP values from 203.0.113.0/24 (TEST-NET-3, RFC 5737) are rejected by SFOS with
-#    the same generic, field-less 501 - consistent with the documented exclusion of
-#    "RESERVED" address classes from GatewayIP, just not enumerated by name. This directly
-#    conflicts with this task's mandated test range. Flagged for the orchestrator; the live
-#    round-trip in this file's verification therefore used a private RFC 1918 address
-#    instead (an unused address on the test-approved carrier interface's subnet) and removed it
-#    immediately after each test. No such object is left behind - see the task report.
+# 2. GatewayIP values are rejected with the same generic, field-less 501 whenever the
+#    address does not lie in the subnet of the chosen Interface. Originally this was read
+#    as an exclusion of reserved address classes (203.0.113.0/24 failed), but the
+#    per-function acceptance run 2026-08-12 isolated the real rule: a public address like
+#    8.8.8.8 fails identically on a private-subnet interface, while an unused address in
+#    the interface's own subnet is accepted at once. The gateway must be on-link for the
+#    selected interface; the live round-trips therefore use an unused address from the
+#    carrier interface's subnet and remove it immediately after each test.
 
 #region GatewayHost
 
@@ -295,9 +296,10 @@ function Get-SfosGatewayHost {
     'IPv4' or 'IPv6' [doc]. Mandatory.
 
 .PARAMETER GatewayIP
-    IP address of the gateway [doc]. Mandatory. SFOS rejects reserved/documentation address
-    classes with a generic, field-less 501 - see the region header comment for the measured
-    conflict with this task's mandated 203.0.113.0/24 test range.
+    IP address of the gateway [doc]. Mandatory. The address must lie in the subnet of the
+    chosen -Interface (the gateway has to be on-link): SFOS rejects any off-subnet value -
+    documentation ranges and public addresses alike - with a generic, field-less 501
+    [measured]. See the region header comment.
 
 .PARAMETER Interface
     Outgoing interface for the gateway, for example 'Port1' [doc]. Mandatory.
@@ -349,13 +351,14 @@ function Get-SfosGatewayHost {
     None. Throws an exception if creation fails.
 
 .EXAMPLE
-    # Gateway with health-check disabled (default)
-    New-SfosGatewayHost -Name 'ISP1' -IPFamily IPv4 -GatewayIP '203.0.113.1' -Interface 'Port1'
+    # Gateway with health-check disabled (default). The gateway address must lie in the
+    # subnet of the chosen interface (here: Port1 on 192.168.1.0/24) or SFOS answers 501.
+    New-SfosGatewayHost -Name 'ISP1' -IPFamily IPv4 -GatewayIP '192.168.1.254' -Interface 'Port1'
 
 .EXAMPLE
     # Gateway with health-check enabled
-    $rule = [PSCustomObject]@{ Protocol = 'PING'; IPAddress = '203.0.113.1'; Port = '*' }
-    New-SfosGatewayHost -Name 'ISP1' -IPFamily IPv4 -GatewayIP '203.0.113.1' -Interface 'Port1' `
+    $rule = [PSCustomObject]@{ Protocol = 'PING'; IPAddress = '192.168.1.254'; Port = '*' }
+    New-SfosGatewayHost -Name 'ISP1' -IPFamily IPv4 -GatewayIP '192.168.1.254' -Interface 'Port1' `
         -Healthcheck ON -Interval 60 -Timeout 5 -FailureRetries 3 -MonitoringCondition $rule
 
 .NOTES
@@ -4703,8 +4706,12 @@ function Set-SfosMulticastRoute {
         $bp = $PSBoundParameters
         $targetSourceInterface = if ($bp.ContainsKey('SourceInterface')) { $SourceInterface } else { [string]$current.SourceInterface }
         $targetSourceTunnel = if ($bp.ContainsKey('SourceTunnel')) { $SourceTunnel } else { [string]$current.SourceTunnel }
-        $targetDestInterfaces = if ($bp.ContainsKey('DestinationInterface')) { @($DestinationInterface) } else { @($current.DestinationInterfaceList | ForEach-Object { $_.Interface }) }
-        $targetDestTunnelTypes = if ($bp.ContainsKey('DestinationTunnelType')) { @($DestinationTunnelType) } else { @($current.DestinationInterfaceList | ForEach-Object { $_.TunnelType }) }
+        # @() must wrap the WHOLE if/else: a one-element array returned from an if branch
+        # unrolls to a scalar on assignment, and indexing that scalar string later takes
+        # its first CHARACTER ('Port2' -> 'P'). Found by the per-function test build-out
+        # 2026-08-12; only bites when the existing route has exactly one destination.
+        $targetDestInterfaces = @(if ($bp.ContainsKey('DestinationInterface')) { $DestinationInterface } else { $current.DestinationInterfaceList | ForEach-Object { $_.Interface } })
+        $targetDestTunnelTypes = @(if ($bp.ContainsKey('DestinationTunnelType')) { $DestinationTunnelType } else { $current.DestinationInterfaceList | ForEach-Object { $_.TunnelType } })
 
         if (-not $PSCmdlet.ShouldProcess("MulticastRoute '$SourceIPAddress -> $MulticastAddress' on $($params.Firewall)", 'Update')) {
             return
@@ -5176,10 +5183,12 @@ function Set-SfosPIMDynamicRouting {
         -SkipCertificateCheck:$params.SkipCertificateCheck
 
     $targetManagePIM = if ($PSBoundParameters.ContainsKey('ManagePIM')) { $ManagePIM } else { [string]$existing.ManagePIM }
-    $targetInterfaces = if ($PSBoundParameters.ContainsKey('InterfaceList')) { @($InterfaceList) } else { @($existing.InterfaceList) }
+    # @() wraps the whole if/else: a one-element array from a branch unrolls to a scalar
+    # on assignment (measured on PS 5.1; two real data-loss bugs of this class were fixed 2026-08-12).
+    $targetInterfaces = @(if ($PSBoundParameters.ContainsKey('InterfaceList')) { $InterfaceList } else { $existing.InterfaceList })
     $targetCandidateRP = if ($PSBoundParameters.ContainsKey('CandidateRP')) { $CandidateRP } else { [string]$existing.CandidateRP }
     $targetStaticRPIP = if ($PSBoundParameters.ContainsKey('StaticRPIP')) { $StaticRPIP } else { [string]$existing.StaticRPIP }
-    $targetStaticRPGroupIP = if ($PSBoundParameters.ContainsKey('StaticRPGroupIP')) { @($StaticRPGroupIP) } else { @($existing.StaticRPGroupIP) }
+    $targetStaticRPGroupIP = @(if ($PSBoundParameters.ContainsKey('StaticRPGroupIP')) { $StaticRPGroupIP } else { $existing.StaticRPGroupIP })
 
     if (-not $PSCmdlet.ShouldProcess("PIMDynamicRouting on $($params.Firewall)", 'Update')) {
         return

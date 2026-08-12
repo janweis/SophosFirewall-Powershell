@@ -1,7 +1,7 @@
 # Sophos Firewall PowerShell Module Suite
 
-PowerShell module collection for Sophos XGS/SFOS firewall management. Ten modules with 451
-cmdlets are shipped; roughly ten further areas of the API are still open.
+PowerShell module collection for Sophos XGS/SFOS firewall management. Eleven modules with 471
+cmdlets are shipped; roughly nine further areas of the API are still open.
 
 ## Quick Start
 
@@ -34,8 +34,9 @@ New-SfosIPHost -Name "Server1" -HostType IP -IPAddress "10.0.0.5"
 | **SophosFirewall.VPN** | 51 | IPsec connections and profiles, SSL VPN (policies, bookmarks, site-to-site), L2TP, PPTP, failover groups |
 | **SophosFirewall.IntrusionPrevention** | 29 | IPS policies and rules, custom signatures, IPS switch, DoS settings and bypass rules, spoof prevention, trusted MACs |
 | **SophosFirewall.ActiveThreatResponse** | 10 | Sophos X-Ops threat feeds (ATP) with host/threat exceptions, third-party threat feeds |
+| **SophosFirewall.Applications** | 20 | Application filter policies and rules, application objects, categories with QoS assignment, classification assignments |
 
-451 cmdlets in total. Every one of them was called against a live SFOS 22.0 appliance, not
+471 cmdlets in total. Every one of them was called against a live SFOS 22.0 appliance, not
 only against mocks — the firmware behaviour that differs from the vendor documentation is
 recorded in the `.NOTES` of the affected function and summarised in each module README.
 
@@ -51,10 +52,11 @@ recorded in the `.NOTES` of the affected function and summarised in each module 
 - [SophosFirewall.VPN README](Modules/SophosFirewall.VPN/README.md) - IPsec, SSL VPN, L2TP and PPTP; read the known limitations, several add operations are not satisfiable through the XML API
 - [SophosFirewall.IntrusionPrevention README](Modules/SophosFirewall.IntrusionPrevention/README.md) - IPS, DoS and spoof prevention; enabling spoof prevention on the management zone can lock you out, read the warning first
 - [SophosFirewall.ActiveThreatResponse README](Modules/SophosFirewall.ActiveThreatResponse/README.md) - ATP / Sophos X-Ops threat feeds and third-party feeds; note the measured remove/update quirks
+- [SophosFirewall.Applications README](Modules/SophosFirewall.Applications/README.md) - Application control; several rule-list fields are computed server-side, read the known behaviour section first
 
 ## Key Features
 
-- 451 functions covering ten of roughly twenty API areas
+- 471 functions covering eleven of roughly twenty API areas
 - PowerShell 5.1 and 7.x
 - Session management: connect once, use every module
 - Pipeline support between cmdlets

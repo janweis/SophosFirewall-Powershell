@@ -424,6 +424,55 @@ Describe 'New-*/Set-* XML generation' {
                 $InnerXml -match '<PresharedKey>IPsecSecret1</PresharedKey>'
             }
         }
+
+        It 'defaults -LocalWANPort to -AliasLocalWANPort and always sends it, for a route-based connection with no LocalSubnet/RemoteNetwork' {
+            New-SfosIPsecConnection -Name 'ZZWVIPsec4' -ConnectionType TunnelInterface `
+                -LocalIDType 'IP Address' -LocalID '198.51.100.1' `
+                -RemoteIDType 'IP Address' -RemoteID '198.51.100.2' `
+                -AliasLocalWANPort 'Port2' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<AliasLocalWANPort>Port2</AliasLocalWANPort>' -and
+                $InnerXml -match '<LocalWANPort>Port2</LocalWANPort>' -and
+                $InnerXml -notmatch '<LocalSubnet>' -and
+                $InnerXml -notmatch '<RemoteNetwork>'
+            }
+        }
+
+        It 'honours an explicit -LocalWANPort that differs from -AliasLocalWANPort' {
+            New-SfosIPsecConnection -Name 'ZZWVIPsec5' -ConnectionType TunnelInterface `
+                -LocalIDType 'IP Address' -LocalID '198.51.100.1' `
+                -RemoteIDType 'IP Address' -RemoteID '198.51.100.2' `
+                -AliasLocalWANPort 'Port2' -LocalWANPort 'Port3' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<AliasLocalWANPort>Port2</AliasLocalWANPort>' -and
+                $InnerXml -match '<LocalWANPort>Port3</LocalWANPort>'
+            }
+        }
+
+        It 'accepts SubnetFamily Dual and always sends LocalPort/RemotePort defaulted to *' {
+            New-SfosIPsecConnection -Name 'ZZWVIPsec6' -ConnectionType TunnelInterface `
+                -LocalIDType 'IP Address' -LocalID '198.51.100.1' `
+                -RemoteIDType 'IP Address' -RemoteID '198.51.100.2' `
+                -AliasLocalWANPort 'Port2' -SubnetFamily Dual @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<SubnetFamily>Dual</SubnetFamily>' -and
+                $InnerXml -match '<LocalPort>\*</LocalPort>' -and
+                $InnerXml -match '<RemotePort>\*</RemotePort>'
+            }
+        }
+
+        It 'throws client-side, without calling the API, when Name contains a hyphen' {
+            { New-SfosIPsecConnection -Name 'ZZ-Hyphen' -ConnectionType TunnelInterface `
+                    -LocalIDType 'IP Address' -LocalID '198.51.100.1' `
+                    -RemoteIDType 'IP Address' -RemoteID '198.51.100.2' `
+                    -AliasLocalWANPort 'Port2' @conn -Confirm:$false } |
+                Should -Throw '*hyphen*'
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -Times 0
+        }
     }
 
     Context 'New-SfosVPNProfile' {
@@ -705,6 +754,83 @@ Describe 'Read-Modify-Write' {
         }
     }
 
+    Context 'Set-SfosIPsecConnection' {
+        BeforeEach {
+            # Real captured shape (scratchpad/vpn-live), PresharedKey-authenticated route-based
+            # tunnel: SubnetFamily Dual, LocalWANPort/AliasLocalWANPort both Port2, Protocol ALL.
+            # Every call's InnerXml is also collected into $script:ipsecCalls, because
+            # Should -Invoke -ParameterFilter against a multi-line, multi-call InnerXml has
+            # proven flaky under this Pester version/module-boundary combination in this suite -
+            # collecting and asserting on the plain array sidesteps that.
+            $script:ipsecCalls = New-Object System.Collections.Generic.List[string]
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -MockWith {
+                $script:ipsecCalls.Add($InnerXml)
+                if ($InnerXml -match '<Get>') {
+                    [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><VPNIPSecConnection><Configuration><Name>ZZRmwIPsec</Name><Description>original</Description><ConnectionType>TunnelInterface</ConnectionType><Policy>Head office (IKEv2)</Policy><ActionOnVPNRestart>RespondOnly</ActionOnVPNRestart><AuthenticationType>PresharedKey</AuthenticationType><SubnetFamily>Dual</SubnetFamily><EndpointFamily>IPv4</EndpointFamily><AliasLocalWANPort>Port2</AliasLocalWANPort><RemoteHost>198.51.100.10</RemoteHost><LocalIDType>IP Address</LocalIDType><LocalID>198.51.100.1</LocalID><RemoteIDType>IP Address</RemoteIDType><RemoteID>198.51.100.10</RemoteID><UserAuthenticationMode>Disable</UserAuthenticationMode><Protocol>ALL</Protocol><LocalPort>*</LocalPort><RemotePort>*</RemotePort><LocalWANPort>Port2</LocalWANPort><Status>Active</Status><PresharedKey hashform="mode1">$sfos$7$0$deadbeef</PresharedKey></Configuration></VPNIPSecConnection></Response>' }
+                }
+                elseif ($InnerXml -match '<Active>|<DeActive>') {
+                    $tag = if ($InnerXml -match '<Active>') { 'Active' } else { 'DeActive' }
+                    $toggleContent = '<Response><Login><status>Authentication Successful</status></Login><' + $tag + '><Status code="200">Configuration applied successfully.</Status></' + $tag + '></Response>'
+                    [PSCustomObject]@{ Content = $toggleContent }
+                }
+                else {
+                    [PSCustomObject]@{ Content = '<Response><Configuration><Status code="200">Configuration applied successfully.</Status></Configuration></Response>' }
+                }
+            }
+        }
+
+        It 'preserves LocalWANPort, SubnetFamily, Protocol, UserAuthenticationMode and the hashed PresharedKey when only Description changes' {
+            Set-SfosIPsecConnection -Name 'ZZRmwIPsec' -Description 'updated' @conn -Confirm:$false
+
+            $setCall = $script:ipsecCalls | Where-Object { $_ -match '<Set operation="update">' }
+            $setCall | Should -Not -BeNullOrEmpty
+            $setCall | Should -Match '<Description>updated</Description>'
+            $setCall | Should -Match '<LocalWANPort>Port2</LocalWANPort>'
+            $setCall | Should -Match '<SubnetFamily>Dual</SubnetFamily>'
+            $setCall | Should -Match '<Protocol>ALL</Protocol>'
+            $setCall | Should -Match '<UserAuthenticationMode>Disable</UserAuthenticationMode>'
+            $setCall | Should -Match '<PresharedKey hashform="mode1">\$sfos\$7\$0\$deadbeef</PresharedKey>'
+        }
+
+        It 'does not send the Active/DeActive toggle when -Status is not specified' {
+            Set-SfosIPsecConnection -Name 'ZZRmwIPsec' -Description 'updated' @conn -Confirm:$false
+
+            $script:ipsecCalls.Count | Should -Be 2
+            ($script:ipsecCalls | Where-Object { $_ -match '<Active>|<DeActive>' }).Count | Should -Be 0
+        }
+
+        It 'sends a separate Active toggle request when -Status Active is specified' {
+            Set-SfosIPsecConnection -Name 'ZZRmwIPsec' -Status Active @conn -Confirm:$false
+
+            $script:ipsecCalls.Count | Should -Be 3
+            $toggleCall = $script:ipsecCalls[2]
+            $toggleCall | Should -Match '<Set operation="update">'
+            $toggleCall | Should -Match '<Active><Name>ZZRmwIPsec</Name></Active>'
+            $toggleCall | Should -Not -Match '<Configuration>'
+        }
+
+        It 'sends a separate DeActive toggle request when -Status Deactive is specified' {
+            Set-SfosIPsecConnection -Name 'ZZRmwIPsec' -Status Deactive @conn -Confirm:$false
+
+            $script:ipsecCalls.Count | Should -Be 3
+            $toggleCall = $script:ipsecCalls[2]
+            $toggleCall | Should -Match '<Set operation="update">'
+            $toggleCall | Should -Match '<DeActive><Name>ZZRmwIPsec</Name></DeActive>'
+            $toggleCall | Should -Not -Match '<Configuration>'
+        }
+
+        It 'accepts SubnetFamily Dual as an override' {
+            (Get-Command Set-SfosIPsecConnection).Parameters['SubnetFamily'].Attributes.ValidValues | Should -Contain 'Dual'
+        }
+
+        It 'throws client-side, without calling the API, when Name contains a hyphen' {
+            { Set-SfosIPsecConnection -Name 'ZZ-Hyphen' -Description 'x' @conn -Confirm:$false } |
+                Should -Throw '*hyphen*'
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -Times 0
+        }
+    }
+
     Context 'Set-SfosSSLBookmark' {
         BeforeEach {
             Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -MockWith {
@@ -924,6 +1050,47 @@ Describe 'Measured special-case behaviours' {
             Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -Times 1 -Exactly -ParameterFilter {
                 $InnerXml -eq '<Remove><SSLVPNPolicy><ClientlessPolicy><Name>ZZRemoveClientless</Name></ClientlessPolicy></SSLVPNPolicy></Remove>'
             }
+        }
+    }
+
+    Context 'Remove-SfosIPsecConnection - nested Remove/Configuration shape, reads back and throws if still present' {
+        It 'sends the nested Remove/VPNIPSecConnection/Configuration/Name shape, not a flat Remove/VPNIPSecConnection' {
+            # First Get (existence pre-check) must still find the object, so answer it once
+            # with a real object and every later Get with "gone" - matches the cmdlet's own
+            # read-first-then-read-back-after design.
+            $script:callCount = 0
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -MockWith {
+                $script:callCount++
+                if ($InnerXml -match '<Remove>') {
+                    return [PSCustomObject]@{ Content = '<Response><Configuration><Status code="200">Configuration applied successfully.</Status></Configuration></Response>' }
+                }
+                if ($script:callCount -eq 1) {
+                    return [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><VPNIPSecConnection><Configuration><Name>ZZRemoveIPsec</Name><ConnectionType>TunnelInterface</ConnectionType></Configuration></VPNIPSecConnection></Response>' }
+                }
+                return [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><VPNIPSecConnection><Configuration><Status>No. of records Zero.</Status></Configuration></VPNIPSecConnection></Response>' }
+            }
+
+            Remove-SfosIPsecConnection -Name 'ZZRemoveIPsec' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Remove>' -and
+                $InnerXml -match '<VPNIPSecConnection>\s*<Configuration>\s*<Name>ZZRemoveIPsec</Name>\s*</Configuration>\s*</VPNIPSecConnection>'
+            }
+        }
+
+        It 'throws when the object is still present after a reported-successful Remove' {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -MockWith {
+                if ($InnerXml -match '<Remove>') {
+                    [PSCustomObject]@{ Content = '<Response><Configuration><Status code="200">Configuration applied successfully.</Status></Configuration></Response>' }
+                }
+                else {
+                    # Still there before AND after the (falsely successful) Remove.
+                    [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><VPNIPSecConnection><Configuration><Name>ZZStuckIPsec</Name><ConnectionType>TunnelInterface</ConnectionType></Configuration></VPNIPSecConnection></Response>' }
+                }
+            }
+
+            { Remove-SfosIPsecConnection -Name 'ZZStuckIPsec' @conn -Confirm:$false } |
+                Should -Throw '*still present*'
         }
     }
 

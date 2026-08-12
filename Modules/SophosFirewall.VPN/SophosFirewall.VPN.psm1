@@ -181,11 +181,18 @@
     Measured live: an empty firewall answers HTTP 200 with '<VPNIPSecConnection>
     <Configuration><Status>No. of records Zero.</Status></Configuration></VPNIPSecConnection>'
     - note the extra <Configuration> wrapper the entity uses only on Get, see the fragment
-    header comment - and this cmdlet returns @() for it. No VPNIPSecConnection object could
-    be created in this lab (see New-SfosIPsecConnection's .NOTES), so the property shape below
-    is derived from the documented sample XML only and was never confirmed against a live
-    object - in particular, whether PresharedKey/Username/Password are actually present on a
-    real Get response is unconfirmed.
+    header comment - and this cmdlet returns @() for it.
+
+    Follow-up (orchestrator session, live route-based tunnel build): a route-based
+    TunnelInterface connection CAN be created on this firmware - see New-SfosIPsecConnection's
+    updated .NOTES for the working recipe, superseding the "not satisfiable" finding below.
+    Get was exercised against two such real objects. Confirmed: PresharedKey IS present on a
+    real Get response, as a salted hash with a 'hashform' attribute
+    (`<PresharedKey hashform="mode1">$sfos$7$0$...</PresharedKey>`), never plaintext, and the
+    hash text changes on every single subsequent write regardless of whether the caller
+    changed the key - identical finding to SSLBookmark.Password. Username/Password (the
+    UserAuthenticationMode credential fields, unrelated to the API auth -Password) were not
+    exercised, since both test connections used UserAuthenticationMode Disable.
 
 .LINK
     https://docs.sophos.com/nsg/sophos-firewall/22.0/API/CONFIGURE/VPN/IPsecConnection/IPsecConnection.html
@@ -247,6 +254,7 @@ function Get-SfosIPsecConnection {
     $objects = foreach ($node in @($nodes)) {
         $remoteNetworkNodes = @($node.SelectNodes('RemoteNetwork/Network'))
         $allowedUserNodes = @($node.SelectNodes('AllowedUser/User'))
+        $presharedKeyNode = $node.SelectSingleNode('PresharedKey')
 
         [PSCustomObject]@{
             Name                      = [string]$node.Name
@@ -255,6 +263,12 @@ function Get-SfosIPsecConnection {
             Policy                    = [string]$node.Policy
             ActionOnVPNRestart        = [string]$node.ActionOnVPNRestart
             AuthenticationType        = [string]$node.AuthenticationType
+            # Measured live: Get returns PresharedKey as a salted hash, re-salted on every
+            # single write regardless of content - same finding as SSLBookmark.Password (see
+            # that cmdlet's .NOTES). Set-SfosIPsecConnection resends it with its hashform
+            # attribute so a read-modify-write does not clear the key.
+            PresharedKey              = if ($presharedKeyNode) { [string]$presharedKeyNode.InnerText } else { '' }
+            PresharedKeyHashForm      = if ($presharedKeyNode -and $presharedKeyNode.Attributes['hashform']) { [string]$presharedKeyNode.Attributes['hashform'].Value } else { '' }
             LocalCertificate          = [string]$node.LocalCertificate
             RemoteCertificate         = [string]$node.RemoteCertificate
             SubnetFamily              = [string]$node.SubnetFamily
@@ -308,15 +322,17 @@ function Get-SfosIPsecConnection {
     Creates a VPNIPSecConnection (VPN > IPsec connections) using the Sophos Firewall XML API.
     Supports ShouldProcess; use -WhatIf to preview.
 
-    UNCONFIRMED - see .NOTES. Every value tried for -AliasLocalWANPort was rejected with a
-    field-less-message 501, so no successful create was ever observed for this entity. The
-    cmdlet is implemented documentation- and measurement-faithful: every parameter below that
-    is marked Mandatory was confirmed live to be checked by the firewall's field validator
-    (it names the field in <InvalidParams> when absent), not merely copied from the
-    documentation table.
+    CONFIRMED live for a route-based (ConnectionType 'TunnelInterface') site-to-site tunnel -
+    see .NOTES for the exact working recipe, measured against two real firewalls. The earlier
+    "not satisfiable" finding for ConnectionType 'SiteToSite' with an explicit -LocalSubnet
+    was a dead end caused by -LocalSubnet/-RemoteNetwork, not by -AliasLocalWANPort as first
+    suspected; a route-based connection needs neither.
 
 .PARAMETER Name
     Name of the connection [doc, measured mandatory]. Starts with a letter, max 100 characters.
+    MEASURED: a hyphen is rejected client-side with a clear error - see .NOTES - because the
+    firewall itself answers a field-specific 501 on Configuration/Name for one, the same
+    defect as SiteToSiteServer and L2TPConnection.
 
 .PARAMETER ConnectionType
     'RemoteAccess', 'SiteToSite', 'HostToHost' or 'TunnelInterface' [doc, measured mandatory].
@@ -334,15 +350,16 @@ function Get-SfosIPsecConnection {
     Remote ID value matching -RemoteIDType [doc, measured mandatory].
 
 .PARAMETER LocalSubnet
-    Name of an existing IPHost object representing the local subnet [doc, measured mandatory].
-    Measured live: an object name works here (an IPHost of type Network, confirmed against
-    this lab's own #Port1 pattern); a raw CIDR string does not clear validation on its own -
-    see .NOTES.
+    Name of an existing IPHost object representing the local subnet [doc: optional]. Route-based
+    (TunnelInterface) connections do not use it - the working recipe in .NOTES sends neither
+    -LocalSubnet nor -RemoteNetwork. Previously implemented as Mandatory based on an earlier,
+    since-superseded SiteToSite investigation; corrected to optional, matching both the
+    documentation and the confirmed live recipe.
 
 .PARAMETER AliasLocalWANPort
-    Alias of the local WAN port [doc]. Measured mandatory - the field is named in
-    <InvalidParams> whenever absent, regardless of -LocalWANPort. UNCONFIRMED value: see
-    the NOTES section below for every value tried and why none was accepted in this lab.
+    Alias of the local WAN port, for example 'Port2' [doc]. Measured mandatory - the field is
+    named in <InvalidParams> whenever absent. Also populates -LocalWANPort when that parameter
+    is not separately supplied - see .PARAMETER LocalWANPort and .NOTES.
 
 .PARAMETER Description
     Free-text description [doc]. Optional.
@@ -357,10 +374,9 @@ function Get-SfosIPsecConnection {
     'PresharedKey', 'DigitalCertificate' or 'RSAKey' [doc]. Optional.
 
 .PARAMETER PresharedKey
-    Pre-shared key, required by the firewall when -AuthenticationType is 'PresharedKey' [doc]. Supply as a SecureString (Read-Host -AsSecureString or ConvertTo-SecureString).
-    Field-level validation accepted this parameter in isolation during testing, but no
-    complete object was ever created (see .NOTES), so whether Get-SfosIPsecConnection returns
-    it afterwards is unconfirmed.
+    Pre-shared key, required by the firewall when -AuthenticationType is 'PresharedKey' [doc]. Supply as a SecureString (Read-Host -AsSecureString or ConvertTo-SecureString), 5-64
+    characters. CONFIRMED live: Get-SfosIPsecConnection returns it afterwards as a salted
+    hash, never plaintext - see Get-SfosIPsecConnection's .NOTES.
 
 .PARAMETER LocalCertificate
     Name of the local (appliance) certificate [doc]. Optional.
@@ -369,13 +385,18 @@ function Get-SfosIPsecConnection {
     Name of the remote (external) certificate [doc]. Optional.
 
 .PARAMETER SubnetFamily
-    'IPv4' or 'IPv6' [doc]. Default: 'IPv4'.
+    'IPv4', 'IPv6' or 'Dual' [doc]. Default: 'IPv4'. 'Dual' was missing from the original
+    ValidateSet even though the documentation lists it and the confirmed working recipe for a
+    route-based tunnel uses it.
 
 .PARAMETER EndpointFamily
     'IPv4' or 'IPv6' [doc]. Default: 'IPv4'.
 
 .PARAMETER LocalWANPort
-    Local listening interface, for example 'Port1' [doc]. Optional.
+    Local listening interface, for example 'Port2' [doc]. Optional - defaults to the value of
+    -AliasLocalWANPort and is always sent. MEASURED: with this field omitted, every
+    SiteToSite/TunnelInterface create failed; the firewall needs both fields present and set
+    to the same interface. Override only if the two must genuinely differ.
 
 .PARAMETER RemoteHost
     Remote peer host or IP address [doc]. Required in practice for SiteToSite/HostToHost, not
@@ -410,10 +431,12 @@ function Get-SfosIPsecConnection {
     'ALL', 'UDP', 'TCP' or 'ICMP' [doc]. Optional.
 
 .PARAMETER LocalPort
-    Local port, 1-65535 or '*' [doc]. Optional.
+    Local port, 1-65535 or '*' [doc]. Default '*' - the documentation marks this Mandatory and
+    an omitted element was rejected live with a 501; '*' (any port) matches the doc's own
+    allowed values and this project's Protocol ALL default.
 
 .PARAMETER RemotePort
-    Remote port, 1-65535 or '*' [doc]. Optional.
+    Remote port, 1-65535 or '*' [doc]. Default '*' - same finding as -LocalPort.
 
 .PARAMETER DisconnectOnIdleInterval
     Idle disconnect interval in seconds [doc]. Optional.
@@ -439,48 +462,49 @@ function Get-SfosIPsecConnection {
     None. Throws an exception if creation fails.
 
 .EXAMPLE
-    # Documentation-faithful shape; UNCONFIRMED to succeed in this lab, see .NOTES
-    New-SfosIPsecConnection -Name 'ExampleTunnel' -ConnectionType SiteToSite `
+    # CONFIRMED live recipe for a route-based (TunnelInterface) site-to-site tunnel - see
+    # .NOTES. No -LocalSubnet/-RemoteNetwork; -LocalWANPort defaults from -AliasLocalWANPort.
+    $psk = Read-Host -AsSecureString -Prompt 'Pre-shared key'
+    New-SfosIPsecConnection -Name 'ExampleTunnel' -ConnectionType TunnelInterface `
+        -Policy 'Head office (IKEv2)' -AuthenticationType PresharedKey -PresharedKey $psk `
+        -AliasLocalWANPort 'Port2' -EndpointFamily IPv4 -SubnetFamily Dual -Protocol ALL `
+        -UserAuthenticationMode Disable -RemoteHost '198.51.100.10' `
         -LocalIDType 'IP Address' -LocalID '198.51.100.1' `
-        -RemoteIDType 'IP Address' -RemoteID '198.51.100.2' `
-        -LocalSubnet 'ExampleLocalNet' -AliasLocalWANPort 'Port1' -WhatIf
+        -RemoteIDType 'IP Address' -RemoteID '198.51.100.10' `
+        -ActionOnVPNRestart Initiate -Status Deactive -WhatIf
 
 .NOTES
     Minimum supported PowerShell version: 5.1
-    NOT VERIFIED to succeed live. Field-by-field validation was measured by provoking 501
-    responses and reading <InvalidParams>, which is how every -Mandatory parameter above was
-    confirmed. The blocker is -AliasLocalWANPort: with ConnectionType SiteToSite and every
-    other now-valid field supplied (Name, ConnectionType, Policy, ActionOnVPNRestart,
-    AuthenticationType, PresharedKey, SubnetFamily, EndpointFamily, LocalWANPort, RemoteHost,
-    LocalSubnet, LocalIDType, LocalID, RemoteNetwork, RemoteIDType, RemoteID, Status), the
-    firewall kept rejecting the request with a 501 naming only AliasLocalWANPort, for every
-    one of these values tried: 'Port1', 'Port1:0', 'Port1_0', 'Port1-0', 'Port1:1', '#Port1',
-    '0', 'WAN', 'Auto', and an omitted/empty element. The same result occurred with
-    ConnectionType RemoteAccess. This lab has zero configured Alias objects on any interface
-    (0 records, confirmed via the Network module), and the value format this field expects
-    matches the documented Alias naming scheme ('Interface:Index') exactly - the working
-    theory is that AliasLocalWANPort must reference a real, already-configured interface Alias
-    object, which none of this lab's test-eligible interfaces has. Creating one was not
-    attempted: Port1 is the only test-approved carrier interface and the lab baseline
-    explicitly prohibits reconfiguring it, and Port2/Port3 are tabu (uplink and API-session
-    carrier). This is reported as an open environmental blocker, not fixed in this pass.
+    CONFIRMED live: a route-based site-to-site tunnel was built end to end between two real
+    firewalls with exactly the recipe in .EXAMPLE (ConnectionType TunnelInterface; Policy
+    'Head office (IKEv2)'; AuthenticationType PresharedKey; both -AliasLocalWANPort and
+    -LocalWANPort set to the same WAN-zone interface; EndpointFamily IPv4; SubnetFamily Dual;
+    Protocol ALL; UserAuthenticationMode Disable; LocalIDType/RemoteIDType 'IP Address'; no
+    -LocalSubnet or -RemoteNetwork at all), created with -Status Deactive and switched on
+    afterwards through Set-SfosIPsecConnection - see that cmdlet's .NOTES for the activation
+    finding. This supersedes every claim below, which is kept for provenance: the original
+    investigation used ConnectionType SiteToSite with an explicit -LocalSubnet and concluded
+    -AliasLocalWANPort was the blocker (code 545). Both were wrong - 545 was
+    -LocalSubnet/-RemoteNetwork forcing a route lookup this lab's addressing could not
+    satisfy, not the alias field, and a route-based connection needs neither.
 
-    Follow-up (orchestrator, same session): three further live attempts with this fragment,
-    using -AliasLocalWANPort 'Port2' (a real WAN-zone interface) instead of Port1. (1) With
-    the identical network object used for both -LocalSubnet and -RemoteNetwork, the firewall
-    answers 503 "Entity having same parameter details already exists" (StatusPath
-    /Response/Configuration/Status) - a duplicate-parameter check that fires before the real
-    blocker is even reached. (2) With separate network objects for -LocalSubnet and
-    -RemoteNetwork, -LocalID/-RemoteID set, and Status Deactive, the request still fails, now
-    with code 545 - an opaque code carrying no field information, identical in shape to the
-    L2TPConnection finding in Group C of this module. Even with a genuine WAN-zone interface,
-    distinct network objects and both IDs supplied, Add is not satisfiable on this firmware.
-    Conclusion: implemented documentation- and measurement-faithful, UNCONFIRMED to succeed on
-    this firmware (same precedent as New-SfosSSLTLSInspectionRule). Because no
-    VPNIPSecConnection object could be created by any means tried, the PSK round-trip question
-    this task was built around remains unanswered - Get-SfosIPsecConnection was never
-    exercised against a real object, and Set-SfosIPsecConnection accordingly does not offer
-    -PresharedKey for preservation.
+    Superseded investigation (kept for provenance): field-by-field validation was measured by
+    provoking 501 responses and reading <InvalidParams>, which is how every -Mandatory
+    parameter was originally confirmed. With ConnectionType SiteToSite and every other field
+    supplied (Name, ConnectionType, Policy, ActionOnVPNRestart, AuthenticationType,
+    PresharedKey, SubnetFamily, EndpointFamily, LocalWANPort, RemoteHost, LocalSubnet,
+    LocalIDType, LocalID, RemoteNetwork, RemoteIDType, RemoteID, Status), the firewall kept
+    rejecting the request with a 501 naming only AliasLocalWANPort, for every one of these
+    values tried: 'Port1', 'Port1:0', 'Port1_0', 'Port1-0', 'Port1:1', '#Port1', '0', 'WAN',
+    'Auto', and an omitted/empty element - all on Port1, this lab's LAN-zone interface, which
+    has no interface Alias configured. Three further attempts used -AliasLocalWANPort 'Port2'
+    (a real WAN-zone interface) instead: (1) the identical network object for both
+    -LocalSubnet and -RemoteNetwork answered 503 "Entity having same parameter details
+    already exists"; (2) distinct network objects, both ID fields, Status Deactive still
+    failed with opaque code 545, identical in shape to the L2TPConnection finding in Group C
+    of this module. Switching ConnectionType to TunnelInterface and dropping -LocalSubnet/
+    -RemoteNetwork entirely is what actually cleared 545 - AliasLocalWANPort 'Port2' was
+    correct all along.
 
 .LINK
     https://docs.sophos.com/nsg/sophos-firewall/22.0/API/CONFIGURE/VPN/IPsecConnection/operations/AddFailoverGroupIPSECConnection%26EditIPSECConnection.html
@@ -514,7 +538,6 @@ function New-SfosIPsecConnection {
         [Parameter(Mandatory)]
         [string]$RemoteID,
 
-        [Parameter(Mandatory)]
         [string]$LocalSubnet,
 
         [Parameter(Mandatory)]
@@ -529,7 +552,7 @@ function New-SfosIPsecConnection {
         [SecureString]$PresharedKey,
         [string]$LocalCertificate,
         [string]$RemoteCertificate,
-        [ValidateSet('IPv4', 'IPv6')]
+        [ValidateSet('IPv4', 'IPv6', 'Dual')]
         [string]$SubnetFamily = 'IPv4',
         [ValidateSet('IPv4', 'IPv6')]
         [string]$EndpointFamily = 'IPv4',
@@ -546,8 +569,8 @@ function New-SfosIPsecConnection {
         [string[]]$AllowedUser,
         [ValidateSet('ALL', 'UDP', 'TCP', 'ICMP')]
         [string]$Protocol,
-        [string]$LocalPort,
-        [string]$RemotePort,
+        [string]$LocalPort = '*',
+        [string]$RemotePort = '*',
         [int]$DisconnectOnIdleInterval,
         [ValidateSet('Active', 'Deactive')]
         [string]$Status = 'Deactive',
@@ -560,6 +583,22 @@ function New-SfosIPsecConnection {
     )
 
     $params = Resolve-SfosParameters -BoundParameters $PSBoundParameters
+
+    # Measured live: a hyphenated Name is rejected with a field-specific 501 naming
+    # /VPNIPSecConnection/Configuration/Name, the same defect as SiteToSiteServer and
+    # L2TPConnection (see those cmdlets' .NOTES). Checked here rather than through
+    # -ValidatePattern so the error names the entity and explains why, matching this
+    # project's other client-side pre-checks.
+    if ($Name -match '-') {
+        throw "The VPNIPSecConnection object name '$Name' must not contain a hyphen; the firewall rejects it with a field-specific 501 on Configuration/Name."
+    }
+
+    # Measured live: with -LocalWANPort omitted, every SiteToSite/TunnelInterface create
+    # fails - the firewall needs both AliasLocalWANPort and LocalWANPort populated with the
+    # same interface. Default LocalWANPort to the alias unless the caller overrides it.
+    if (-not $PSBoundParameters.ContainsKey('LocalWANPort')) {
+        $LocalWANPort = $AliasLocalWANPort
+    }
 
     if (-not $PSCmdlet.ShouldProcess("VPNIPSecConnection '$Name' on $($params.Firewall)", 'Create')) {
         return
@@ -605,6 +644,7 @@ function New-SfosIPsecConnection {
     if ($PSBoundParameters.ContainsKey('PresharedKey')) { $optionalXml += "<PresharedKey>$(& $e $presharedKeyPlain)</PresharedKey>" }
     if ($LocalCertificate) { $optionalXml += "<LocalCertificate>$(& $e $LocalCertificate)</LocalCertificate>" }
     if ($RemoteCertificate) { $optionalXml += "<RemoteCertificate>$(& $e $RemoteCertificate)</RemoteCertificate>" }
+    if ($LocalSubnet) { $optionalXml += "<LocalSubnet>$(& $e $LocalSubnet)</LocalSubnet>" }
     if ($LocalWANPort) { $optionalXml += "<LocalWANPort>$(& $e $LocalWANPort)</LocalWANPort>" }
     if ($RemoteHost) { $optionalXml += "<RemoteHost>$(& $e $RemoteHost)</RemoteHost>" }
     if ($NATedLAN) { $optionalXml += "<NATedLAN>$(& $e $NATedLAN)</NATedLAN>" }
@@ -629,7 +669,6 @@ function New-SfosIPsecConnection {
       <SubnetFamily>$SubnetFamily</SubnetFamily>
       <EndpointFamily>$EndpointFamily</EndpointFamily>
       <AliasLocalWANPort>$(& $e $AliasLocalWANPort)</AliasLocalWANPort>
-      <LocalSubnet>$(& $e $LocalSubnet)</LocalSubnet>
       <LocalIDType>$LocalIDType</LocalIDType>
       <LocalID>$(& $e $LocalID)</LocalID>
       <RemoteIDType>$RemoteIDType</RemoteIDType>
@@ -667,13 +706,16 @@ function New-SfosIPsecConnection {
     (read-modify-write - SFOS replaces the whole entity on update). Supports ShouldProcess;
     use -WhatIf to preview.
 
-    UNCONFIRMED live - no VPNIPSecConnection object could be created in this lab (see
-    New-SfosIPsecConnection's .NOTES), so this cmdlet's read-modify-write was never exercised
-    end to end. -PresharedKey is deliberately NOT a parameter here (see .NOTES) - the KEY
-    reason this task asked to check whether Get returns it, and the check could not be run.
+    CONFIRMED live end to end, including activation - see .NOTES. -PresharedKey IS a
+    parameter here: Get-SfosIPsecConnection returns the key as a salted hash, and the hash
+    plus its hashform attribute is resent whenever the caller does not supply a new key, or
+    the update fails outright (measured: code 515) for a PresharedKey-authenticated
+    connection whose PresharedKey element is missing.
 
 .PARAMETER Name
     Name of the target connection. Mandatory; accepts pipeline input by property name.
+    MEASURED: a hyphen is rejected client-side with a clear error, the same defect as on
+    New-SfosIPsecConnection - see that cmdlet's .NOTES.
 
 .PARAMETER Description
     Free-text description. If omitted, the existing value is kept.
@@ -684,11 +726,20 @@ function New-SfosIPsecConnection {
 .PARAMETER ActionOnVPNRestart
     'Disable', 'RespondOnly' or 'Initiate'. If omitted, the existing value is kept.
 
+.PARAMETER PresharedKey
+    New pre-shared key, SecureString. If omitted, the hash Get-SfosIPsecConnection returned is
+    resent with its hashform attribute so the key is preserved rather than cleared - see
+    .DESCRIPTION.
+
 .PARAMETER LocalWANPort
     Local listening interface. If omitted, the existing value is kept.
 
 .PARAMETER AliasLocalWANPort
     Alias of the local WAN port. If omitted, the existing value is kept.
+
+.PARAMETER SubnetFamily
+    'IPv4', 'IPv6' or 'Dual' [doc]. If omitted, the existing value is kept. 'Dual' was missing
+    from the original ValidateSet - see New-SfosIPsecConnection's matching fix.
 
 .PARAMETER RemoteHost
     Remote peer host or IP address. If omitted, the existing value is kept.
@@ -714,8 +765,16 @@ function New-SfosIPsecConnection {
 .PARAMETER RemoteID
     Remote ID value. If omitted, the existing value is kept.
 
+.PARAMETER UserAuthenticationMode
+    'Disable', 'AsServer' or 'AsClient' [doc]. If omitted, the existing value is kept.
+
+.PARAMETER Protocol
+    'ALL', 'UDP', 'TCP' or 'ICMP' [doc]. If omitted, the existing value is kept.
+
 .PARAMETER Status
-    'Active' or 'Deactive'. If omitted, the existing value is kept.
+    'Active' or 'Deactive'. If omitted, the existing value is kept, but the separate
+    enable/disable toggle described in .NOTES is only sent when -Status is explicitly bound -
+    see .NOTES for why this cmdlet cannot preserve that toggle's state on its own.
 
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
@@ -740,12 +799,24 @@ function New-SfosIPsecConnection {
 
 .NOTES
     Minimum supported PowerShell version: 5.1
-    NOT VERIFIED live - see .DESCRIPTION. -PresharedKey is intentionally absent from this
-    cmdlet's parameters: whether Get-SfosIPsecConnection returns PresharedKey at all could
-    never be measured (no object could be created), and the FileType/-Template precedent in
-    this project is to omit a field from Set- rather than silently risk clearing it on every
-    update. If a future session confirms Get returns it (raw or otherwise), add it back here
-    following the RADIUS-SharedSecret pattern instead.
+    CONFIRMED live against two real firewalls, including the activation step. The
+    Configuration/Status field alone does NOT enable a connection: sending a full field set
+    with <Status>Active</Status> answers HTTP 200, but a Get immediately afterwards shows the
+    Status field unchanged from before the call, and the web admin UI kept showing the
+    connection as disabled. The documented sample XML for this operation lists four further,
+    undocumented-elsewhere sibling elements that "will work only after the connection is
+    created": <Active><Name>x</Name></Active>, <DeActive><Name>x</Name></DeActive>,
+    <Connection><Name>x</Name></Connection>, <DisConnection><Name>x</Name></DisConnection>.
+    Sending <Active>/<DeActive> as its own <Set operation="update"> against a real connection
+    answered HTTP 200 with a response rooted at <Active>/<DeActive> instead of <Configuration>
+    - so Assert-SfosApiReturnSuccess is called with -ObjectName 'Active'/'DeActive' for that
+    call, not 'Configuration' - and the web admin UI changed from disabled to connected right
+    after the <Active> call, confirmed visually. This toggle is NOT reflected anywhere Get can
+    read: Configuration/Status stayed the same value throughout every DeActive/Active cycle
+    tested, so this cmdlet cannot read-modify-write it and only sends it when the caller
+    explicitly passes -Status - an omitted -Status leaves the toggle exactly as it was.
+    <Connection>/<DisConnection> (force a reconnect) were not exercised; out of scope for this
+    fix, which only had to make -Status Active actually enable the connection.
 
 .LINK
     https://docs.sophos.com/nsg/sophos-firewall/22.0/API/CONFIGURE/VPN/IPsecConnection/operations/AddFailoverGroupIPSECConnection%26EditIPSECConnection.html
@@ -763,8 +834,11 @@ function Set-SfosIPsecConnection {
         [string]$Policy,
         [ValidateSet('Disable', 'RespondOnly', 'Initiate')]
         [string]$ActionOnVPNRestart,
+        [SecureString]$PresharedKey,
         [string]$LocalWANPort,
         [string]$AliasLocalWANPort,
+        [ValidateSet('IPv4', 'IPv6', 'Dual')]
+        [string]$SubnetFamily,
         [string]$RemoteHost,
         [string]$LocalSubnet,
         [ValidateSet('DNS', 'IP Address', 'Email', 'DER ASN1 DN (X.509)')]
@@ -774,6 +848,10 @@ function Set-SfosIPsecConnection {
         [ValidateSet('DNS', 'IP Address', 'Email', 'DER ASN1 DN (X.509)')]
         [string]$RemoteIDType,
         [string]$RemoteID,
+        [ValidateSet('Disable', 'AsServer', 'AsClient')]
+        [string]$UserAuthenticationMode,
+        [ValidateSet('ALL', 'UDP', 'TCP', 'ICMP')]
+        [string]$Protocol,
         [ValidateSet('Active', 'Deactive')]
         [string]$Status,
 
@@ -792,6 +870,12 @@ function Set-SfosIPsecConnection {
     process {
         $bp = $PSBoundParameters
 
+        # Measured live: a hyphenated Name is rejected the same way as on
+        # New-SfosIPsecConnection - see that cmdlet's .NOTES.
+        if ($Name -match '-') {
+            throw "The VPNIPSecConnection object name '$Name' must not contain a hyphen; the firewall rejects it with a field-specific 501 on Configuration/Name."
+        }
+
         $existing = @(Get-SfosIPsecConnection -Firewall $params.Firewall `
                 -Port $params.Port `
                 -Username $params.Username `
@@ -808,6 +892,7 @@ function Set-SfosIPsecConnection {
         $targetDescription = if ($bp.ContainsKey('Description')) { $Description } else { [string]$current.Description }
         $targetPolicy = if ($bp.ContainsKey('Policy')) { $Policy } else { [string]$current.Policy }
         $targetAction = if ($bp.ContainsKey('ActionOnVPNRestart')) { $ActionOnVPNRestart } else { [string]$current.ActionOnVPNRestart }
+        $targetSubnetFamily = if ($bp.ContainsKey('SubnetFamily')) { $SubnetFamily } else { [string]$current.SubnetFamily }
         $targetLocalWANPort = if ($bp.ContainsKey('LocalWANPort')) { $LocalWANPort } else { [string]$current.LocalWANPort }
         $targetAlias = if ($bp.ContainsKey('AliasLocalWANPort')) { $AliasLocalWANPort } else { [string]$current.AliasLocalWANPort }
         $targetRemoteHost = if ($bp.ContainsKey('RemoteHost')) { $RemoteHost } else { [string]$current.RemoteHost }
@@ -817,6 +902,8 @@ function Set-SfosIPsecConnection {
         $targetRemoteNetwork = if ($bp.ContainsKey('RemoteNetwork')) { $RemoteNetwork } else { $current.RemoteNetworkList }
         $targetRemoteIDType = if ($bp.ContainsKey('RemoteIDType')) { $RemoteIDType } else { [string]$current.RemoteIDType }
         $targetRemoteID = if ($bp.ContainsKey('RemoteID')) { $RemoteID } else { [string]$current.RemoteID }
+        $targetUserAuthMode = if ($bp.ContainsKey('UserAuthenticationMode')) { $UserAuthenticationMode } else { [string]$current.UserAuthenticationMode }
+        $targetProtocol = if ($bp.ContainsKey('Protocol')) { $Protocol } else { [string]$current.Protocol }
         $targetStatus = if ($bp.ContainsKey('Status')) { $Status } else { [string]$current.Status }
 
         if (-not $PSCmdlet.ShouldProcess("VPNIPSecConnection '$Name' on $($params.Firewall)", 'Update')) {
@@ -827,6 +914,41 @@ function Set-SfosIPsecConnection {
         foreach ($net in @($targetRemoteNetwork)) {
             $remoteNetworkXml += "<Network>$(& $e $net)</Network>"
         }
+        $allowedUserXml = ''
+        foreach ($user in @($current.AllowedUserList)) {
+            $allowedUserXml += "<User>$(& $e $user)</User>"
+        }
+
+        # PresharedKey: a caller-supplied value goes out as bare plaintext; a preserved value
+        # is the HASH Get returned and must be resent with its hashform attribute, or the
+        # update fails outright with code 515 for a PresharedKey-authenticated connection -
+        # measured live, see .NOTES.
+        $presharedKeyXml = ''
+        if ($bp.ContainsKey('PresharedKey')) {
+            $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($PresharedKey)
+            try {
+                $presharedKeyPlain = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
+            }
+            finally {
+                [Runtime.InteropServices.Marshal]::FreeBSTR($bstr)
+            }
+            $presharedKeyXml = "<PresharedKey>$(& $e $presharedKeyPlain)</PresharedKey>"
+        }
+        elseif ($current.PresharedKey) {
+            $hfEsc = & $e $current.PresharedKeyHashForm
+            $presharedKeyXml = "<PresharedKey hashform=`"$hfEsc`">$(& $e $current.PresharedKey)</PresharedKey>"
+        }
+
+        $optionalXml = ''
+        if ($current.LocalCertificate) { $optionalXml += "<LocalCertificate>$(& $e $current.LocalCertificate)</LocalCertificate>" }
+        if ($current.RemoteCertificate) { $optionalXml += "<RemoteCertificate>$(& $e $current.RemoteCertificate)</RemoteCertificate>" }
+        if ($current.NATedLAN) { $optionalXml += "<NATedLAN>$(& $e $current.NATedLAN)</NATedLAN>" }
+        if ($current.AllowNATTraversal) { $optionalXml += "<AllowNATTraversal>$($current.AllowNATTraversal)</AllowNATTraversal>" }
+        if ($current.Username) { $optionalXml += "<Username>$(& $e $current.Username)</Username>" }
+        if ($allowedUserXml) { $optionalXml += "<AllowedUser>$allowedUserXml</AllowedUser>" }
+        if ($current.LocalPort) { $optionalXml += "<LocalPort>$(& $e $current.LocalPort)</LocalPort>" }
+        if ($current.RemotePort) { $optionalXml += "<RemotePort>$(& $e $current.RemotePort)</RemotePort>" }
+        if ($current.DisconnectOnIdleInterval) { $optionalXml += "<DisconnectOnIdleInterval>$($current.DisconnectOnIdleInterval)</DisconnectOnIdleInterval>" }
 
         $inner = @"
 <Set operation="update">
@@ -838,7 +960,8 @@ function Set-SfosIPsecConnection {
       <Policy>$(& $e $targetPolicy)</Policy>
       <ActionOnVPNRestart>$targetAction</ActionOnVPNRestart>
       <AuthenticationType>$($current.AuthenticationType)</AuthenticationType>
-      <SubnetFamily>$($current.SubnetFamily)</SubnetFamily>
+      $presharedKeyXml
+      <SubnetFamily>$targetSubnetFamily</SubnetFamily>
       <EndpointFamily>$($current.EndpointFamily)</EndpointFamily>
       <LocalWANPort>$(& $e $targetLocalWANPort)</LocalWANPort>
       <AliasLocalWANPort>$(& $e $targetAlias)</AliasLocalWANPort>
@@ -849,6 +972,9 @@ function Set-SfosIPsecConnection {
       <RemoteNetwork>$remoteNetworkXml</RemoteNetwork>
       <RemoteIDType>$targetRemoteIDType</RemoteIDType>
       <RemoteID>$(& $e $targetRemoteID)</RemoteID>
+      <UserAuthenticationMode>$targetUserAuthMode</UserAuthenticationMode>
+      <Protocol>$targetProtocol</Protocol>
+      $optionalXml
       <Status>$targetStatus</Status>
     </Configuration>
   </VPNIPSecConnection>
@@ -868,6 +994,40 @@ function Set-SfosIPsecConnection {
 
         $XmlResponse = [xml]$response.Content
         Assert-SfosApiReturnSuccess -Xml $XmlResponse -ObjectName 'Configuration' -Action 'update' -Target $Name
+
+        # The Configuration/Status field just written does NOT toggle the connection's real
+        # enabled state - measured live, see .NOTES. Only fired when the caller explicitly
+        # asked for -Status, since this cmdlet has no way to read the toggle back to preserve
+        # it on updates that do not touch -Status.
+        if ($bp.ContainsKey('Status')) {
+            $nameEscForToggle = & $e $Name
+            if ($targetStatus -eq 'Active') {
+                $innerToggle = '<Set operation="update"><VPNIPSecConnection><Active><Name>' + $nameEscForToggle + '</Name></Active></VPNIPSecConnection></Set>'
+                $toggleObjectName = 'Active'
+                $toggleAction = 'activate'
+            }
+            else {
+                $innerToggle = '<Set operation="update"><VPNIPSecConnection><DeActive><Name>' + $nameEscForToggle + '</Name></DeActive></VPNIPSecConnection></Set>'
+                $toggleObjectName = 'DeActive'
+                $toggleAction = 'deactivate'
+            }
+
+            try {
+                $toggleResponse = Invoke-SfosApi -Firewall $params.Firewall `
+                    -Port $params.Port `
+                    -Username $params.Username `
+                    -Password $params.Password `
+                    -InnerXml $innerToggle -SkipCertificateCheck:$params.SkipCertificateCheck -ErrorAction Stop
+            }
+            catch {
+                throw "Error switching VPNIPSecConnection object '$Name' to Status '$targetStatus': $($_.Exception.Message)"
+            }
+
+            $toggleXmlResponse = [xml]$toggleResponse.Content
+            # Write responses for this pair are rooted at <Active>/<DeActive>, not
+            # <Configuration> - see the fragment header comment's cross-cutting finding.
+            Assert-SfosApiReturnSuccess -Xml $toggleXmlResponse -ObjectName $toggleObjectName -Action $toggleAction -Target $Name
+        }
     }
 }
 
@@ -956,10 +1116,17 @@ function Remove-SfosIPsecConnection {
 
         $nameEsc = ConvertTo-SfosXmlEscaped -Text $Name
 
+        # Measured live: the shallow <Remove><VPNIPSecConnection><Name>x</Name>
+        # </VPNIPSecConnection></Remove> form answers HTTP 200 and deletes nothing - a
+        # confirmed firmware no-op, the same class of defect as Remove-SfosSSLBookmark. The
+        # form that actually deletes nests Name one level deeper, under <Configuration>,
+        # matching the entity's own Get/Set shape.
         $inner = @"
 <Remove>
   <VPNIPSecConnection>
-    <Name>$nameEsc</Name>
+    <Configuration>
+      <Name>$nameEsc</Name>
+    </Configuration>
   </VPNIPSecConnection>
 </Remove>
 "@
@@ -977,6 +1144,21 @@ function Remove-SfosIPsecConnection {
 
         $XmlResponse = [xml]$response.Content
         Assert-SfosApiReturnSuccess -Xml $XmlResponse -ObjectName 'Configuration' -Action 'remove' -Target $Name
+
+        # Belt and braces: the shallow form above answered 200 while changing nothing, so a
+        # successful status alone is not trusted here - read the object back and throw if it
+        # is still present, matching the Remove-SfosSSLBookmark/-SSLVPNPolicy pattern.
+        $stillPresent = @(Get-SfosIPsecConnection -Firewall $params.Firewall `
+                -Port $params.Port `
+                -Username $params.Username `
+                -Password $params.Password `
+                -NameLike $Name `
+                -SkipCertificateCheck:$params.SkipCertificateCheck |
+                Where-Object -FilterScript { $_.Name -eq $Name })
+
+        if ($stillPresent.Count -gt 0) {
+            throw "The Sophos API reported success removing VPNIPSecConnection object '$Name', but the object is still present on the firewall."
+        }
     }
 }
 

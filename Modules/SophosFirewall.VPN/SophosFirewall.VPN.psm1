@@ -1522,11 +1522,7 @@ between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session f
     None. Throws an exception if creation fails.
 
 .EXAMPLE
-    New-SfosVPNProfile -Name 'BranchProfile' -AuthenticationMode MainMode `
-        -Phase1EncryptionAlgorithm1 AES256 -Phase1AuthenticationAlgorithm1 SHA2_256 `
-        -Phase1KeyLife 3600 -Phase1ReKeyMargin 120 -Phase1RandomizeReKeyingMarginBy 100 `
-        -Phase2EncryptionAlgorithm1 AES256 -Phase2AuthenticationAlgorithm1 SHA2_256 `
-        -Phase2KeyLife 3600 -SupportedDHGroup '14(DH2048)' -WhatIf
+    New-SfosVPNProfile -Name 'BranchProfile' -AuthenticationMode MainMode -Phase1EncryptionAlgorithm1 AES256 -Phase1AuthenticationAlgorithm1 SHA2_256 -Phase1KeyLife 3600 -Phase1ReKeyMargin 120 -Phase1RandomizeReKeyingMarginBy 100 -Phase2EncryptionAlgorithm1 AES256 -Phase2AuthenticationAlgorithm1 SHA2_256 -Phase2KeyLife 3600 -SupportedDHGroup '14(DH2048)' -WhatIf
 
 .NOTES
     Minimum supported PowerShell version: 5.1

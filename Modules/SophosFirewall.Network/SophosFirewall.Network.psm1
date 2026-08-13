@@ -26,9 +26,13 @@
         Use Connect-SfosFirewall once, then call functions without connection parameters.
 
         .EXAMPLE
-        # Connect and list the interfaces with their addresses
+        # Connect and list the interfaces with their addresses. The IPv4 address, assignment
+        # and netmask live under the nested .IPv4Configuration object, not on the top level.
         Connect-SfosFirewall -Firewall "192.168.1.1" -Credential (Get-Credential) -SkipCertificateCheck
-        Get-SfosInterface | Format-Table Name, NetworkZone, IPv4Assignment, IPAddress, Netmask
+        Get-SfosInterface | Format-Table Name, NetworkZone,
+            @{n='Assignment';e={$_.IPv4Configuration.Assignment}},
+            @{n='IPAddress'; e={$_.IPv4Configuration.IPAddress}},
+            @{n='Netmask';   e={$_.IPv4Configuration.Netmask}}
 
         .EXAMPLE
         # Add a VLAN on a physical port
@@ -58,7 +62,7 @@
         - Sophos SFOS 22.0
         - Sophos XGS Firewall Series
 
-        Total Functions: 119 (100 exported, 19 internal helpers)
+        Total Functions: 117 (100 exported, 17 internal helpers)
 
         These cmdlets change the network configuration of a live appliance. A wrong address,
         zone or gateway can make the firewall unreachable, and the API is then no longer

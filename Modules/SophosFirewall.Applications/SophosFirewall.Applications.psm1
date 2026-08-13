@@ -2437,8 +2437,7 @@ between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session f
     None. Throws an exception if the update fails.
 
 .EXAMPLE
-    Add-SfosApplicationFilterCategoryMember -Name 'Mobile Applications' -Application 'Instagram' `
-        -QoSPolicy 'Streaming Video - Limit to SD Quality'
+    Add-SfosApplicationFilterCategoryMember -Name 'Mobile Applications' -Application 'Instagram' -QoSPolicy 'Streaming Video - Limit to SD Quality'
 
 .NOTES
     Minimum supported PowerShell version: 5.1

@@ -1,6 +1,6 @@
-# Sophos Firewall PowerShell Module Suite
+﻿# Sophos Firewall PowerShell Module Suite
 
-PowerShell module collection for Sophos XGS/SFOS firewall management. Eleven modules with 471
+PowerShell module collection for Sophos XGS/SFOS firewall management. Twelve modules with 492
 cmdlets are shipped; roughly nine further areas of the API are still open.
 
 ## Quick Start
@@ -60,8 +60,9 @@ before — existing scripts are unaffected.
 | **SophosFirewall.IntrusionPrevention** | 29 | IPS policies and rules, custom signatures, IPS switch, DoS settings and bypass rules, spoof prevention, trusted MACs |
 | **SophosFirewall.ActiveThreatResponse** | 10 | Sophos X-Ops threat feeds (ATP) with host/threat exceptions, third-party threat feeds |
 | **SophosFirewall.Applications** | 20 | Application filter policies and rules, application objects, categories with QoS assignment, classification assignments |
+| **SophosFirewall.SystemServices** | 21 | QoS (traffic shaping) policies, syslog servers, the system service daemon manager, High Availability, RED configuration |
 
-471 cmdlets in total. Every one of them was called against a live SFOS 22.0 appliance, not
+492 cmdlets in total. Every one of them was called against a live SFOS 22.0 appliance, not
 only against mocks — the firmware behaviour that differs from the vendor documentation is
 recorded in the `.NOTES` of the affected function and summarised in each module README.
 
@@ -84,10 +85,11 @@ state carry `ConfirmImpact = 'High'` and prompt unless `-Confirm:$false` is pass
 - [SophosFirewall.IntrusionPrevention README](Modules/SophosFirewall.IntrusionPrevention/README.md) - IPS, DoS and spoof prevention; enabling spoof prevention on the management zone can lock you out, read the warning first
 - [SophosFirewall.ActiveThreatResponse README](Modules/SophosFirewall.ActiveThreatResponse/README.md) - ATP / Sophos X-Ops threat feeds and third-party feeds; note the measured remove/update quirks
 - [SophosFirewall.Applications README](Modules/SophosFirewall.Applications/README.md) - Application control; several rule-list fields are computed server-side, read the known behaviour section first
+- [SophosFirewall.SystemServices README](Modules/SophosFirewall.SystemServices/README.md) - QoS/traffic shaping, syslog, the service daemon manager, HA and RED; the daemon manager only starts/stops/restarts, and HA/RED are documentation-faithful without the hardware
 
 ## Key Features
 
-- 471 functions covering eleven of roughly twenty API areas
+- 492 functions covering twelve of roughly twenty API areas
 - PowerShell 5.1 and 7.x
 - Session management: connect once, use every module
 - Pipeline support between cmdlets

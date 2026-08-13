@@ -21,6 +21,7 @@ on:
           - SophosFirewall.IntrusionPrevention
           - SophosFirewall.ActiveThreatResponse
           - SophosFirewall.Applications
+          - SophosFirewall.SystemServices
       dryRun:
         description: 'Dry run (do not actually publish)'
         required: true
@@ -68,7 +69,8 @@ jobs:
               'SophosFirewall.VPN',
               'SophosFirewall.IntrusionPrevention',
               'SophosFirewall.ActiveThreatResponse',
-              'SophosFirewall.Applications'
+              'SophosFirewall.Applications',
+              'SophosFirewall.SystemServices'
             )
           } else {
             $order = @($selected)

@@ -1,6 +1,6 @@
 ﻿@{
     RootModule           = 'SophosFirewall.Network.psm1'
-    ModuleVersion        = '1.1.0'
+    ModuleVersion        = '1.3.1'
     GUID                 = 'c0ed538a-3f1f-4dbb-9f42-672fb8f40f4c'
     Author               = 'Jan Weis'
     Description          = 'PowerShell module for managing the network configuration of Sophos XGS / SFOS 22.0 firewalls via API: interfaces, VLANs, zones, gateways, DNS, DHCP, ARP and tunnels.'
@@ -10,7 +10,7 @@
     RequiredModules      = @(
         @{
             ModuleName    = 'SophosFirewall.Core'
-            ModuleVersion = '1.3.0'
+            ModuleVersion = '1.3.1'
         }
     )
 
@@ -126,6 +126,7 @@
             Tags         = @('Sophos', 'Firewall', 'API', 'XGS', 'SFOS', 'Network', 'DNS', 'DHCP', 'VLAN', 'Security')
             LicenseUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/blob/main/Modules/SophosFirewall.Network/LICENSE.txt'
             ProjectUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/tree/main/Modules/SophosFirewall.Network'
+            ReleaseNotes = 'Documentation revised for production use: rewritten cmdlet help, module description and README.'
         }
     }
 }

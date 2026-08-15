@@ -1,6 +1,6 @@
 ﻿@{
     RootModule           = 'SophosFirewall.Web.psm1'
-    ModuleVersion        = '1.1.0'
+    ModuleVersion        = '1.3.1'
     GUID                 = '77a63a21-54db-4f49-a7c7-632f520bd61b'
     Author               = 'Jan Weis'
     Description          = 'PowerShell module for managing the web protection area of Sophos XGS / SFOS 22.0 firewalls via API.'
@@ -10,7 +10,7 @@
     RequiredModules      = @(
         @{
             ModuleName    = 'SophosFirewall.Core'
-            ModuleVersion = '1.3.0'
+            ModuleVersion = '1.3.1'
         }
     )
 
@@ -75,9 +75,10 @@
 
     PrivateData          = @{
         PSData = @{
-            Tags       = @('Sophos', 'Firewall', 'API', 'XGS', 'SFOS', 'Web', 'WebFilter', 'Security')
-            LicenseUri = 'https://github.com/janweis/SophosFirewall-PowerShell/blob/main/Modules/SophosFirewall.Web/LICENSE.txt'
-            ProjectUri = 'https://github.com/janweis/SophosFirewall-PowerShell/tree/main/Modules/SophosFirewall.Web'
+            Tags         = @('Sophos', 'Firewall', 'API', 'XGS', 'SFOS', 'Web', 'WebFilter', 'Security')
+            LicenseUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/blob/main/Modules/SophosFirewall.Web/LICENSE.txt'
+            ProjectUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/tree/main/Modules/SophosFirewall.Web'
+            ReleaseNotes = 'Documentation revised for production use: rewritten cmdlet help, module description and README.'
         }
     }
 }

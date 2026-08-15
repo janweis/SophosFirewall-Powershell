@@ -1,6 +1,6 @@
 ﻿@{
     RootModule           = 'SophosFirewall.Core.psm1'
-    ModuleVersion        = '1.3.0'
+    ModuleVersion        = '1.3.1'
     GUID                 = 'cf0350d0-30af-4cd9-ae9e-8eb43356718d'
     Author               = 'Jan Weis'
     Description          = 'Core helper functions for Sophos Firewall API modules. Provides session management, API communication, XML escaping, and response validation.'
@@ -25,9 +25,10 @@
     
     PrivateData          = @{
         PSData = @{
-            Tags       = @('Sophos', 'Firewall', 'XGS', 'SFOS', 'API', 'Core', 'Helper')
-            LicenseUri = 'https://github.com/janweis/SophosFirewall-PowerShell/blob/main/Modules/SophosFirewall.Core/LICENSE.txt'
-            ProjectUri = 'https://github.com/janweis/SophosFirewall-PowerShell/tree/main/Modules/SophosFirewall.Core'
+            Tags         = @('Sophos', 'Firewall', 'XGS', 'SFOS', 'API', 'Core', 'Helper')
+            LicenseUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/blob/main/Modules/SophosFirewall.Core/LICENSE.txt'
+            ProjectUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/tree/main/Modules/SophosFirewall.Core'
+            ReleaseNotes = 'Documentation revised for production use: rewritten cmdlet help, module description and README.'
         }
     }
 }

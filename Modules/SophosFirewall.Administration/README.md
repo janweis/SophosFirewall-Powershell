@@ -36,11 +36,15 @@ Read the Known Limitations section below before using
 - **Appliance Access**: `Get-`/`Set-SfosApplianceAccess` for the zone-per-service
   matrix that controls which zones may reach HTTPS, SSH, the captive portal
   and 11 other management services
-- **Admin Settings**: `Get-SfosAdminSettings` plus six focused `Set-*`
+- **Admin Settings**: `Get-SfosAdminSettings` plus five focused single-block `Set-*`
   cmdlets - `Set-SfosWebAdminSettings`, `Set-SfosLoginSecurity`,
-  `Set-SfosAdminPasswordComplexity`, `Set-SfosLoginDisclaimer`,
-  `Set-SfosHostname`, `Set-SfosDefaultLanguage` - each reading and resending
-  the whole six-block singleton, changing only its own block
+  `Set-SfosAdminPasswordComplexity`, `Set-SfosLoginDisclaimer`, `Set-SfosHostname` -
+  each writing only its own block of the AdminSettings singleton (HTTPSport and the
+  other blocks are never resent)
+- **Factory reset**: `Reset-SfosToFactoryDefaults` - the AdminSettings singleton also
+  carries a misleadingly-named `DefaultConfigurationLanguage` field that is in fact a
+  **factory reset** (web admin: Backup & firmware > Firmware); the cmdlet is named for
+  what it does, carries `ConfirmImpact = High`, and is documented in Known Limitations
 - **Local Service ACL**: `Get-`/`New-`/`Set-`/`Remove-SfosLocalServiceACL`
   for rules controlling which zones/source hosts may reach which management
   services (`New`/`Set`/`Remove` are UNCONFIRMED - never executed live, see
@@ -113,7 +117,9 @@ Get-SfosAdminSettings
 Set-SfosLoginDisclaimer -LoginDisclaimer 'Enable'
 Set-SfosAdminPasswordComplexity -MinimumPasswordLengthValue 12
 Set-SfosHostname -HostNameDesc 'Lab firewall'
-Set-SfosDefaultLanguage -DefaultConfigurationLanguage 'English'
+# DANGER: Reset-SfosToFactoryDefaults WIPES the appliance to factory defaults - it is NOT a
+# language setting despite the API field name. Prompts unless -Confirm:$false. Left commented out.
+# Reset-SfosToFactoryDefaults -DefaultLanguage German
 
 Get-SfosLocalServiceACL
 # UNCONFIRMED - never executed live, see Known Limitations before using these cmdlets.
@@ -148,7 +154,7 @@ Get-SfosLocalServiceACL
 | `Set-SfosAdminPasswordComplexity` | Updates the admin password complexity policy |
 | `Set-SfosLoginDisclaimer` | Updates the admin login disclaimer toggle |
 | `Set-SfosHostname` | Updates the appliance hostname/description |
-| `Set-SfosDefaultLanguage` | Updates the default configuration language |
+| `Reset-SfosToFactoryDefaults` | **FACTORY-RESETS the appliance** (the API's `DefaultConfigurationLanguage` field is a factory reset, not a language setting); ConfirmImpact High |
 | `Get-SfosLocalServiceACL` | Reads Local Service ACL rules |
 | `New-SfosLocalServiceACL` | Creates a Local Service ACL rule (UNCONFIRMED) |
 | `Set-SfosLocalServiceACL` | Updates a Local Service ACL rule (UNCONFIRMED) |
@@ -232,22 +238,20 @@ Get-SfosLocalServiceACL
   `/Response/DefaultConfigurationLanguage/Status` - one independent status
   per block, even though a single request only ever changes one block. Every
   `Set-*` in this region asserts against its own block's path.
-- **Unresolved incident, 2026-08-14**: the one live AdminSettings write
-  attempted this session -
-  `Set-SfosAdminPasswordComplexity -MinimumPasswordLengthValue 11` against
-  the lab baseline of `10` - was accepted by the firewall (all six blocks
-  answered code 200), and the firewall then stopped responding to any
-  further request (including a plain `Get-SfosAdminSettings`) and remained
-  unreachable (no ping, no TCP on port 4444) for the rest of the session.
-  Whether this write caused the outage was not established. Consequences:
-  `-MinimumPasswordLengthValue` was **not** reverted to `10` on the lab
-  firewall, and `Set-SfosLoginDisclaimer`, `Set-SfosHostname` and
-  `Set-SfosDefaultLanguage` - otherwise low-risk and intended to be
-  live-tested in the same session - were never executed at all. Their
-  request XML follows the same structure the one executed call used and
-  their status path was measured on that call, but none of the three has
-  been run itself. Do not treat this incident as resolved; investigate
-  appliance reachability before any further write to this firewall.
+- **Root cause of the AdminSettings outages (RESOLVED)**: the early
+  full-object AdminSettings writes resent the whole singleton, including its
+  `<DefaultConfigurationLanguage>` element. That element is not a language
+  setting - despite the API field name it is a **factory reset** (web admin:
+  Backup & firmware > Firmware, "reset to factory settings with the default
+  language"). Every such write therefore factory-reset the lab appliance,
+  which is why it went unreachable and needed a snapshot each time. Two fixes
+  followed: (1) every `Set-*` in this region is now a single-block write that
+  sends only its own block, so it never resends the factory-reset field -
+  `Set-SfosLoginDisclaimer` and `Set-SfosHostname` are since live-confirmed to
+  change only their block and leave HTTPSport untouched; (2) the factory-reset
+  field is exposed only as `Reset-SfosToFactoryDefaults` (ConfirmImpact High),
+  named for what it does. `Set-SfosAdminPasswordComplexity` is now a safe
+  single-block write.
 - **`New-`/`Set-`/`Remove-SfosLocalServiceACL` were never executed against a
   live firewall.** This entity has no documentation page anywhere in the
   SFOS 22.0 API menu, though a field shape for it (`RuleName`, `Services`

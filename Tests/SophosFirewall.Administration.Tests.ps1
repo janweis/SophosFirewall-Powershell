@@ -75,8 +75,9 @@ Describe 'Module Loading' {
             'Get-SfosSNMPCommunity', 'Get-SfosSNMPv3User', 'Get-SfosTime',
             'New-SfosLocalServiceACL', 'New-SfosSNMPCommunity', 'New-SfosSNMPv3User',
             'Remove-SfosLocalServiceACL', 'Remove-SfosSNMPCommunity',
-            'Remove-SfosSNMPv3User', 'Set-SfosAdminPasswordComplexity', 'Set-SfosApplianceAccess',
-            'Set-SfosDefaultLanguage', 'Set-SfosHostname', 'Set-SfosLocalServiceACL',
+            'Remove-SfosSNMPv3User', 'Reset-SfosToFactoryDefaults',
+            'Set-SfosAdminPasswordComplexity', 'Set-SfosApplianceAccess',
+            'Set-SfosHostname', 'Set-SfosLocalServiceACL',
             'Set-SfosLoginDisclaimer', 'Set-SfosLoginSecurity', 'Set-SfosMessages',
             'Set-SfosNotification', 'Set-SfosSNMPAgentConfiguration', 'Set-SfosSNMPCommunity',
             'Set-SfosSNMPv3User', 'Set-SfosTime', 'Set-SfosWebAdminSettings'

@@ -3467,7 +3467,7 @@ function Set-SfosApplianceAccess {
     Set-SfosHostname
 
 .LINK
-    Set-SfosDefaultLanguage
+    Reset-SfosToFactoryDefaults
 #>
 function Get-SfosAdminSettings {
     # PSUseSingularNouns is suppressed on purpose: AdminSettings is the Sophos API's own
@@ -4285,30 +4285,30 @@ function Set-SfosHostname {
 
 <#
 .SYNOPSIS
-    Updates the default configuration language on the Sophos Firewall.
+    FACTORY-RESETS the Sophos Firewall to defaults, keeping the chosen language as the default.
 
 .DESCRIPTION
-    Updates the DefaultConfigurationLanguage field of the AdminSettings singleton (SYSTEM >
-    Administration > Settings) using the Sophos Firewall XML API. AdminSettings is a
-    partial-update singleton (see the region header): the request carries only this one
-    field, never any of the other five blocks - no read of the current settings is needed,
-    since DefaultConfigurationLanguage has no sibling field to preserve. Supports
-    ShouldProcess; use -WhatIf to preview.
+    WARNING: THIS WIPES THE APPLIANCE. The underlying API field is misleadingly named
+    DefaultConfigurationLanguage, but the operation is not a language setting - in the web admin
+    it lives under Backup & firmware > Firmware as "reset to factory settings with the default
+    language", and it resets the device to factory defaults, keeping only the supplied language
+    as the new default. Established the hard way: run live against the lab appliance, it wiped
+    the firewall (long outage, recovered only from a snapshot).
 
-    A safe write: this block does not touch HTTPSport, BlockLogin or any other access-gating
-    field. Like every AdminSettings write it may cause a brief management-service restart (see
-    Set-SfosTime's -TimeZone note for the same, measured, effect on a different singleton).
+    Carries ConfirmImpact = High, so it prompts for confirmation unless -Confirm:$false is
+    passed. Never run this against an appliance you are not deliberately factory-resetting. The
+    request is a single-block AdminSettings update; nothing else is sent.
 
-.PARAMETER DefaultConfigurationLanguage
-    Default configuration language, e.g. 'German' or 'English'. No documentation page exists
-    for this field and the full set of accepted values is unconfirmed - see the region header.
+.PARAMETER DefaultLanguage
+    The language the reset appliance comes back up in. Documented values: English, German,
+    French, Italian, Spanish, Russian, Japanese, Korean, Hindi, Brazilian-Portuguese,
+    Chinese-Simplified, Chinese-Traditional.
 
 .PARAMETER Session
     A session object returned by Connect-SfosFirewall, or the name of a session
     registered with Connect-SfosFirewall -Name. Overrides the stored default
     connection context; any of -Firewall/-Port/-Username/-Password/
-    -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-    between firewalls, e.g. Get-SfosAdminSettings -Session $fw1 | Set-SfosDefaultLanguage -Session fw2.
+    -SkipCertificateCheck supplied explicitly still wins over it.
 
 .PARAMETER Firewall
     Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
@@ -4329,23 +4329,18 @@ function Set-SfosHostname {
     None. Throws an exception if the update fails.
 
 .EXAMPLE
-    # Switch the default configuration language to English
-    Set-SfosDefaultLanguage -DefaultConfigurationLanguage 'English'
+    # Factory-reset the appliance, coming back up in German. Prompts for confirmation.
+    Reset-SfosToFactoryDefaults -DefaultLanguage German
 
 .NOTES
     Minimum supported PowerShell version: 5.1
-    Refactored to a one-block write - see the region header and Set-SfosLoginDisclaimer's
-    .NOTES for the measurement that made this a one-block write (this cmdlet's field was not
-    itself the one measured, but shares the same request shape and the same measured
-    flat-per-block status path). Touches no access-gating field (HTTPSport and the other
-    blocks are preserved - verified live). BUT [measured]: changing the language triggers a
-    management-interface restart, exactly like Set-SfosTime -TimeZone - the call itself times
-    out client-side while the appliance rebuilds the web admin in the new language, and the
-    firewall answers again some time later with the change applied. It is not a lock-out (the
-    access fields are untouched) and it recovers on its own, but a caller should expect the
-    call to throw a timeout and poll before treating it as failed. No ValidateSet is applied -
-    no documentation page exists for this field, so the full set of accepted values is
-    unconfirmed.
+    [measured] This is a FACTORY RESET, not a language change - established the hard way by
+    running it against the lab appliance and watching the firewall wipe itself (repeated long
+    outages, each recovered only from a snapshot). The vendor doc labels the field "default
+    configuration language", which is dangerously misleading; the web admin's own label (Backup
+    & firmware > Firmware, "reset to factory settings with the default language") is the truth.
+    The request is a single-block AdminSettings update carrying <DefaultConfigurationLanguage>;
+    the status lands flat at /Response/DefaultConfigurationLanguage/Status.
 
 .LINK
     https://docs.sophos.com/nsg/sophos-firewall/22.0/API/
@@ -4353,11 +4348,13 @@ function Set-SfosHostname {
 .LINK
     Get-SfosAdminSettings
 #>
-function Set-SfosDefaultLanguage {
-    [CmdletBinding(SupportsShouldProcess)]
+function Reset-SfosToFactoryDefaults {
+    [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
     param(
         [Parameter(Mandatory)]
-        [string]$DefaultConfigurationLanguage,
+        [ValidateSet('English', 'German', 'French', 'Italian', 'Spanish', 'Russian', 'Japanese',
+            'Korean', 'Hindi', 'Brazilian-Portuguese', 'Chinese-Simplified', 'Chinese-Traditional')]
+        [string]$DefaultLanguage,
 
         [string]$Firewall,
         [int]$Port,
@@ -4370,14 +4367,14 @@ function Set-SfosDefaultLanguage {
 
     $params = Resolve-SfosParameters -BoundParameters $PSBoundParameters
 
-    if (-not $PSCmdlet.ShouldProcess("AdminSettings DefaultConfigurationLanguage on $($params.Firewall)", 'Update')) {
+    if (-not $PSCmdlet.ShouldProcess($params.Firewall, "FACTORY-RESET the appliance to defaults (language '$DefaultLanguage')")) {
         return
     }
 
     $inner = @"
 <Set operation="update">
   <AdminSettings>
-    <DefaultConfigurationLanguage>$(ConvertTo-SfosXmlEscaped -Text $DefaultConfigurationLanguage)</DefaultConfigurationLanguage>
+    <DefaultConfigurationLanguage>$(ConvertTo-SfosXmlEscaped -Text $DefaultLanguage)</DefaultConfigurationLanguage>
   </AdminSettings>
 </Set>
 "@
@@ -4390,7 +4387,7 @@ function Set-SfosDefaultLanguage {
             -InnerXml $inner -SkipCertificateCheck:$params.SkipCertificateCheck -ErrorAction Stop
     }
     catch {
-        throw "Failed to update AdminSettings DefaultConfigurationLanguage: $($_.Exception.Message)"
+        throw "Failed to factory-reset the appliance: $($_.Exception.Message)"
     }
 
     $XmlResponse = [xml]$response.Content

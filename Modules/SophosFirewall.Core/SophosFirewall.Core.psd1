@@ -1,4 +1,4 @@
-@{
+﻿@{
     RootModule           = 'SophosFirewall.Core.psm1'
     ModuleVersion        = '1.3.0'
     GUID                 = 'cf0350d0-30af-4cd9-ae9e-8eb43356718d'
@@ -25,88 +25,9 @@
     
     PrivateData          = @{
         PSData = @{
-            Tags         = @('Sophos', 'Firewall', 'XGS', 'SFOS', 'API', 'Core', 'Helper')
-            LicenseUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/blob/main/Modules/SophosFirewall.Core/LICENSE.txt'
-            ProjectUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/tree/main/Modules/SophosFirewall.Core'
-            ReleaseNotes = @'
-Version 1.3.0 (2026-08-12)
-Multi-session support. The exported surface grows by one function; every existing
-call site is unaffected.
-
-- New Get-SfosSession cmdlet lists registered named sessions (Firewall, Port,
-  Username, SkipCertificateCheck, IsDefault - the Password is not exposed), or
-  one specific session with -Name.
-- Connect-SfosFirewall gains -Name (registers the connection in a session
-  registry, case-insensitive lookup) and -NoDefault (keeps the current default
-  session instead of replacing it with this one; a no-op without -Name, since
-  there would be no other way to reach the connection again). The returned
-  object's shape is unchanged - still Firewall/Port/Username/Password/
-  SkipCertificateCheck, no Name property, so it still splats cleanly - and now
-  carries the PSTypeName 'SophosFirewall.Session'.
-- Disconnect-SfosFirewall gains -Name, -Session (pipeline-capable) and -All.
-  Called with no parameters it behaves exactly as before.
-- Resolve-SfosParameters recognises a 'Session' key in -BoundParameters: when a
-  calling cmdlet has its own -Session parameter and it was bound - even to
-  $null - that session becomes the base for parameter resolution instead of the
-  default session, and an explicit -Session $null disables the fallback to the
-  default session rather than silently keeping it. Callers that do not pass a
-  'Session' key are unaffected.
-- Invoke-SfosApi gains an additional 'Session' parameter set for raw
-  multi-session work; the existing explicit-parameter set is unchanged and
-  stays the default.
-
-Version 1.2.0 (2026-08-12)
-Hardening for production use. The exported surface is unchanged.
-
-- New -TimeoutSec parameter on Invoke-SfosApi (default 30, identical on PS
-  5.1 and PS 7+). An unreachable host previously blocked for the operating
-  system's own default with no way for a caller to shorten it. Pass 0 to
-  fall back to Invoke-WebRequest's own default.
-- Assert-SfosApiReturnSuccess no longer fails open when a status node exists
-  but sits outside the path derived from -ObjectName. Measured against
-  New-SfosL2TPConnection, whose create/update status landed flat at
-  /Response/Configuration/Status: the lookup found nothing at the expected
-  path and the function used to just return, reporting success for a write
-  that may have failed. It now searches the rest of the response once for
-  any node the existing status heuristic still recognises, throws on an
-  error code found that way (naming the path deviation, so -ObjectName can
-  be corrected), and warns on a success code found that way. A response
-  with genuinely no status anywhere behaves exactly as before.
-
-Version 1.1.0 (2026-08-11)
-Correctness fixes measured against a live SFOS 22.0 appliance. The exported
-surface is unchanged, so no caller has to be adapted, but the behaviour of
-existing calls changes for the better. Upgrading is strongly recommended:
-1.0.0 can report success for operations that never happened.
-
-- A failed login is no longer read as success. SFOS answers a bad login with
-  HTTP 200 and a lowercase <status> under <Login>, which matches neither
-  status path - so every write reported success while the firewall did
-  nothing. Checked now before the response is parsed.
-- The request body is URL-encoded. Sent unencoded, any "&" - including every
-  "&amp;" produced by XML escaping - made the firewall answer 529 Invalid XML
-  request.
-- Web requests use -UseBasicParsing. Without it every call failed under
-  Windows PowerShell 5.1 on hosts without the Internet Explorer engine.
-- Status evaluation follows the documented table: 200 and 216 are success,
-  201/203/211-215 succeed with a warning, 204-210 and 500-599 fail. There is
-  no code 202. The undocumented 217 and 222 warn; the rest of the 217-499 gap
-  still fails, because failing open is worse than a false alarm.
-- A response with no recognisable status is an error, not success. Only the
-  exact wording "No. of records Zero." counts as an empty result - a code-less
-  "Transaction fail" used to pass as "nothing found".
-- One status object per <Status> node instead of a collapsed string, and the
-  node is located by XPath rather than by property access.
-- SecureString conversion uses PtrToStringBSTR, which does not truncate.
-- The process-wide certificate callback used under PS 5.1 is restored in a
-  finally block and guarded by a lock, so parallel runspaces cannot leave
-  validation permanently disabled.
-- New -ApiVersion parameter on Invoke-SfosApi for callers that need a specific
-  schema; omitted, the appliance uses its active firmware version.
-
-Version 1.0.0 (2025-12-31)
-- Initial release
-'@
+            Tags       = @('Sophos', 'Firewall', 'XGS', 'SFOS', 'API', 'Core', 'Helper')
+            LicenseUri = 'https://github.com/janweis/SophosFirewall-PowerShell/blob/main/Modules/SophosFirewall.Core/LICENSE.txt'
+            ProjectUri = 'https://github.com/janweis/SophosFirewall-PowerShell/tree/main/Modules/SophosFirewall.Core'
         }
     }
 }

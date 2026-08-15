@@ -1,4 +1,4 @@
-@{
+﻿@{
     RootModule           = 'SophosFirewall.SystemServices.psm1'
     ModuleVersion        = '1.0.0'
     GUID                 = 'ffcaa7e6-5e2d-4e98-978a-86b487ce8d35'
@@ -47,7 +47,6 @@
             Tags         = @('Sophos', 'Firewall', 'API', 'XGS', 'SFOS', 'SystemServices', 'QoS', 'TrafficShaping', 'Syslog', 'HA', 'RED')
             LicenseUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/blob/main/Modules/SophosFirewall.SystemServices/LICENSE.txt'
             ProjectUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/tree/main/Modules/SophosFirewall.SystemServices'
-            ReleaseNotes = 'Initial release of the SystemServices module for Sophos Firewall API management. Includes the -Session parameter on every cmdlet (requires SophosFirewall.Core 1.3.0).'
         }
     }
 }

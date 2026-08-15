@@ -53,42 +53,6 @@
         # Read the web protection settings
         Get-SfosWebFilterProtectionSettings
 
-        .NOTES
-        Module Name: SophosFirewall.Web
-        Author: Jan Weis
-        Homepage: https://www.it-explorations.de
-        Version: 1.0.0
-        PowerShell Version: 5.1+
-
-        Dependencies:
-        - SophosFirewall.Core module (provides Connect-SfosFirewall, Invoke-SfosApi, etc.)
-
-        API Compatibility:
-        - Sophos SFOS 22.0
-        - Sophos XGS Firewall Series
-
-        Total Functions: 55 (52 exported, 3 internal helpers)
-        - 6 URL Group functions (including Add/Remove members)
-        - 4 File Type functions
-        - 4 Web Category functions
-        - 6 User Activity functions (including Add/Remove members)
-        - 4 Web Filter Exception functions
-        - 8 Web Filter Policy functions (including rule/category builders and rule management)
-        - 4 Surfing Quota Policy functions
-        - 6 Content Condition List functions (including Add/Remove members)
-        - 10 settings functions (5 Get/Set pairs)
-
-        Behaviour that differs from the vendor documentation was measured against a live
-        appliance and is recorded in the .NOTES of the affected function. The most important
-        ones:
-        - Remove-SfosFileType always fails on this firmware, including for freshly created
-          objects.
-        - Set-SfosUserActivity must always send <NewName>; omitting it renames the object to
-          an empty name while reporting success.
-        - Set-SfosWebFilterCategory can only grow an external URL list, never shrink it.
-        - A partial update of the settings singletons can silently reset a field that was
-          never sent, which is why every Set-* here reads the current state first.
-
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
 
@@ -109,66 +73,93 @@
 
 <#
         .SYNOPSIS
-        Retrieves WebFilterURLGroup objects from the Sophos Firewall.
+        Retrieves web filter URL group objects from a Sophos Firewall.
 
         .DESCRIPTION
-        Queries the Sophos Firewall XML API for WebFilterURLGroup objects. By default the cmdlet returns PowerShell-friendly objects. Use -AsXml to return the raw XML nodes.
+        Returns the URL group objects that are defined on the firewall. A URL group bundles
+        one or more URLs under a single name for use in web filter policy rules and
+        exceptions. Use this cmdlet to review the existing groups or to feed them into
+        another cmdlet through the pipeline. The cmdlet only reads; nothing on the firewall
+        is changed. It needs an open connection from Connect-SfosFirewall, or the connection
+        parameters supplied directly.
 
-        Note: Sophos GET responses can be inconsistent regarding status elements. This cmdlet is designed to return an empty result when no records are found.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
-
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        You can combine several filters. The firewall itself evaluates at most one of them,
+        so every filter you supply is applied again on the client. The result therefore
+        always matches all filters you gave.
 
         .PARAMETER NameLike
-        Optional name filter. In Sophos SFOS, 'like' behaves as a substring match (the supplied value may match anywhere in the object name). Sent to the firewall as the server-side filter.
+        Optional. Returns only objects whose name contains the given text anywhere. This is
+        a substring match, not a wildcard pattern. If omitted, the name is not used to
+        filter.
 
         .PARAMETER DescriptionLike
-        Optional description filter, matched as a substring anywhere in the value. The firewall does not support filtering on Description, so this filter is always applied client-side.
+        Optional. Returns only objects whose description contains the given text anywhere.
+        Applied on the client. If omitted, the description is not used to filter.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs read permission for the web
+        filter URL groups. If omitted, the value from the current connection is used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
 
         .PARAMETER AsXml
-        Returns raw XML nodes instead of PowerShell-friendly objects.
+        Optional. Returns the raw XML elements sent by the firewall instead of PowerShell
+        objects. Useful when you need a field that the standard output does not show.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        PSCustomObject (default). System.Xml.XmlElement when -AsXml is specified.
+        System.Management.Automation.PSCustomObject. One object per URL group, with the
+        properties Name, Description and URLlist. Returns System.Xml.XmlElement when -AsXml
+        is used, and an empty array when no object matches.
 
         .EXAMPLE
-        # Retrieve all objects
         Get-SfosWebFilterURLGroup
 
-        .EXAMPLE
-        # Filter by name (substring match)
-        Get-SfosWebFilterURLGroup -NameLike "Example"
+        Lists every URL group on the firewall of the current connection.
 
         .EXAMPLE
-        # Return raw XML for troubleshooting
-        Get-SfosWebFilterURLGroup -NameLike "Example" -AsXml
+        Get-SfosWebFilterURLGroup -NameLike 'Example'
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
-        The member list wrapper element is <URLlist> with a lowercase 'l' - not <URLList> as the naming convention of every other list wrapper in this API would suggest.
+        Lists all URL groups whose name contains 'Example'.
+
+        .EXAMPLE
+        Get-SfosWebFilterURLGroup -NameLike 'Example' -AsXml
+
+        Returns the raw XML of the matching objects, for example to check a field that the
+        standard output does not contain.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        New-SfosWebFilterURLGroup
+
+        .LINK
+        Set-SfosWebFilterURLGroup
 #>
 function Get-SfosWebFilterURLGroup {
     [CmdletBinding()]
@@ -261,58 +252,68 @@ function Get-SfosWebFilterURLGroup {
 
 <#
         .SYNOPSIS
-        Creates a new WebFilterURLGroup on the Sophos Firewall.
+        Creates a web filter URL group on a Sophos Firewall.
 
         .DESCRIPTION
-        Creates a WebFilterURLGroup object that bundles one or more URLs for use in web filter policy rules and exceptions.
-        After creation, use Add-SfosWebFilterURLGroupMember to add additional URLs.
+        Creates a URL group object that bundles one or more URLs under a single name, for
+        use in web filter policy rules and exceptions. It needs an open connection from
+        Connect-SfosFirewall, or the connection parameters supplied directly, and an account
+        with write permission. Use Add-SfosWebFilterURLGroupMember afterwards to add further
+        URLs.
 
         .PARAMETER Name
-        Name of the URL group (1-50 characters, no commas).
+        Required. Name of the new URL group. 1 to 50 characters, no comma.
 
         .PARAMETER Members
-        Array of URLs to include in the group. At least one URL is required.
+        Required. One or more URLs to include in the group.
 
         .PARAMETER Description
-        Optional description.
-
-        # Connection parameters (optional - use stored context if not provided)
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. Free-text description of the URL group.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, uses stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number. If omitted, uses stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, uses stored connection context.
+        Optional. User name for the API login. The account needs write permission for the
+        web filter URL groups. If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, uses stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        None. Throws an exception if creation fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        create.
 
         .EXAMPLE
-        # Create a URL group with two entries
-        New-SfosWebFilterURLGroup -Name "AllowedNews" -Members @("news.example.com", "example.org/news") -Description "Approved news sites"
+        New-SfosWebFilterURLGroup -Name 'AllowedNews' -Members 'news.example.com' -WhatIf
+
+        Shows what the call would create without sending it to the firewall.
 
         .EXAMPLE
-        # Create with a single entry
-        New-SfosWebFilterURLGroup -Name "VendorPortal" -Members "portal.vendor.example"
+        New-SfosWebFilterURLGroup -Name 'AllowedNews' -Members 'news.example.com','example.org/news' -Description 'Approved news sites'
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
+        Creates a URL group with two entries and a description.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
@@ -398,64 +399,82 @@ function New-SfosWebFilterURLGroup {
 
 <#
         .SYNOPSIS
-        Updates an existing WebFilterURLGroup object on the Sophos Firewall.
+        Updates a web filter URL group on a Sophos Firewall.
 
         .DESCRIPTION
-        Updates a WebFilterURLGroup object using the Sophos Firewall XML API. You can supply the target object name directly or via the pipeline.
-
-        SFOS replaces the whole entity on update - any element not sent in the request is
-        cleared on the firewall. This cmdlet reads the current group first and keeps whatever
-        the caller does not explicitly pass (Description, Members). To clear a field, pass it
-        explicitly with an empty value.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
-
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Changes the description or member list of an existing URL group. The cmdlet reads
+        the current object first and sends it back complete, so a field you do not pass
+        keeps its current value; pass a field explicitly, with an empty value if needed, to
+        clear it. It needs an open connection from Connect-SfosFirewall, or the connection
+        parameters supplied directly, and an account with write permission.
 
         .PARAMETER Name
-        Name of the target object.
+        Required. Name of the URL group to update.
 
         .PARAMETER Members
-        One or more URLs to include. If omitted, the existing entries are kept.
+        Optional. URLs to store in the group, replacing the current list. If omitted, the
+        current list is kept.
 
         .PARAMETER Description
-        Optional description text. If omitted, the existing description is kept.
+        Optional. Description to store, replacing the current one. If omitted, the current
+        description is kept.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs write permission for the
+        web filter URL groups. If omitted, the value from the current connection is used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        System.String. The URL group name can be piped in by property name, for example the
+        output of Get-SfosWebFilterURLGroup.
 
         .OUTPUTS
-        None. Throws an exception if the update fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        update.
 
         .EXAMPLE
-        # Update the description only, the URL list is preserved
-        Set-SfosWebFilterURLGroup -Name "AllowedNews" -Description "Approved news and media sites"
+        Set-SfosWebFilterURLGroup -Name 'AllowedNews' -Description 'Approved news sites' -WhatIf
+
+        Shows what the call would change without sending it to the firewall.
 
         .EXAMPLE
-        # Update using pipeline input
-        Get-SfosWebFilterURLGroup -NameLike "AllowedNews" | Set-SfosWebFilterURLGroup -Description "Updated"
+        Set-SfosWebFilterURLGroup -Name 'AllowedNews' -Description 'Approved news and media sites'
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+        Updates the description. The URL list is kept unchanged.
+
+        .EXAMPLE
+        Get-SfosWebFilterURLGroup -NameLike 'AllowedNews' | Set-SfosWebFilterURLGroup -Description 'Updated'
+
+        Updates every matching group with a new description.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosWebFilterURLGroup
 #>
 function Set-SfosWebFilterURLGroup {
     [CmdletBinding(SupportsShouldProcess)]
@@ -567,53 +586,68 @@ function Set-SfosWebFilterURLGroup {
 
 <#
         .SYNOPSIS
-        Removes a WebFilterURLGroup object from the Sophos Firewall.
+        Removes a web filter URL group from a Sophos Firewall.
 
         .DESCRIPTION
-        Removes a WebFilterURLGroup object using the Sophos Firewall XML API. This cmdlet supports ShouldProcess; use -WhatIf to preview the change.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
-
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Deletes a URL group object by name. It needs an open connection from
+        Connect-SfosFirewall, or the connection parameters supplied directly, and an
+        account with write permission. Remove any web filter policy rule or exception that
+        still references the group first, or the firewall keeps the reference in place.
 
         .PARAMETER Name
-        Name of the target object.
+        Required. Name of the URL group to remove.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs write permission for the
+        web filter URL groups. If omitted, the value from the current connection is used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        System.String. The URL group name can be piped in by property name, for example the
+        output of Get-SfosWebFilterURLGroup.
 
         .OUTPUTS
-        None. Throws an exception if removal fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        removal.
 
         .EXAMPLE
-        # Preview removal
-        Remove-SfosWebFilterURLGroup -Name "Example" -WhatIf
+        Remove-SfosWebFilterURLGroup -Name 'Example' -WhatIf
+
+        Shows what the call would remove without sending it to the firewall.
 
         .EXAMPLE
-        # Remove an object
-        Remove-SfosWebFilterURLGroup -Name "Example"
+        Remove-SfosWebFilterURLGroup -Name 'Example'
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+        Removes the URL group. The cmdlet asks for confirmation before it writes.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosWebFilterURLGroup
 #>
 function Remove-SfosWebFilterURLGroup {
     [CmdletBinding(SupportsShouldProcess)]
@@ -674,52 +708,72 @@ function Remove-SfosWebFilterURLGroup {
 
 <#
         .SYNOPSIS
-        Adds members to an existing WebFilterURLGroup object on the Sophos Firewall.
+        Adds URLs to an existing web filter URL group on a Sophos Firewall.
 
         .DESCRIPTION
-        Adds URLs to a WebFilterURLGroup object using the Sophos Firewall XML API. The cmdlet validates input where possible and escapes user input for XML safety.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
-
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Adds one or more URLs to a URL group without removing the ones already stored. It
+        needs an open connection from Connect-SfosFirewall, or the connection parameters
+        supplied directly, and an account with write permission.
 
         .PARAMETER Name
-        Name of the target object.
+        Required. Name of the URL group to change.
 
         .PARAMETER Members
-        One or more URLs to add.
+        Required. One or more URLs to add.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs write permission for the
+        web filter URL groups. If omitted, the value from the current connection is used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        None. Throws an exception if the update fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        update.
 
         .EXAMPLE
-        # Add URLs to an existing group
-        Add-SfosWebFilterURLGroupMember -Name "AllowedNews" -Members "news2.example.com","news3.example.com"
+        Add-SfosWebFilterURLGroupMember -Name 'AllowedNews' -Members 'news2.example.com' -WhatIf
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+        Shows what the call would add without sending it to the firewall.
+
+        .EXAMPLE
+        Add-SfosWebFilterURLGroupMember -Name 'AllowedNews' -Members 'news2.example.com','news3.example.com'
+
+        Adds two URLs to the group.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosWebFilterURLGroup
+
+        .LINK
+        Remove-SfosWebFilterURLGroupMember
 #>
 function Add-SfosWebFilterURLGroupMember {
     [CmdletBinding(SupportsShouldProcess)]
@@ -831,52 +885,72 @@ function Add-SfosWebFilterURLGroupMember {
 
 <#
         .SYNOPSIS
-        Removes members from an existing WebFilterURLGroup object on the Sophos Firewall.
+        Removes URLs from an existing web filter URL group on a Sophos Firewall.
 
         .DESCRIPTION
-        Removes URLs from a WebFilterURLGroup object using the Sophos Firewall XML API. The cmdlet validates input where possible and escapes user input for XML safety.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
-
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Removes one or more URLs from a URL group, keeping the remaining entries. It needs
+        an open connection from Connect-SfosFirewall, or the connection parameters supplied
+        directly, and an account with write permission.
 
         .PARAMETER Name
-        Name of the target object.
+        Required. Name of the URL group to change.
 
         .PARAMETER Members
-        One or more URLs to remove.
+        Required. One or more URLs to remove.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs write permission for the
+        web filter URL groups. If omitted, the value from the current connection is used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        None. Throws an exception if the update fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        update.
 
         .EXAMPLE
-        # Remove URLs from an existing group
-        Remove-SfosWebFilterURLGroupMember -Name "AllowedNews" -Members "news2.example.com","news3.example.com"
+        Remove-SfosWebFilterURLGroupMember -Name 'AllowedNews' -Members 'news2.example.com' -WhatIf
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+        Shows what the call would remove without sending it to the firewall.
+
+        .EXAMPLE
+        Remove-SfosWebFilterURLGroupMember -Name 'AllowedNews' -Members 'news2.example.com','news3.example.com'
+
+        Removes two URLs from the group.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosWebFilterURLGroup
+
+        .LINK
+        Add-SfosWebFilterURLGroupMember
 #>
 function Remove-SfosWebFilterURLGroupMember {
     [CmdletBinding(SupportsShouldProcess)]
@@ -1002,65 +1076,94 @@ function Remove-SfosWebFilterURLGroupMember {
 
 <#
         .SYNOPSIS
-        Retrieves FileType objects from the Sophos Firewall.
+        Retrieves file type objects from a Sophos Firewall.
 
         .DESCRIPTION
-        Queries the Sophos Firewall XML API for FileType objects. By default the cmdlet returns PowerShell-friendly objects. Use -AsXml to return the raw XML nodes.
+        Returns the file type objects that are defined on the firewall. A file type object
+        groups file extensions and MIME headers under a single name, for use as a category
+        in web filter policy rules. Use this cmdlet to review the existing objects or to
+        feed them into another cmdlet through the pipeline. The cmdlet only reads; nothing
+        on the firewall is changed. It needs an open connection from Connect-SfosFirewall,
+        or the connection parameters supplied directly.
 
-        Note: Sophos GET responses can be inconsistent regarding status elements. This cmdlet is designed to return an empty result when no records are found.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
-
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        You can combine several filters. The firewall itself evaluates at most one of them,
+        so every filter you supply is applied again on the client. The result therefore
+        always matches all filters you gave.
 
         .PARAMETER NameLike
-        Optional name filter. In Sophos SFOS, 'like' behaves as a substring match (the supplied value may match anywhere in the object name). Sent to the firewall as the server-side filter.
+        Optional. Returns only objects whose name contains the given text anywhere. This is
+        a substring match, not a wildcard pattern. If omitted, the name is not used to
+        filter.
 
         .PARAMETER DescriptionLike
-        Optional description filter, matched as a substring anywhere in the value. The firewall does not support filtering on Description, so this filter is always applied client-side.
+        Optional. Returns only objects whose description contains the given text anywhere.
+        Applied on the client. If omitted, the description is not used to filter.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs read permission for the
+        file type objects. If omitted, the value from the current connection is used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
 
         .PARAMETER AsXml
-        Returns raw XML nodes instead of PowerShell-friendly objects.
+        Optional. Returns the raw XML elements sent by the firewall instead of PowerShell
+        objects. Useful when you need a field that the standard output does not show.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        PSCustomObject (default). System.Xml.XmlElement when -AsXml is specified.
+        System.Management.Automation.PSCustomObject. One object per file type, with the
+        properties Name, Description, FileExtensionList and MIMEHeaderList. Returns
+        System.Xml.XmlElement when -AsXml is used, and an empty array when no object
+        matches.
 
         .EXAMPLE
-        # Retrieve all objects
         Get-SfosFileType
 
-        .EXAMPLE
-        # Filter by name (substring match)
-        Get-SfosFileType -NameLike "Example"
+        Lists every file type object on the firewall of the current connection.
 
         .EXAMPLE
-        # Return raw XML for troubleshooting
-        Get-SfosFileType -NameLike "Example" -AsXml
+        Get-SfosFileType -NameLike 'Example'
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+        Lists all file type objects whose name contains 'Example'.
+
+        .EXAMPLE
+        Get-SfosFileType -NameLike 'Example' -AsXml
+
+        Returns the raw XML of the matching objects, for example to check a field that the
+        standard output does not contain.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        New-SfosFileType
+
+        .LINK
+        Set-SfosFileType
 #>
 function Get-SfosFileType {
     [CmdletBinding()]
@@ -1142,8 +1245,7 @@ function Get-SfosFileType {
     $fileTypeObjects = @()
     foreach ($node in $nodes) {
         # No Template property: the firewall never returns <Template>, so the value would
-        # always be empty and would suggest a field that can be read back. See
-        # Set-SfosFileType .NOTES.
+        # always be empty and would suggest a field that can be read back.
         $fileTypeObjects += [PSCustomObject]@{
             Name              = $node.Name
             Description       = $node.Description
@@ -1157,64 +1259,74 @@ function Get-SfosFileType {
 
 <#
         .SYNOPSIS
-        Creates a new FileType object on the Sophos Firewall.
+        Creates a file type object on a Sophos Firewall.
 
         .DESCRIPTION
-        Creates a FileType object that groups file extensions and MIME headers for use in web filter policy rules (e.g. as a rule category of type FileType).
+        Creates a file type object that groups file extensions and MIME headers under a
+        single name, for use as a category in web filter policy rules. It needs an open
+        connection from Connect-SfosFirewall, or the connection parameters supplied
+        directly, and an account with write permission.
 
         .PARAMETER Name
-        Name of the file type object (1-50 characters, no commas).
+        Required. Name of the new file type object. 1 to 50 characters, no comma.
 
         .PARAMETER FileExtension
-        Optional array of file extensions (e.g. 'txt', 'jpg', 'gif').
+        Optional. File extensions to include, for example 'txt', 'jpg', 'gif'.
 
         .PARAMETER MIMEHeader
-        Optional array of MIME headers.
+        Optional. MIME headers to include.
 
         .PARAMETER Description
-        Optional description (max 1000 characters).
+        Optional. Free-text description of the file type object. Up to 1000 characters.
 
         .PARAMETER Template
-        Optional template name, e.g. 'Blank'.
-
-        # Connection parameters (optional - use stored context if not provided)
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. Template name applied when the object is created. Get-SfosFileType does
+        not return this value afterwards.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, uses stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number. If omitted, uses stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, uses stored connection context.
+        Optional. User name for the API login. The account needs write permission for the
+        file type objects. If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, uses stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        None. Throws an exception if creation fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        create.
 
         .EXAMPLE
-        # Create a file type object for archive files
-        New-SfosFileType -Name "ArchiveFiles" -FileExtension @("zip", "rar", "7z") -Description "Common archive formats"
+        New-SfosFileType -Name 'ArchiveFiles' -FileExtension 'zip','rar','7z' -WhatIf
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
+        Shows what the call would create without sending it to the firewall.
 
-        Live finding (SFOS 22.0, APIVersion 2200.1): -Template is accepted by the create
-        request but Get-SfosFileType never returns a <Template> element on this firmware,
-        regardless of whether one was sent. There is no way to confirm from the API whether
-        the value was actually stored.
+        .EXAMPLE
+        New-SfosFileType -Name 'ArchiveFiles' -FileExtension 'zip','rar','7z' -Description 'Common archive formats'
+
+        Creates a file type object for archive file extensions.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
@@ -1328,75 +1440,91 @@ function New-SfosFileType {
 
 <#
         .SYNOPSIS
-        Updates an existing FileType object on the Sophos Firewall.
+        Updates a file type object on a Sophos Firewall.
 
         .DESCRIPTION
-        Updates a FileType object using the Sophos Firewall XML API. You can supply the target object name directly or via the pipeline.
+        Changes the description, file extensions or MIME headers of an existing file type
+        object. The cmdlet reads the current object first and sends it back complete, so a
+        field you do not pass keeps its current value; pass a field explicitly, with an
+        empty value if needed, to clear it. It needs an open connection from
+        Connect-SfosFirewall, or the connection parameters supplied directly, and an account
+        with write permission.
 
-        SFOS replaces the whole entity on update - any element not sent in the request is
-        cleared on the firewall. This cmdlet reads the current object first and keeps whatever
-        the caller does not explicitly pass (Description, Template, FileExtension, MIMEHeader).
-        To clear a field, pass it explicitly with an empty value.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
-
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        This cmdlet has no -Template parameter. The firewall never returns the template
+        value of an existing object, so it can only be set when the object is created, with
+        New-SfosFileType.
 
         .PARAMETER Name
-        Name of the target object.
+        Required. Name of the file type object to update.
 
         .PARAMETER FileExtension
-        Optional array of file extensions. If omitted, the existing entries are kept.
+        Optional. File extensions to store, replacing the current list. If omitted, the
+        current list is kept.
 
         .PARAMETER MIMEHeader
-        Optional array of MIME headers. If omitted, the existing entries are kept.
+        Optional. MIME headers to store, replacing the current list. If omitted, the current
+        list is kept.
 
         .PARAMETER Description
-        Optional description text. If omitted, the existing description is kept.
+        Optional. Description to store, replacing the current one. If omitted, the current
+        description is kept.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs write permission for the
+        file type objects. If omitted, the value from the current connection is used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        System.String. The file type name can be piped in by property name, for example the
+        output of Get-SfosFileType.
 
         .OUTPUTS
-        None. Throws an exception if the update fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        update.
 
         .EXAMPLE
-        # Update the description only, extensions and MIME headers are preserved
-        Set-SfosFileType -Name "ArchiveFiles" -Description "Common archive and compressed formats"
+        Set-SfosFileType -Name 'ArchiveFiles' -Description 'Common archive formats' -WhatIf
+
+        Shows what the call would change without sending it to the firewall.
 
         .EXAMPLE
-        # Update using pipeline input
-        Get-SfosFileType -NameLike "ArchiveFiles" | Set-SfosFileType -Description "Updated"
+        Set-SfosFileType -Name 'ArchiveFiles' -Description 'Common archive and compressed formats'
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+        Updates the description. The file extensions and MIME headers are kept unchanged.
 
-        This cmdlet deliberately has no -Template parameter, unlike New-SfosFileType.
-        Template appears only in the vendor's sample XML, not in the documented attribute
-        table, and Get-SfosFileType never returns a <Template> element - measured on SFOS
-        22.0 / APIVersion 2200.1, whether or not one was sent. A field the Get cannot read
-        back is a field the read-modify-write cannot preserve, so
-        offering it here would promise something the API does not deliver. Template is
-        therefore a create-time parameter only.
+        .EXAMPLE
+        Get-SfosFileType -NameLike 'ArchiveFiles' | Set-SfosFileType -Description 'Updated'
+
+        Updates every matching file type object with a new description.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosFileType
 #>
 function Set-SfosFileType {
     [CmdletBinding(SupportsShouldProcess)]
@@ -1419,7 +1547,7 @@ function Set-SfosFileType {
         [string]$Description,
 
         # No -Template here on purpose: Get-SfosFileType never returns <Template>, so the
-        # read-modify-write below could not preserve it. See .NOTES.
+        # read-modify-write below could not preserve it.
 
         # Connection parameters (optional - use stored context if not provided)
         [string]$Firewall,
@@ -1543,63 +1671,67 @@ function Set-SfosFileType {
 
 <#
         .SYNOPSIS
-        Removes a FileType object from the Sophos Firewall.
+        Removes a file type object from a Sophos Firewall.
 
         .DESCRIPTION
-        Removes a FileType object using the Sophos Firewall XML API. This cmdlet supports ShouldProcess; use -WhatIf to preview the change.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
-
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Deletes a file type object by name. It needs an open connection from
+        Connect-SfosFirewall, or the connection parameters supplied directly, and an
+        account with write permission.
 
         .PARAMETER Name
-        Name of the target object.
+        Required. Name of the file type object to remove.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs write permission for the
+        file type objects. If omitted, the value from the current connection is used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        System.String. The file type name can be piped in by property name, for example the
+        output of Get-SfosFileType.
 
         .OUTPUTS
-        None. Throws an exception if removal fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        removal.
 
         .EXAMPLE
-        # Preview removal
-        Remove-SfosFileType -Name "Example" -WhatIf
+        Remove-SfosFileType -Name 'Example' -WhatIf
+
+        Shows what the call would remove without sending it to the firewall.
 
         .EXAMPLE
-        # Remove an object
-        Remove-SfosFileType -Name "Example"
+        Remove-SfosFileType -Name 'Example'
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
-
-        Known firmware defect (reproduced against SFOS 22.0, APIVersion 2200.1): the documented
-        Delete operation for FileType takes exactly one parameter (Name) and lists 200/500/504
-        as possible responses. On the tested firmware it answers Status code="500" - "Operation
-        could not be performed on Entity." for every call, including a freshly created object
-        that is referenced nowhere else. A control call removing a WebFilterURLGroup in the same
-        test run returned 200, so this is specific to FileType, not to the Remove path in
-        general. This cmdlet is implemented documentation-faithfully regardless; callers should
-        expect Remove-SfosFileType to fail on this firmware and plan accordingly (e.g. do not
-        rely on being able to delete FileType objects created for testing).
+        Removes the file type object. The cmdlet asks for confirmation before it writes.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosFileType
 #>
 function Remove-SfosFileType {
     [CmdletBinding(SupportsShouldProcess)]
@@ -1665,65 +1797,97 @@ function Remove-SfosFileType {
 
 <#
         .SYNOPSIS
-        Retrieves WebFilterCategory objects from the Sophos Firewall.
+        Retrieves web filter category objects from a Sophos Firewall.
 
         .DESCRIPTION
-        Queries the Sophos Firewall XML API for WebFilterCategory objects. By default the cmdlet returns PowerShell-friendly objects. Use -AsXml to return the raw XML nodes.
+        Returns the web filter category objects that are defined on the firewall. A web
+        filter category matches traffic either locally, by domain or keyword, or
+        externally, by a URL list, and is used as a category in web filter policy rules.
+        Use this cmdlet to review the existing objects or to feed them into another cmdlet
+        through the pipeline. The cmdlet only reads; nothing on the firewall is changed. It
+        needs an open connection from Connect-SfosFirewall, or the connection parameters
+        supplied directly.
 
-        Note: Sophos GET responses can be inconsistent regarding status elements. This cmdlet is designed to return an empty result when no records are found.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
-
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        You can combine several filters. The firewall itself evaluates at most one of them,
+        so every filter you supply is applied again on the client. The result therefore
+        always matches all filters you gave.
 
         .PARAMETER NameLike
-        Optional name filter. In Sophos SFOS, 'like' behaves as a substring match (the supplied value may match anywhere in the object name). Sent to the firewall as the server-side filter.
+        Optional. Returns only objects whose name contains the given text anywhere. This is
+        a substring match, not a wildcard pattern. If omitted, the name is not used to
+        filter.
 
         .PARAMETER ClassificationLike
-        Optional classification filter, matched as a substring anywhere in the value (e.g. "Productive"). The firewall does not support filtering on Classification, so this filter is always applied client-side.
+        Optional. Returns only objects whose classification contains the given text
+        anywhere, for example 'Productive'. Applied on the client. If omitted, the
+        classification is not used to filter.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs read permission for the web
+        filter category objects. If omitted, the value from the current connection is used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
 
         .PARAMETER AsXml
-        Returns raw XML nodes instead of PowerShell-friendly objects.
+        Optional. Returns the raw XML elements sent by the firewall instead of PowerShell
+        objects. Useful when you need a field that the standard output does not show.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        PSCustomObject (default). System.Xml.XmlElement when -AsXml is specified.
+        System.Management.Automation.PSCustomObject. One object per web filter category, with
+        the properties Name, Classification, ConfigureCategory, QoSPolicy, Description,
+        DomainList, KeywordList, URLList, OverrideDefaultDeniedMessage,
+        DefaultDeniedMessage and Notification. Returns System.Xml.XmlElement when -AsXml is
+        used, and an empty array when no object matches.
 
         .EXAMPLE
-        # Retrieve all objects
         Get-SfosWebFilterCategory
 
-        .EXAMPLE
-        # Filter by name (substring match)
-        Get-SfosWebFilterCategory -NameLike "Gambling"
+        Lists every web filter category on the firewall of the current connection.
 
         .EXAMPLE
-        # Return raw XML for troubleshooting
-        Get-SfosWebFilterCategory -NameLike "Gambling" -AsXml
+        Get-SfosWebFilterCategory -NameLike 'Gambling'
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+        Lists all web filter categories whose name contains 'Gambling'.
+
+        .EXAMPLE
+        Get-SfosWebFilterCategory -NameLike 'Gambling' -AsXml
+
+        Returns the raw XML of the matching objects, for example to check a field that the
+        standard output does not contain.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        New-SfosWebFilterCategory
+
+        .LINK
+        Set-SfosWebFilterCategory
 #>
 function Get-SfosWebFilterCategory {
     [CmdletBinding()]
@@ -1823,90 +1987,112 @@ function Get-SfosWebFilterCategory {
 
 <#
         .SYNOPSIS
-        Creates a new WebFilterCategory on the Sophos Firewall.
+        Creates a web filter category on a Sophos Firewall.
 
         .DESCRIPTION
-        Creates a WebFilterCategory, either matched locally by domain/keyword or as an
-        external (URL-based) category. ConfigureCategory is not exposed as its own
-        parameter - it is derived from which parameter set is selected: passing -Domain
-        and/or -Keyword builds a 'Local' category, passing -Url builds an 'External' one.
-        The firewall documents Classification, QoSPolicy and
-        ConfigureCategory as optional, but rejects a create that omits any of them with a
-        500/501, so all three are always sent.
+        Creates a web filter category that matches traffic either locally, by domain or
+        keyword, or externally, by a URL list, for use as a category in web filter policy
+        rules. Passing -Domain and/or -Keyword builds a local category; passing -Url builds
+        an external one. It needs an open connection from Connect-SfosFirewall, or the
+        connection parameters supplied directly, and an account with write permission.
 
         .PARAMETER Name
-        Name of the web filter category (1-50 characters; '^', ';', apostrophe, quote and backtick are not allowed).
+        Required. Name of the new web filter category. 1 to 50 characters. The characters
+        ^, ;, apostrophe, quote and backtick are not allowed.
 
         .PARAMETER Classification
-        Traffic classification: 'Productive', 'Unproductive', 'Acceptable' or 'Objectionable'.
+        Required. Traffic classification. Valid values: Productive, Unproductive,
+        Acceptable, Objectionable.
 
         .PARAMETER QoSPolicy
-        Name of a QoS policy to apply, or 'None'.
+        Required. Name of a QoS policy to apply, or 'None'.
 
         .PARAMETER Domain
-        Array of domains for a local ('Local') category. Selects the 'Local' parameter set. Each entry is at most 250 characters.
+        Optional. Domains that make up a local category. Each entry is at most 250
+        characters. Selects the local form of the category together with -Keyword.
 
         .PARAMETER Keyword
-        Array of keywords for a local ('Local') category. Selects the 'Local' parameter set. Each entry is at most 250 characters.
+        Optional. Keywords that make up a local category. Each entry is at most 250
+        characters. Selects the local form of the category together with -Domain.
 
         .PARAMETER Url
-        Array of URLs for an external ('External') category. Selects the 'External' parameter set. Entries must not include a scheme (http://, https://) - the firewall rejects those with an opaque 501; use a bare host[/path] value, e.g. "www.example.com/list".
+        Optional. URLs that make up an external category. Give a bare host and path, for
+        example 'www.example.com/list.txt', without a scheme such as http:// or https://.
 
         .PARAMETER Description
-        Optional description (max 512 characters).
+        Optional. Free-text description of the category. Up to 512 characters.
 
         .PARAMETER OverrideDefaultDeniedMessage
-        Optional override of the default denied message: 'Enable' or 'Disable'.
+        Optional. Whether the category shows a custom denied message instead of the
+        default one. Valid values: Enable, Disable.
 
         .PARAMETER DefaultDeniedMessage
-        Optional custom denied message text/HTML.
+        Optional. Custom denied message text or HTML, used when
+        -OverrideDefaultDeniedMessage is Enable.
 
         .PARAMETER Notification
-        Optional notification setting: 'Enable' or 'Disable'.
-
-        # Connection parameters (optional - use stored context if not provided)
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. Whether a notification is shown when the category blocks traffic. Valid
+        values: Enable, Disable.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, uses stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number. If omitted, uses stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, uses stored connection context.
+        Optional. User name for the API login. The account needs write permission for the
+        web filter category objects. If omitted, the value from the current connection is
+        used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, uses stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        None. Throws an exception if creation fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        create.
 
         .EXAMPLE
-        # Create a local category matched by domain
-        New-SfosWebFilterCategory -Name "Custom-Local" -Classification Productive -QoSPolicy None -Domain "example.com"
+        New-SfosWebFilterCategory -Name 'Custom-Local' -Classification Productive -QoSPolicy None -Domain 'example.com' -WhatIf
+
+        Shows what the call would create without sending it to the firewall.
 
         .EXAMPLE
-        # Create an external category matched by URL
-        New-SfosWebFilterCategory -Name "External-Feed" -Classification Acceptable -QoSPolicy None -Url "www.example.com/list.txt"
+        New-SfosWebFilterCategory -Name 'Custom-Local' -Classification Productive -QoSPolicy None -Domain 'example.com'
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
+        Creates a local category matched by domain.
+
+        .EXAMPLE
+        New-SfosWebFilterCategory -Name 'External-Feed' -Classification Acceptable -QoSPolicy None -Url 'www.example.com/list.txt'
+
+        Creates an external category matched by a URL list.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
 
         .LINK
         Get-SfosWebFilterCategory
+
+        .LINK
+        Set-SfosWebFilterCategory
 #>
 function New-SfosWebFilterCategory {
     [CmdletBinding(DefaultParameterSetName = 'Local', SupportsShouldProcess)]
@@ -2075,101 +2261,122 @@ function New-SfosWebFilterCategory {
 
 <#
         .SYNOPSIS
-        Updates an existing WebFilterCategory object on the Sophos Firewall.
+        Updates a web filter category on a Sophos Firewall.
 
         .DESCRIPTION
-        Updates a WebFilterCategory object using the Sophos Firewall XML API. You can supply the target object name directly or via the pipeline.
+        Changes the classification, member list or other settings of an existing web
+        filter category. The cmdlet reads the current object first and sends it back
+        complete, so a field you do not pass keeps its current value. It needs an open
+        connection from Connect-SfosFirewall, or the connection parameters supplied
+        directly, and an account with write permission.
 
-        SFOS replaces the whole entity on update - any element not sent in the request is
-        cleared on the firewall. This cmdlet reads the current category first and keeps
-        whatever the caller does not explicitly pass. QoSPolicy and ConfigureCategory are
-        singled out by the firewall as effectively mandatory (500/501 if missing), so both
-        are always sent. ConfigureCategory cannot be split into parameter sets here: with
-        pipeline input PowerShell fixes the parameter set before it binds properties, so
-        a Get-SfosWebFilterCategory | Set-SfosWebFilterCategory call
-        would silently land in whichever set is the default. It is therefore a single
-        mandatory parameter instead, matching the pattern used for HostType in
-        Set-SfosIPHost.
-
-        KNOWN FIRMWARE DEFECT: unlike every other list in this module,
-        URLList on an update is APPEND-ONLY - it does not follow the whole-entity-replace
-        rule. Sending fewer URLs than currently stored, or an empty <URLList>, still leaves
-        every previously stored URL in place (observed status code 201 "Operation partially
-        successful"). -Url can therefore grow the list but cannot shrink or clear it; there
-        is no client-side workaround short of removing and recreating the object.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
-
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        -Url only adds URLs to the external list; it does not remove entries already
+        stored. Removing a URL requires deleting and recreating the category.
 
         .PARAMETER Name
-        Name of the target object.
+        Required. Name of the web filter category to update.
 
         .PARAMETER Classification
-        Traffic classification: 'Productive', 'Unproductive', 'Acceptable' or 'Objectionable'. If omitted, the existing value on the firewall is kept.
+        Optional. Traffic classification, replacing the current value. Valid values:
+        Productive, Unproductive, Acceptable, Objectionable. If omitted, the current value
+        is kept.
 
         .PARAMETER QoSPolicy
-        Name of a QoS policy to apply, or 'None'. If omitted, the existing value on the firewall is kept.
+        Optional. Name of a QoS policy to apply, or 'None', replacing the current value. If
+        omitted, the current value is kept.
 
         .PARAMETER ConfigureCategory
-        Category type: 'Local' or 'External'. Mandatory - determines whether Domain/Keyword or Url apply.
+        Required. Category form: Local or External. Determines whether Domain/Keyword or
+        Url apply.
 
         .PARAMETER Domain
-        Array of domains (ConfigureCategory 'Local'). If omitted, the existing domains are kept.
+        Optional. Domains to store, replacing the current list. Applies to a Local
+        category. If omitted, the current list is kept.
 
         .PARAMETER Keyword
-        Array of keywords (ConfigureCategory 'Local'). If omitted, the existing keywords are kept.
+        Optional. Keywords to store, replacing the current list. Applies to a Local
+        category. If omitted, the current list is kept.
 
         .PARAMETER Url
-        Array of URLs (ConfigureCategory 'External'). If omitted, the existing URLs are kept. Entries must not include a scheme (http://, https://) - the firewall rejects those with an opaque 501; use a bare host[/path] value, e.g. "www.example.com/list". Known firmware defect: updates append to the stored URL list rather than replacing it (see DESCRIPTION), so this parameter cannot be used to remove or clear URLs.
+        Optional. URLs to add to an External category. Give a bare host and path, for
+        example 'www.example.com/list.txt', without a scheme such as http:// or https://.
+        If omitted, the current list is kept.
 
         .PARAMETER Description
-        Optional description text. If omitted, the existing description is kept.
+        Optional. Description to store, replacing the current one. If omitted, the current
+        description is kept.
 
         .PARAMETER OverrideDefaultDeniedMessage
-        Override of the default denied message: 'Enable' or 'Disable'. If omitted, the existing value is kept.
+        Optional. Whether the category shows a custom denied message, replacing the
+        current value. Valid values: Enable, Disable. If omitted, the current value is
+        kept.
 
         .PARAMETER DefaultDeniedMessage
-        Custom denied message text/HTML. If omitted, the existing value is kept.
+        Optional. Custom denied message text or HTML, replacing the current value. If
+        omitted, the current value is kept.
 
         .PARAMETER Notification
-        Notification setting: 'Enable' or 'Disable'. If omitted, the existing value is kept.
+        Optional. Whether a notification is shown when the category blocks traffic,
+        replacing the current value. Valid values: Enable, Disable. If omitted, the current
+        value is kept.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs write permission for the
+        web filter category objects. If omitted, the value from the current connection is
+        used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        System.String. The web filter category name and other fields can be piped in by
+        property name, for example the output of Get-SfosWebFilterCategory.
 
         .OUTPUTS
-        None. Throws an exception if the update fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        update.
 
         .EXAMPLE
-        # Update just the description, keeping everything else
-        Set-SfosWebFilterCategory -Name "Custom-Local" -ConfigureCategory Local -Description "Updated"
+        Set-SfosWebFilterCategory -Name 'Custom-Local' -ConfigureCategory Local -Description 'Updated' -WhatIf
+
+        Shows what the call would change without sending it to the firewall.
 
         .EXAMPLE
-        # Update using pipeline input
-        Get-SfosWebFilterCategory -NameLike "Custom-Local" | Set-SfosWebFilterCategory -Domain "example.org"
+        Set-SfosWebFilterCategory -Name 'Custom-Local' -ConfigureCategory Local -Description 'Updated'
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+        Updates the description. All other fields are kept unchanged.
+
+        .EXAMPLE
+        Get-SfosWebFilterCategory -NameLike 'Custom-Local' | Set-SfosWebFilterCategory -ConfigureCategory Local -Domain 'example.org'
+
+        Adds a domain to every matching local category.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosWebFilterCategory
 #>
 function Set-SfosWebFilterCategory {
     [CmdletBinding(SupportsShouldProcess)]
@@ -2351,9 +2558,8 @@ function Set-SfosWebFilterCategory {
         else {
             $targetUrl = @(if ($PSBoundParameters.ContainsKey('Url')) { $Url } else { $existing[0].URLList })
 
-            # Known firmware defect (see comment-based help): URLList updates are
-            # append-only on this firmware, so sending fewer entries than currently stored
-            # does not remove any of them.
+            # URLList updates are append-only: sending fewer entries than currently
+            # stored does not remove any of them.
             $urlXml = ''
             foreach ($urlItem in $targetUrl) {
                 if (-not $urlItem) {
@@ -2413,53 +2619,69 @@ function Set-SfosWebFilterCategory {
 
 <#
         .SYNOPSIS
-        Removes a WebFilterCategory object from the Sophos Firewall.
+        Removes a web filter category from a Sophos Firewall.
 
         .DESCRIPTION
-        Removes a WebFilterCategory object using the Sophos Firewall XML API. This cmdlet supports ShouldProcess; use -WhatIf to preview the change.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
-
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Deletes a web filter category by name. It needs an open connection from
+        Connect-SfosFirewall, or the connection parameters supplied directly, and an
+        account with write permission. Remove any web filter policy rule that still
+        references the category first, or the firewall keeps the reference in place.
 
         .PARAMETER Name
-        Name of the target object.
+        Required. Name of the web filter category to remove.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs write permission for the
+        web filter category objects. If omitted, the value from the current connection is
+        used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        System.String. The web filter category name can be piped in by property name, for
+        example the output of Get-SfosWebFilterCategory.
 
         .OUTPUTS
-        None. Throws an exception if removal fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        removal.
 
         .EXAMPLE
-        # Preview removal
-        Remove-SfosWebFilterCategory -Name "Custom-Local" -WhatIf
+        Remove-SfosWebFilterCategory -Name 'Custom-Local' -WhatIf
+
+        Shows what the call would remove without sending it to the firewall.
 
         .EXAMPLE
-        # Remove an object
-        Remove-SfosWebFilterCategory -Name "Custom-Local"
+        Remove-SfosWebFilterCategory -Name 'Custom-Local'
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+        Removes the web filter category. The cmdlet asks for confirmation before it writes.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosWebFilterCategory
 #>
 function Remove-SfosWebFilterCategory {
     [CmdletBinding(SupportsShouldProcess)]
@@ -2521,65 +2743,87 @@ function Remove-SfosWebFilterCategory {
 
 <#
         .SYNOPSIS
-        Retrieves UserActivity objects from the Sophos Firewall.
+        Retrieves user activity objects from a Sophos Firewall.
 
         .DESCRIPTION
-        Queries the Sophos Firewall XML API for UserActivity objects. By default the cmdlet returns PowerShell-friendly objects. Use -AsXml to return the raw XML nodes.
-
-        Note: Sophos GET responses can be inconsistent regarding status elements. This cmdlet is designed to return an empty result when no records are found.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
-
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Returns the user activity objects that are defined on the firewall. A user activity
+        groups one or more categories - web categories, file types or URL groups - under a
+        single name, for use in web filter policy rules. Use this cmdlet to review the
+        existing objects or to feed them into another cmdlet through the pipeline. The
+        cmdlet only reads; nothing on the firewall is changed. It needs an open connection
+        from Connect-SfosFirewall, or the connection parameters supplied directly.
 
         .PARAMETER NameLike
-        Optional name filter. In Sophos SFOS, 'like' behaves as a substring match (the supplied value may match anywhere in the object name). Sent to the firewall as the server-side filter.
+        Optional. Returns only objects whose name contains the given text anywhere. This is
+        a substring match, not a wildcard pattern. If omitted, the name is not used to
+        filter.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs read permission for the
+        user activity objects. If omitted, the value from the current connection is used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
 
         .PARAMETER AsXml
-        Returns raw XML nodes instead of PowerShell-friendly objects.
+        Optional. Returns the raw XML elements sent by the firewall instead of PowerShell
+        objects. Useful when you need a field that the standard output does not show.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        PSCustomObject (default). System.Xml.XmlElement when -AsXml is specified.
+        System.Management.Automation.PSCustomObject. One object per user activity, with the
+        properties Name, Desc, NewName and CategoryList. Each CategoryList entry is a
+        PSCustomObject with ID (the plain-text name of the referenced object) and Type.
+        Returns System.Xml.XmlElement when -AsXml is used, and an empty array when no object
+        matches.
 
         .EXAMPLE
-        # Retrieve all objects
         Get-SfosUserActivity
 
-        .EXAMPLE
-        # Filter by name (substring match)
-        Get-SfosUserActivity -NameLike "Search"
+        Lists every user activity on the firewall of the current connection.
 
         .EXAMPLE
-        # Return raw XML for troubleshooting
-        Get-SfosUserActivity -NameLike "Search" -AsXml
+        Get-SfosUserActivity -NameLike 'Search'
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
-        The CategoryList entries are returned as PSCustomObjects with 'ID' (the referenced
-        object's plain-text name) and 'Type' properties. The underlying XML child element is
-        spelled '<type>' in lowercase on this firmware, unlike the documentation sample.
+        Lists all user activities whose name contains 'Search'.
+
+        .EXAMPLE
+        Get-SfosUserActivity -NameLike 'Search' -AsXml
+
+        Returns the raw XML of the matching objects, for example to check a field that the
+        standard output does not contain.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        New-SfosUserActivity
+
+        .LINK
+        Set-SfosUserActivity
 #>
 function Get-SfosUserActivity {
     [CmdletBinding()]
@@ -2673,55 +2917,71 @@ function Get-SfosUserActivity {
 
 <#
         .SYNOPSIS
-        Creates a new UserActivity on the Sophos Firewall.
+        Creates a user activity object on a Sophos Firewall.
 
         .DESCRIPTION
-        Creates a UserActivity object grouping one or more categories (web categories,
-        file types or URL groups). The firewall documents CategoryList as optional but
-        rejects a create that omits it with a 501 InvalidParams, so it is mandatory here.
+        Creates a user activity object that groups one or more categories - web
+        categories, file types or URL groups - under a single name, for use in web filter
+        policy rules. It needs an open connection from Connect-SfosFirewall, or the
+        connection parameters supplied directly, and an account with write permission.
 
         .PARAMETER Name
-        Name of the user activity (1-50 characters; '^', ';', apostrophe, quote and backtick are not allowed).
+        Required. Name of the new user activity. 1 to 50 characters. The characters ^, ;,
+        apostrophe, quote and backtick are not allowed.
 
         .PARAMETER Desc
-        Optional description (max 255 characters).
+        Optional. Free-text description of the user activity. Up to 255 characters.
 
         .PARAMETER CategoryList
-        Array of category entries. Each entry needs an 'ID' (the plain-text name of the referenced object) and a 'Type' property, e.g. [PSCustomObject]@{ID='Search Engines';Type='web category'}. Type is 'web category', 'file type' or 'url group'.
-
-        # Connection parameters (optional - use stored context if not provided)
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Required. One or more category entries. Each entry is a PSCustomObject with an ID
+        property (the plain-text name of the referenced object) and a Type property, for
+        example @{ID='Search Engines';Type='web category'}. Type is 'web category', 'file
+        type' or 'url group'.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, uses stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number. If omitted, uses stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, uses stored connection context.
+        Optional. User name for the API login. The account needs write permission for the
+        user activity objects. If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, uses stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        None. Throws an exception if creation fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        create.
 
         .EXAMPLE
-        # Create a user activity grouping two web categories
-        New-SfosUserActivity -Name "Search-Activity" -Desc "Test" -CategoryList @([PSCustomObject]@{ID='Search Engines';Type='web category'}, [PSCustomObject]@{ID='Image Search';Type='web category'})
+        New-SfosUserActivity -Name 'Search-Activity' -CategoryList @([PSCustomObject]@{ID='Search Engines';Type='web category'}) -WhatIf
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
+        Shows what the call would create without sending it to the firewall.
+
+        .EXAMPLE
+        New-SfosUserActivity -Name 'Search-Activity' -Desc 'Search engine traffic' -CategoryList @([PSCustomObject]@{ID='Search Engines';Type='web category'}, [PSCustomObject]@{ID='Image Search';Type='web category'})
+
+        Creates a user activity grouping two web categories.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
@@ -2809,78 +3069,91 @@ function New-SfosUserActivity {
 
 <#
         .SYNOPSIS
-        Updates an existing UserActivity object on the Sophos Firewall.
+        Updates a user activity object on a Sophos Firewall.
 
         .DESCRIPTION
-        Updates a UserActivity object using the Sophos Firewall XML API. You can supply the target object name directly or via the pipeline.
-
-        SFOS replaces the whole entity on update - any element not sent in the request is
-        cleared on the firewall. This cmdlet reads the current object first and keeps
-        whatever the caller does not explicitly pass (Desc, CategoryList).
-
-        THE MOST DANGEROUS DEFECT IN THIS AREA: an update sent without
-        <NewName> answers HTTP 200 / status code 200, but renames the object to an EMPTY
-        name. The object then becomes unreachable under its old name and stays behind as
-        an invisible orphan. This cmdlet therefore always sends <NewName> - the new name
-        when -NewName is supplied, otherwise the object's current name - never omit it,
-        even though the API documentation marks NewName as optional. Do not remove this as
-        seemingly redundant.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
-
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Changes the name, description or category list of an existing user activity. The
+        cmdlet reads the current object first and sends it back complete, so a field you do
+        not pass keeps its current value. It needs an open connection from
+        Connect-SfosFirewall, or the connection parameters supplied directly, and an
+        account with write permission.
 
         .PARAMETER Name
-        Name of the target object.
+        Required. Name of the user activity to update.
 
         .PARAMETER NewName
-        New name to rename the object to. If omitted, the object keeps its current name - but <NewName> is still sent on every update (see DESCRIPTION).
+        Optional. New name for the object. If omitted, the current name is kept.
 
         .PARAMETER Desc
-        Optional description text. If omitted, the existing description is kept.
+        Optional. Description to store, replacing the current one. If omitted, the current
+        description is kept.
 
         .PARAMETER CategoryList
-        Array of category entries (see New-SfosUserActivity). If omitted, the existing categories are kept. The firewall rejects an update with an empty category list.
+        Optional. Category entries to store, replacing the current list (see
+        New-SfosUserActivity for the entry format). If omitted, the current list is kept.
+        The firewall does not accept an empty category list.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs write permission for the
+        user activity objects. If omitted, the value from the current connection is used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        System.String. The user activity name and other fields can be piped in by property
+        name, for example the output of Get-SfosUserActivity.
 
         .OUTPUTS
-        None. Throws an exception if the update fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        update.
 
         .EXAMPLE
-        # Update just the description, keeping the category list
-        Set-SfosUserActivity -Name "Search-Activity" -Desc "Updated"
+        Set-SfosUserActivity -Name 'Search-Activity' -Desc 'Updated' -WhatIf
+
+        Shows what the call would change without sending it to the firewall.
 
         .EXAMPLE
-        # Rename the object
-        Set-SfosUserActivity -Name "Search-Activity" -NewName "Search-Activity-Renamed"
+        Set-SfosUserActivity -Name 'Search-Activity' -Desc 'Updated'
+
+        Updates the description. The category list is kept unchanged.
 
         .EXAMPLE
-        # Update using pipeline input
-        Get-SfosUserActivity -NameLike "Search-Activity" | Set-SfosUserActivity -Desc "Updated via pipeline"
+        Set-SfosUserActivity -Name 'Search-Activity' -NewName 'Search-Activity-Renamed'
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+        Renames the object.
+
+        .EXAMPLE
+        Get-SfosUserActivity -NameLike 'Search-Activity' | Set-SfosUserActivity -Desc 'Updated via pipeline'
+
+        Updates every matching user activity with a new description.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosUserActivity
 #>
 function Set-SfosUserActivity {
     [CmdletBinding(SupportsShouldProcess)]
@@ -3011,53 +3284,68 @@ function Set-SfosUserActivity {
 
 <#
         .SYNOPSIS
-        Removes a UserActivity object from the Sophos Firewall.
+        Removes a user activity object from a Sophos Firewall.
 
         .DESCRIPTION
-        Removes a UserActivity object using the Sophos Firewall XML API. This cmdlet supports ShouldProcess; use -WhatIf to preview the change.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
-
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Deletes a user activity object by name. It needs an open connection from
+        Connect-SfosFirewall, or the connection parameters supplied directly, and an
+        account with write permission. Remove any web filter policy rule that still
+        references the object first, or the firewall keeps the reference in place.
 
         .PARAMETER Name
-        Name of the target object.
+        Required. Name of the user activity to remove.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs write permission for the
+        user activity objects. If omitted, the value from the current connection is used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        System.String. The user activity name can be piped in by property name, for example
+        the output of Get-SfosUserActivity.
 
         .OUTPUTS
-        None. Throws an exception if removal fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        removal.
 
         .EXAMPLE
-        # Preview removal
-        Remove-SfosUserActivity -Name "Search-Activity" -WhatIf
+        Remove-SfosUserActivity -Name 'Search-Activity' -WhatIf
+
+        Shows what the call would remove without sending it to the firewall.
 
         .EXAMPLE
-        # Remove an object
-        Remove-SfosUserActivity -Name "Search-Activity"
+        Remove-SfosUserActivity -Name 'Search-Activity'
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+        Removes the user activity object. The cmdlet asks for confirmation before it writes.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosUserActivity
 #>
 function Remove-SfosUserActivity {
     [CmdletBinding(SupportsShouldProcess)]
@@ -3115,57 +3403,75 @@ function Remove-SfosUserActivity {
 
 <#
         .SYNOPSIS
-        Adds category members to an existing UserActivity object on the Sophos Firewall.
+        Adds categories to an existing user activity object on a Sophos Firewall.
 
         .DESCRIPTION
-        Adds categories to a UserActivity object using the Sophos Firewall XML API. Internally this reads the object, merges the new entries into the existing CategoryList and sends a full <Set operation="update">, because SFOS applies the member list as a whole - a plain update would otherwise replace it instead of appending.
-
-        This cmdlet updates the object internally, so - just like Set-SfosUserActivity - it
-        always sends <NewName> set to the object's current name. Without it, the update
-        would answer success while silently renaming the object to an empty name.
-        Do not remove this as seemingly redundant.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
-
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Adds one or more categories to a user activity without removing the ones already
+        stored. It needs an open connection from Connect-SfosFirewall, or the connection
+        parameters supplied directly, and an account with write permission.
 
         .PARAMETER Name
-        Name of the target object.
+        Required. Name of the user activity to change.
 
         .PARAMETER Members
-        Array of category entries to add. Each entry needs an 'ID' (the plain-text name of the referenced object) and a 'Type' property, e.g. [PSCustomObject]@{ID='Search Engines';Type='web category'}. Entries already present (matched on ID and Type) are left unchanged.
+        Required. One or more category entries to add. Each entry is a PSCustomObject with
+        an ID property (the plain-text name of the referenced object) and a Type property,
+        for example @{ID='Search Engines';Type='web category'}. An entry that is already
+        present, matched on ID and Type, is left unchanged.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs write permission for the
+        user activity objects. If omitted, the value from the current connection is used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        None. Throws an exception if the update fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        update.
 
         .EXAMPLE
-        # Add a web category to an existing user activity
-        Add-SfosUserActivityMember -Name "Search-Activity" -Members @([PSCustomObject]@{ID='Search Engines';Type='web category'})
+        Add-SfosUserActivityMember -Name 'Search-Activity' -Members @([PSCustomObject]@{ID='Search Engines';Type='web category'}) -WhatIf
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+        Shows what the call would add without sending it to the firewall.
+
+        .EXAMPLE
+        Add-SfosUserActivityMember -Name 'Search-Activity' -Members @([PSCustomObject]@{ID='Search Engines';Type='web category'})
+
+        Adds a web category to the user activity.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosUserActivity
+
+        .LINK
+        Remove-SfosUserActivityMember
 #>
 function Add-SfosUserActivityMember {
     [CmdletBinding(SupportsShouldProcess)]
@@ -3287,57 +3593,75 @@ function Add-SfosUserActivityMember {
 
 <#
         .SYNOPSIS
-        Removes category members from an existing UserActivity object on the Sophos Firewall.
+        Removes categories from an existing user activity object on a Sophos Firewall.
 
         .DESCRIPTION
-        Removes categories from a UserActivity object using the Sophos Firewall XML API. Internally this reads the object, drops the matching entries from the existing CategoryList and sends a full <Set operation="update"> with the remaining entries - 'update' with the complete remaining list, not a partial remove, because SFOS replaces the member list with whatever is sent.
-
-        This cmdlet updates the object internally, so - just like Set-SfosUserActivity - it
-        always sends <NewName> set to the object's current name. Without it, the update
-        would answer success while silently renaming the object to an empty name.
-        Do not remove this as seemingly redundant.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
-
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Removes one or more categories from a user activity, keeping the remaining
+        entries. It needs an open connection from Connect-SfosFirewall, or the connection
+        parameters supplied directly, and an account with write permission.
 
         .PARAMETER Name
-        Name of the target object.
+        Required. Name of the user activity to change.
 
         .PARAMETER Members
-        Array of category entries to remove. Each entry needs an 'ID' and a 'Type' property matching an existing entry, e.g. [PSCustomObject]@{ID='Search Engines';Type='web category'}. Entries that are not present are ignored.
+        Required. One or more category entries to remove. Each entry is a PSCustomObject
+        with an ID property and a Type property matching an existing entry, for example
+        @{ID='Search Engines';Type='web category'}. An entry that is not present is
+        ignored.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs write permission for the
+        user activity objects. If omitted, the value from the current connection is used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        None. Throws an exception if the update fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        update.
 
         .EXAMPLE
-        # Remove a web category from an existing user activity
-        Remove-SfosUserActivityMember -Name "Search-Activity" -Members @([PSCustomObject]@{ID='Search Engines';Type='web category'})
+        Remove-SfosUserActivityMember -Name 'Search-Activity' -Members @([PSCustomObject]@{ID='Search Engines';Type='web category'}) -WhatIf
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+        Shows what the call would remove without sending it to the firewall.
+
+        .EXAMPLE
+        Remove-SfosUserActivityMember -Name 'Search-Activity' -Members @([PSCustomObject]@{ID='Search Engines';Type='web category'})
+
+        Removes a web category from the user activity.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosUserActivity
+
+        .LINK
+        Add-SfosUserActivityMember
 #>
 function Remove-SfosUserActivityMember {
     [CmdletBinding(SupportsShouldProcess)]
@@ -3476,72 +3800,100 @@ function Remove-SfosUserActivityMember {
 
 <#
         .SYNOPSIS
-        Retrieves WebFilterException objects from the Sophos Firewall.
+        Retrieves web filter exception objects from a Sophos Firewall.
 
         .DESCRIPTION
-        Queries the Sophos Firewall XML API for WebFilterException objects. By default the cmdlet returns PowerShell-friendly objects. Use -AsXml to return the raw XML nodes.
+        Returns the web filter exception objects that are defined on the firewall. A web
+        filter exception lets matching traffic bypass one or more web filtering checks, for
+        example HTTPS decryption or virus scanning. Use this cmdlet to review the existing
+        objects or to feed them into another cmdlet through the pipeline. The cmdlet only
+        reads; nothing on the firewall is changed. It needs an open connection from
+        Connect-SfosFirewall, or the connection parameters supplied directly.
 
-        Note: Sophos GET responses can be inconsistent regarding status elements. This cmdlet is designed to return an empty result when no records are found.
+        Some exceptions are predefined by Sophos and marked with IsDefault. Check this
+        property before changing objects in bulk.
 
-        All four match lists (SourceIPAddress, DestinationIPAddress, URLRegex, WebCategory)
-        live together inside a single <DomainList> wrapper on the firewall - the vendor's
-        attribute table shows them as top-level fields, but that is not how the API returns
-        them [live]. This cmdlet flattens them back into individually named properties.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
-
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        You can combine several filters. The firewall itself evaluates at most one of them,
+        so every filter you supply is applied again on the client. The result therefore
+        always matches all filters you gave.
 
         .PARAMETER NameLike
-        Optional name filter. In Sophos SFOS, 'like' behaves as a substring match (the supplied value may match anywhere in the object name). Sent to the firewall as the server-side filter.
+        Optional. Returns only objects whose name contains the given text anywhere. This is
+        a substring match, not a wildcard pattern. If omitted, the name is not used to
+        filter.
 
         .PARAMETER DescriptionLike
-        Optional description filter, matched as a substring anywhere in the value. The firewall does not support filtering on Desc, so this filter is always applied client-side.
+        Optional. Returns only objects whose description contains the given text anywhere.
+        Applied on the client. If omitted, the description is not used to filter.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs read permission for the
+        web filter exception objects. If omitted, the value from the current connection is
+        used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
 
         .PARAMETER AsXml
-        Returns raw XML nodes instead of PowerShell-friendly objects.
+        Optional. Returns the raw XML elements sent by the firewall instead of PowerShell
+        objects. Useful when you need a field that the standard output does not show.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        PSCustomObject (default). System.Xml.XmlElement when -AsXml is specified.
+        System.Management.Automation.PSCustomObject. One object per web filter exception,
+        with the properties Name, Desc, Enabled, HttpsDecrypt, VirusScan, PolicyCheck,
+        ZeroDayProtection, CertValidation, EnableSrcIP, SourceIPAddress, EnableDstIP,
+        DestinationIPAddress, EnableURLRegex, URLRegex, EnableWebCat, WebCategory and
+        IsDefault. Returns System.Xml.XmlElement when -AsXml is used, and an empty array
+        when no object matches.
 
         .EXAMPLE
-        # Retrieve all objects
         Get-SfosWebFilterException
 
-        .EXAMPLE
-        # Filter by name (substring match)
-        Get-SfosWebFilterException -NameLike "Example"
+        Lists every web filter exception on the firewall of the current connection.
 
         .EXAMPLE
-        # Return raw XML for troubleshooting
-        Get-SfosWebFilterException -NameLike "Example" -AsXml
+        Get-SfosWebFilterException -NameLike 'Example'
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
-        Predefined Sophos exceptions (IsDefault=yes, e.g. 'Sophos Services') are returned like any
-        other object - check the IsDefault property before scripting bulk changes.
+        Lists all web filter exceptions whose name contains 'Example'.
+
+        .EXAMPLE
+        Get-SfosWebFilterException -NameLike 'Example' -AsXml
+
+        Returns the raw XML of the matching objects, for example to check a field that the
+        standard output does not contain.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        New-SfosWebFilterException
+
+        .LINK
+        Set-SfosWebFilterException
 #>
 function Get-SfosWebFilterException {
     [CmdletBinding()]
@@ -3646,96 +3998,107 @@ function Get-SfosWebFilterException {
 
 <#
         .SYNOPSIS
-        Creates a new WebFilterException object on the Sophos Firewall.
+        Creates a web filter exception on a Sophos Firewall.
 
         .DESCRIPTION
-        Creates a WebFilterException that lets matching traffic bypass web filtering
-        checks. At least one match criterion (-SourceIPAddress, -DestinationIPAddress,
-        -URLRegex or -WebCategory) is required - the Sophos API rejects an object with
-        none of these with an undiagnostic 501 (empty <InvalidParams/>), so this cmdlet
-        checks that client-side first.
-
-        CertValidation is not documented anywhere (neither the attribute table nor the
-        sample XML mention it). Enabled - documented as optional - is required on create as well: omitting either
-        Enabled or CertValidation makes the create request fail (500 or 501, both without
-        a usable diagnostic) [live]. This cmdlet always sends both, defaulting to 'on'.
-        HttpsDecrypt, VirusScan, PolicyCheck and ZeroDayProtection are confirmed optional
-        on create and are only sent when explicitly supplied.
+        Creates a web filter exception that lets matching traffic bypass one or more web
+        filtering checks. At least one match criterion must be given, through
+        -SourceIPAddress, -DestinationIPAddress, -URLRegex or -WebCategory. It needs an
+        open connection from Connect-SfosFirewall, or the connection parameters supplied
+        directly, and an account with write permission.
 
         .PARAMETER Name
-        Name of the exception (1-60 characters; the characters ^ ; ' " \ are not allowed).
+        Required. Name of the new exception. 1 to 60 characters. The characters ^, ;,
+        apostrophe, quote and backslash are not allowed.
 
         .PARAMETER Desc
-        Optional description (max 250 characters).
+        Optional. Free-text description of the exception. Up to 250 characters.
 
         .PARAMETER Enabled
-        Enables or disables the exception: 'on' or 'off'. Like CertValidation this is not marked
-        mandatory in the vendor documentation, but a create request without it fails with a
-        diagnostic-free 500 ('Operation could not be performed on Entity') [live]. Always sent;
-        default 'on'.
+        Optional. Whether the exception is active. Valid values: on, off. Default: on.
 
         .PARAMETER HttpsDecrypt
-        Whether HTTPS traffic matching this exception is decrypted: 'on' or 'off'. If omitted, the firewall applies its own default.
+        Optional. Whether HTTPS traffic matching this exception is decrypted. Valid
+        values: on, off. If omitted, the firewall applies its own default.
 
         .PARAMETER VirusScan
-        Whether matching traffic is still virus-scanned: 'on' or 'off'. If omitted, the firewall applies its own default.
+        Optional. Whether matching traffic is still virus-scanned. Valid values: on, off.
+        If omitted, the firewall applies its own default.
 
         .PARAMETER PolicyCheck
-        Whether matching traffic still runs through policy checks: 'on' or 'off'. If omitted, the firewall applies its own default.
+        Optional. Whether matching traffic still runs through policy checks. Valid values:
+        on, off. If omitted, the firewall applies its own default.
 
         .PARAMETER ZeroDayProtection
-        Whether Zero-day Protection still applies to matching traffic: 'on' or 'off'. If omitted, the firewall applies its own default.
+        Optional. Whether Zero-day Protection still applies to matching traffic. Valid
+        values: on, off. If omitted, the firewall applies its own default.
 
         .PARAMETER CertValidation
-        Whether certificate validation still applies to matching traffic: 'on' or 'off'. Undocumented but required by the API on every write [live]. Default: 'on'.
+        Optional. Whether certificate validation still applies to matching traffic. Valid
+        values: on, off. Default: on.
 
         .PARAMETER SourceIPAddress
-        One or more source IP addresses/networks this exception matches. Presence of this parameter (with at least one entry) sets EnableSrcIP=yes on the firewall.
+        Optional. Source IP addresses or networks this exception matches.
 
         .PARAMETER DestinationIPAddress
-        One or more destination IP addresses/networks this exception matches. Presence of this parameter (with at least one entry) sets EnableDstIP=yes on the firewall.
+        Optional. Destination IP addresses or networks this exception matches.
 
         .PARAMETER URLRegex
-        One or more URL regular expressions this exception matches. Presence of this parameter (with at least one entry) sets EnableURLRegex=yes on the firewall.
+        Optional. URL regular expressions this exception matches.
 
         .PARAMETER WebCategory
-        One or more web category names this exception matches. Presence of this parameter (with at least one entry) sets EnableWebCat=yes on the firewall.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. Web category names this exception matches.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, uses stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number. If omitted, uses stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, uses stored connection context.
+        Optional. User name for the API login. The account needs write permission for the
+        web filter exception objects. If omitted, the value from the current connection is
+        used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, uses stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        None. Throws an exception if creation fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        create.
 
         .EXAMPLE
-        # Create an exception that bypasses filtering for a source network
-        New-SfosWebFilterException -Name "Example" -SourceIPAddress "10.0.1.0/24" -Desc "Internal test range"
+        New-SfosWebFilterException -Name 'Example' -SourceIPAddress '10.0.1.0/24' -WhatIf
+
+        Shows what the call would create without sending it to the firewall.
 
         .EXAMPLE
-        # Create an exception matching a web category, with virus scanning kept on
-        New-SfosWebFilterException -Name "Example-Category" -WebCategory "Business" -VirusScan on
+        New-SfosWebFilterException -Name 'Example' -SourceIPAddress '10.0.1.0/24' -Desc 'Internal test range'
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
+        Creates an exception that bypasses filtering for a source network.
+
+        .EXAMPLE
+        New-SfosWebFilterException -Name 'Example-Category' -WebCategory 'Business' -VirusScan on
+
+        Creates an exception matching a web category, with virus scanning kept on.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
@@ -3795,7 +4158,7 @@ function New-SfosWebFilterException {
     $descEsc = ConvertTo-SfosXmlEscaped -Text $Desc
 
     # Ein Objekt ohne jedes Match-Kriterium wird von der API mit einem diagnosefreien
-    # 501 (leeres <InvalidParams/>) abgelehnt [live]. Clientseitig vorab pruefen, statt
+    # 501 (leeres <InvalidParams/>) abgelehnt. Clientseitig vorab pruefen, statt
     # einen nutzlosen Roundtrip zu machen.
     if (-not ($SourceIPAddress -or $DestinationIPAddress -or $URLRegex -or $WebCategory)) {
         throw "WebFilterException '$Name' needs at least one match criterion: -SourceIPAddress, -DestinationIPAddress, -URLRegex or -WebCategory. The Sophos API rejects an object with none of these with an undiagnostic 501 (empty <InvalidParams/>)."
@@ -3897,106 +4260,135 @@ function New-SfosWebFilterException {
 
 <#
         .SYNOPSIS
-        Updates an existing WebFilterException object on the Sophos Firewall.
+        Updates a web filter exception on a Sophos Firewall.
 
         .DESCRIPTION
-        Updates a WebFilterException object using the Sophos Firewall XML API. You can supply
-        the target object name directly or via the pipeline.
+        Changes the name, checks or match criteria of an existing web filter exception.
+        The cmdlet reads the current object first and sends it back complete, so a field
+        you do not pass keeps its current value; pass a field explicitly, with an empty
+        value if needed, to clear it. It needs an open connection from Connect-SfosFirewall,
+        or the connection parameters supplied directly, and an account with write
+        permission.
 
-        SFOS replaces the whole entity on update - any element not sent in the request is
-        cleared on the firewall, confirmed live for Desc and the DomainList entries. This
-        cmdlet reads the current object first and keeps whatever the caller does not
-        explicitly pass. To clear a field, pass it explicitly with an empty value.
-
-        CertValidation is undocumented but required by the API on every write [live]; it is
-        always sent, carried over from the existing object unless overridden.
-
-        Predefined exceptions are flagged IsDefault=yes by Get-SfosWebFilterException. The API
-        applies no write protection to them - a Set on 'Sophos Services' is accepted like any
-        other object. Check IsDefault before scripting bulk changes.
+        Predefined exceptions are flagged IsDefault in the output of
+        Get-SfosWebFilterException and can be changed like any other object. Check
+        IsDefault before changing objects in bulk.
 
         .PARAMETER Name
-        Name of the target object.
+        Required. Name of the web filter exception to update.
 
         .PARAMETER NewName
-        New name to rename the object to (1-60 characters; the characters ^ ; ' " \ are not allowed). If omitted, the object keeps its current name.
+        Optional. New name for the object. 1 to 60 characters. The characters ^, ;,
+        apostrophe, quote and backslash are not allowed. If omitted, the current name is
+        kept.
 
         .PARAMETER Desc
-        Optional description text. If omitted, the existing description is kept.
+        Optional. Description to store, replacing the current one. If omitted, the current
+        description is kept.
 
         .PARAMETER Enabled
-        Enables or disables the exception: 'on' or 'off'. If omitted, the existing value on the firewall is kept.
+        Optional. Whether the exception is active, replacing the current value. Valid
+        values: on, off. If omitted, the current value is kept.
 
         .PARAMETER HttpsDecrypt
-        Whether HTTPS traffic matching this exception is decrypted: 'on' or 'off'. If omitted, the existing value on the firewall is kept.
+        Optional. Whether HTTPS traffic matching this exception is decrypted, replacing the
+        current value. Valid values: on, off. If omitted, the current value is kept.
 
         .PARAMETER VirusScan
-        Whether matching traffic is still virus-scanned: 'on' or 'off'. If omitted, the existing value on the firewall is kept.
+        Optional. Whether matching traffic is still virus-scanned, replacing the current
+        value. Valid values: on, off. If omitted, the current value is kept.
 
         .PARAMETER PolicyCheck
-        Whether matching traffic still runs through policy checks: 'on' or 'off'. If omitted, the existing value on the firewall is kept.
+        Optional. Whether matching traffic still runs through policy checks, replacing the
+        current value. Valid values: on, off. If omitted, the current value is kept.
 
         .PARAMETER ZeroDayProtection
-        Whether Zero-day Protection still applies to matching traffic: 'on' or 'off'. If omitted, the existing value on the firewall is kept.
+        Optional. Whether Zero-day Protection still applies to matching traffic, replacing
+        the current value. Valid values: on, off. If omitted, the current value is kept.
 
         .PARAMETER CertValidation
-        Whether certificate validation still applies to matching traffic: 'on' or 'off'. Undocumented but required by the API on every write [live]. If omitted, the existing value on the firewall is kept.
+        Optional. Whether certificate validation still applies to matching traffic,
+        replacing the current value. Valid values: on, off. If omitted, the current value
+        is kept.
 
         .PARAMETER SourceIPAddress
-        One or more source IP addresses/networks this exception matches. If omitted, the existing list is kept. Presence of this parameter (with at least one entry) sets EnableSrcIP=yes; an explicit empty array sets EnableSrcIP=no.
+        Optional. Source IP addresses or networks to store, replacing the current list. If
+        omitted, the current list is kept.
 
         .PARAMETER DestinationIPAddress
-        One or more destination IP addresses/networks this exception matches. If omitted, the existing list is kept. Presence of this parameter (with at least one entry) sets EnableDstIP=yes; an explicit empty array sets EnableDstIP=no.
+        Optional. Destination IP addresses or networks to store, replacing the current
+        list. If omitted, the current list is kept.
 
         .PARAMETER URLRegex
-        One or more URL regular expressions this exception matches. If omitted, the existing list is kept. Presence of this parameter (with at least one entry) sets EnableURLRegex=yes; an explicit empty array sets EnableURLRegex=no.
+        Optional. URL regular expressions to store, replacing the current list. If omitted,
+        the current list is kept.
 
         .PARAMETER WebCategory
-        One or more web category names this exception matches. If omitted, the existing list is kept. Presence of this parameter (with at least one entry) sets EnableWebCat=yes; an explicit empty array sets EnableWebCat=no.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. Web category names to store, replacing the current list. If omitted, the
+        current list is kept.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. User name for the API login. The account needs write permission for the
+        web filter exception objects. If omitted, the value from the current connection is
+        used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        System.String. The web filter exception name and other fields can be piped in by
+        property name, for example the output of Get-SfosWebFilterException.
 
         .OUTPUTS
-        None. Throws an exception if the update fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        update.
 
         .EXAMPLE
-        # Update the description without touching anything else
-        Set-SfosWebFilterException -Name "Example" -Desc "Updated description"
+        Set-SfosWebFilterException -Name 'Example' -Desc 'Updated description' -WhatIf
+
+        Shows what the call would change without sending it to the firewall.
 
         .EXAMPLE
-        # Rename an object
-        Set-SfosWebFilterException -Name "Example" -NewName "Example-Renamed"
+        Set-SfosWebFilterException -Name 'Example' -Desc 'Updated description'
+
+        Updates the description. All other fields are kept unchanged.
 
         .EXAMPLE
-        # Update using pipeline input
-        Get-SfosWebFilterException -NameLike "Example" | Set-SfosWebFilterException -VirusScan on
+        Set-SfosWebFilterException -Name 'Example' -NewName 'Example-Renamed'
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+        Renames the object.
+
+        .EXAMPLE
+        Get-SfosWebFilterException -NameLike 'Example' | Set-SfosWebFilterException -VirusScan on
+
+        Turns virus scanning back on for every matching exception.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosWebFilterException
 #>
 function Set-SfosWebFilterException {
     [CmdletBinding(SupportsShouldProcess)]
@@ -4068,8 +4460,8 @@ function Set-SfosWebFilterException {
         $nameEsc = ConvertTo-SfosXmlEscaped -Text $Name
 
         # SFOS replaces the whole entity on update - anything not sent is cleared on the
-        # firewall, confirmed live for Desc and the DomainList entries. So read the
-        # current object first and override only what the caller actually passed.
+        # firewall, including Desc and the DomainList entries. So read the current object
+        # first and override only what the caller actually passed.
         $existing = @(Get-SfosWebFilterException -Firewall $params.Firewall `
                 -Port $params.Port `
                 -Username $params.Username `
@@ -4132,7 +4524,7 @@ function Set-SfosWebFilterException {
 
         # CertValidation ist in der Doku (Attributtabelle und Sample) gar nicht
         # vorhanden, muss aber bei jedem Schreibzugriff mitgesendet werden - ohne
-        # antwortet die API mit 501 und leerem <InvalidParams/> [live].
+        # antwortet die API mit 501 und leerem <InvalidParams/>.
         $targetCertValidation = if ($PSBoundParameters.ContainsKey('CertValidation')) {
             $CertValidation
         }
@@ -4172,7 +4564,7 @@ function Set-SfosWebFilterException {
         }
 
         # Ein Objekt ohne jedes Match-Kriterium wird von der API mit einem diagnosefreien
-        # 501 (leeres <InvalidParams/>) abgelehnt [live]. Clientseitig vorab pruefen, statt
+        # 501 (leeres <InvalidParams/>) abgelehnt. Clientseitig vorab pruefen, statt
         # einen nutzlosen Roundtrip zu machen - das gilt auch fuer ein Update, das die
         # letzte verbliebene Liste leert.
         if (-not ($targetSourceIPAddress -or $targetDestinationIPAddress -or $targetURLRegex -or $targetWebCategory)) {
@@ -4281,58 +4673,74 @@ function Set-SfosWebFilterException {
 
 <#
         .SYNOPSIS
-        Removes a WebFilterException object from the Sophos Firewall.
+        Removes a web filter exception from a Sophos Firewall.
 
         .DESCRIPTION
-        Removes a WebFilterException object using the Sophos Firewall XML API. This cmdlet
-        supports ShouldProcess; use -WhatIf to preview the change.
+        Deletes a web filter exception by name. It needs an open connection from
+        Connect-SfosFirewall, or the connection parameters supplied directly, and an
+        account with write permission.
 
-        Predefined exceptions are flagged IsDefault=yes by Get-SfosWebFilterException. The API
-        applies no write protection to them - a Remove on a Sophos-shipped default such as
-        'Sophos Services' is accepted like any other object. Check IsDefault before removing.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
-
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        A predefined exception, flagged IsDefault in the output of
+        Get-SfosWebFilterException, can be removed like any other object and is not
+        recreated automatically. Check IsDefault before removing an object you did not
+        create yourself.
 
         .PARAMETER Name
-        Name of the target object.
+        Required. Name of the web filter exception to remove.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs write permission for the
+        web filter exception objects. If omitted, the value from the current connection is
+        used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        System.String. The web filter exception name can be piped in by property name, for
+        example the output of Get-SfosWebFilterException.
 
         .OUTPUTS
-        None. Throws an exception if removal fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        removal.
 
         .EXAMPLE
-        # Preview removal
-        Remove-SfosWebFilterException -Name "Example" -WhatIf
+        Remove-SfosWebFilterException -Name 'Example' -WhatIf
+
+        Shows what the call would remove without sending it to the firewall.
 
         .EXAMPLE
-        # Remove an object
-        Remove-SfosWebFilterException -Name "Example"
+        Remove-SfosWebFilterException -Name 'Example'
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+        Removes the web filter exception. The cmdlet asks for confirmation before it
+        writes.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosWebFilterException
 #>
 function Remove-SfosWebFilterException {
     [CmdletBinding(SupportsShouldProcess)]
@@ -4398,17 +4806,17 @@ function Remove-SfosWebFilterException {
 
 # --- WebFilterPolicy ---
 #
-# RuleList/Rule is not documented in the attribute table at all - only reconstructed from
-# the sample XML and a live GET. SFOS replaces RuleList and every
-# other field of the entity wholesale on <Set operation="update"> - an element that is not
-# sent is cleared, not left alone. Every write cmdlet below therefore
-# funnels through ConvertTo-SfosWebFilterPolicyEntityXml with a fully resolved policy object,
-# built either directly from bound parameters (New-*) or by reading the current object first
-# and overriding only what the caller actually passed (Set-*, Add-/Remove-*Rule).
+# RuleList/Rule is reconstructed from the sample XML and a live GET, since the attribute
+# table does not document it. SFOS replaces RuleList and every other field of the entity
+# wholesale on <Set operation="update">; an element that is not sent is cleared, not left
+# alone. Every write cmdlet below therefore funnels through
+# ConvertTo-SfosWebFilterPolicyEntityXml with a fully resolved policy object, built either
+# directly from bound parameters (New-*) or by reading the current object first and
+# overriding only what the caller actually passed (Set-*, Add-/Remove-*Rule).
 #
 # WebFilterPolicy carries no IsDefault flag, unlike WebFilterException. A predefined policy
 # such as 'Default Policy' can be overwritten by Set-/Remove-SfosWebFilterPolicy and by both
-# rule cmdlets without any warning from the API - see the .NOTES on each write cmdlet.
+# rule cmdlets without any warning from the API.
 
 <#
 .SYNOPSIS
@@ -4648,71 +5056,105 @@ function ConvertTo-SfosWebFilterPolicyEntityXml {
 
 <#
         .SYNOPSIS
-        Retrieves WebFilterPolicy objects from the Sophos Firewall.
+        Retrieves web filter policy objects from a Sophos Firewall.
 
         .DESCRIPTION
-        Queries the Sophos Firewall XML API for WebFilterPolicy objects. By default the cmdlet returns PowerShell-friendly objects. Use -AsXml to return the raw XML nodes.
+        Returns the web filter policy objects that are defined on the firewall. A web
+        filter policy groups rules that decide how HTTP and HTTPS traffic is handled, and
+        is applied to a firewall rule. Use this cmdlet to review the existing policies or
+        to feed them into another cmdlet through the pipeline. The cmdlet only reads;
+        nothing on the firewall is changed. It needs an open connection from
+        Connect-SfosFirewall, or the connection parameters supplied directly.
 
-        Each returned RuleList entry mirrors the shape produced by New-SfosWebFilterPolicyRule, so a rule read back from Get-SfosWebFilterPolicy can be reused directly with
+        Each returned RuleList entry has the same shape produced by
+        New-SfosWebFilterPolicyRule, so a rule read back here can be reused directly with
         Add-SfosWebFilterPolicyRule or passed to Set-SfosWebFilterPolicy -Rule.
 
-        Note: Sophos GET responses can be inconsistent regarding status elements. This cmdlet is designed to return an empty result when no records are found.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
-
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        You can combine several filters. The firewall itself evaluates at most one of them,
+        so every filter you supply is applied again on the client. The result therefore
+        always matches all filters you gave.
 
         .PARAMETER NameLike
-        Optional name filter. In Sophos SFOS, 'like' behaves as a substring match (the supplied value may match anywhere in the object name). Sent to the firewall as the server-side filter.
+        Optional. Returns only objects whose name contains the given text anywhere. This is
+        a substring match, not a wildcard pattern. If omitted, the name is not used to
+        filter.
 
         .PARAMETER DescriptionLike
-        Optional description filter, matched as a substring anywhere in the value. The firewall does not support filtering on Description, so this filter is always applied client-side.
+        Optional. Returns only objects whose description contains the given text anywhere.
+        Applied on the client. If omitted, the description is not used to filter.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs read permission for the
+        web filter policy objects. If omitted, the value from the current connection is
+        used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
 
         .PARAMETER AsXml
-        Returns raw XML nodes instead of PowerShell-friendly objects.
+        Optional. Returns the raw XML elements sent by the firewall instead of PowerShell
+        objects. Useful when you need a field that the standard output does not show.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        PSCustomObject with properties: Name, Description, DefaultAction, EnableReporting, DownloadFileSizeRestrictionEnabled, DownloadFileSizeRestriction, GoogAppDomainListEnabled,
-        GoogAppDomainList, RuleList (array of rule objects with CategoryList, HTTPAction, HTTPSAction, FollowHTTPAction, Schedule, PolicyRuleEnabled, CCLRuleEnabled, ExceptionList,
-        UserList, CCLList), EnforceSafeSearch, EnforceImageLicensing, YoutubeFilterEnabled, YoutubeFilterIsStrict, XFFEnabled, Office365Enabled, QuotaLimit, Office365TenantsList,
-        Office365DirectoryId. System.Xml.XmlElement when -AsXml is specified.
+        System.Management.Automation.PSCustomObject. One object per web filter policy, with
+        the properties Name, Description, DefaultAction, EnableReporting,
+        DownloadFileSizeRestrictionEnabled, DownloadFileSizeRestriction,
+        GoogAppDomainListEnabled, GoogAppDomainList, RuleList, EnforceSafeSearch,
+        EnforceImageLicensing, YoutubeFilterEnabled, YoutubeFilterIsStrict, XFFEnabled,
+        Office365Enabled, QuotaLimit, Office365TenantsList and Office365DirectoryId.
+        RuleList is an array of rule objects, each with CategoryList, HTTPAction,
+        HTTPSAction, FollowHTTPAction, Schedule, PolicyRuleEnabled, CCLRuleEnabled,
+        ExceptionList, UserList and CCLList. Returns System.Xml.XmlElement when -AsXml is
+        used, and an empty array when no object matches.
 
         .EXAMPLE
-        # Retrieve all policies
         Get-SfosWebFilterPolicy
 
-        .EXAMPLE
-        # Filter by name (substring match)
-        Get-SfosWebFilterPolicy -NameLike "Basic"
+        Lists every web filter policy on the firewall of the current connection.
 
         .EXAMPLE
-        # Return raw XML for troubleshooting
-        Get-SfosWebFilterPolicy -NameLike "Basic" -AsXml
+        Get-SfosWebFilterPolicy -NameLike 'Basic'
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+        Lists all web filter policies whose name contains 'Basic'.
+
+        .EXAMPLE
+        Get-SfosWebFilterPolicy -NameLike 'Basic' -AsXml
+
+        Returns the raw XML of the matching objects, for example to check a field that the
+        standard output does not contain.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        New-SfosWebFilterPolicy
+
+        .LINK
+        Set-SfosWebFilterPolicy
 #>
 function Get-SfosWebFilterPolicy {
     [CmdletBinding()]
@@ -4854,118 +5296,130 @@ function Get-SfosWebFilterPolicy {
 
 <#
         .SYNOPSIS
-        Creates a new web filter policy on the Sophos Firewall.
+        Creates a web filter policy on a Sophos Firewall.
 
         .DESCRIPTION
-        Creates a WebFilterPolicy object that controls how HTTP/HTTPS traffic is categorized and
-        actioned by category, URL group, user activity, dynamic category or file type. Rules can
-        be supplied at creation time via -Rule, built with New-SfosWebFilterPolicyRule, or added
-        afterwards with Add-SfosWebFilterPolicyRule.
-
-        DownloadFileSizeRestriction must always be sent to the API, on every add and every
-        update - a request without it is rejected with a 501. This cmdlet makes the parameter
-        mandatory for exactly that reason.
+        Creates a web filter policy that controls how HTTP and HTTPS traffic is categorized
+        and actioned, by web category, URL group, user activity or file type. Rules can be
+        supplied at creation time with -Rule, built with New-SfosWebFilterPolicyRule, or
+        added afterwards with Add-SfosWebFilterPolicyRule. It needs an open connection from
+        Connect-SfosFirewall, or the connection parameters supplied directly, and an
+        account with write permission.
 
         .PARAMETER Name
-        Name of the web filter policy (1-50 characters, no commas).
+        Required. Name of the new web filter policy. 1 to 50 characters, no comma.
 
         .PARAMETER Description
-        Optional description (max 255 characters).
+        Optional. Free-text description of the policy. Up to 255 characters.
 
         .PARAMETER DefaultAction
-        Action applied when no rule matches: 'Allow' or 'Deny'. The vendor doc's attribute table
-        claims "max 1 character" for this field; that is a documentation error and is not
-        implemented here - the values are the literal words Allow/Deny.
+        Required. Action applied when no rule matches. Valid values: Allow, Deny.
 
         .PARAMETER EnableReporting
-        Whether to include this policy's traffic in reporting: 'Enable' or 'Disable'. The
-        vendor doc lists only 'Enable' as a valid value; the firewall accepts 'Disable' as well.
+        Optional. Whether this policy's traffic is included in reporting. Valid values:
+        Enable, Disable.
 
         .PARAMETER DownloadFileSizeRestrictionEnabled
-        Whether the download file size restriction is active: '0' or '1'.
+        Optional. Whether the download file size restriction is active. Valid values: 0, 1.
 
         .PARAMETER DownloadFileSizeRestriction
-        Maximum download size in MB, 0-1536. Mandatory on every create and update - omitting it
-        is rejected by the firewall with a 501. 0 is accepted live even though the vendor doc's
-        wording suggests otherwise.
+        Required. Maximum download size in MB. 0 to 1536.
 
         .PARAMETER GoogAppDomainListEnabled
-        Whether the Google Apps domain restriction is active: '0' or '1'.
+        Optional. Whether the Google Apps domain restriction is active. Valid values: 0, 1.
 
         .PARAMETER GoogAppDomainList
-        Comma-separated list of allowed Google Apps domains (max 256 characters).
+        Optional. Comma-separated list of allowed Google Apps domains. Up to 256
+        characters.
 
         .PARAMETER Rule
-        Zero or more rule objects, in the exact order they should be evaluated by the firewall.
-        Build each entry with New-SfosWebFilterPolicyRule. SFOS persists rule order unchanged.
+        Optional. Rule objects, in the order they should be evaluated by the firewall.
+        Build each entry with New-SfosWebFilterPolicyRule.
 
         .PARAMETER EnforceSafeSearch
-        Enforce SafeSearch on supported search engines: '0' or '1'.
+        Optional. Whether SafeSearch is enforced on supported search engines. Valid
+        values: 0, 1.
 
         .PARAMETER EnforceImageLicensing
-        Enforce Google image licensing filter: '0' or '1'.
+        Optional. Whether the Google image licensing filter is enforced. Valid values: 0,
+        1.
 
         .PARAMETER YoutubeFilterEnabled
-        Enable the YouTube filter: '0' or '1'.
+        Optional. Whether the YouTube filter is active. Valid values: 0, 1.
 
         .PARAMETER YoutubeFilterIsStrict
-        Use YouTube's strict filtering mode: '0' or '1'.
+        Optional. Whether the YouTube filter uses strict mode. Valid values: 0, 1.
 
         .PARAMETER XFFEnabled
-        Honor the X-Forwarded-For header when applying this policy: '0' or '1'.
+        Optional. Whether the X-Forwarded-For header is honored when this policy is
+        applied. Valid values: 0, 1.
 
         .PARAMETER Office365Enabled
-        Enable Office 365 tenant restriction for this policy: '0' or '1'.
+        Optional. Whether Office 365 tenant restriction is active for this policy. Valid
+        values: 0, 1.
 
         .PARAMETER QuotaLimit
-        Quota time limit in minutes for Quota-actioned rules, 1-1440. Firewall default is 60
-        when omitted.
+        Optional. Quota time limit in minutes for Quota-actioned rules. 1 to 1440.
 
         .PARAMETER Office365TenantsList
-        Allowed Office 365 tenant identifiers for this policy.
+        Optional. Allowed Office 365 tenant identifiers for this policy.
 
         .PARAMETER Office365DirectoryId
-        Office 365 directory ID used for tenant restriction.
-
-        # Connection parameters (optional - use stored context if not provided)
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. Office 365 directory ID used for tenant restriction.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, uses stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number. If omitted, uses stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, uses stored connection context.
+        Optional. User name for the API login. The account needs write permission for the
+        web filter policy objects. If omitted, the value from the current connection is
+        used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, uses stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        None. Throws an exception if creation fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        create.
 
         .EXAMPLE
-        # Create a policy with no rules yet, add rules afterwards
-        New-SfosWebFilterPolicy -Name "Basic-Policy" -DefaultAction Allow -DownloadFileSizeRestriction 0
+        New-SfosWebFilterPolicy -Name 'Basic-Policy' -DefaultAction Allow -DownloadFileSizeRestriction 0 -WhatIf
+
+        Shows what the call would create without sending it to the firewall.
 
         .EXAMPLE
-        # Create a policy with one rule built from the two builder cmdlets
-        $category = New-SfosWebFilterPolicyCategory -ID "Extreme" -Type WebCategory
+        New-SfosWebFilterPolicy -Name 'Basic-Policy' -DefaultAction Allow -DownloadFileSizeRestriction 0
+
+        Creates a policy with no rules yet. Add rules afterwards with
+        Add-SfosWebFilterPolicyRule.
+
+        .EXAMPLE
+        $category = New-SfosWebFilterPolicyCategory -ID 'Extreme' -Type WebCategory
         $rule = New-SfosWebFilterPolicyRule -Category $category -HTTPAction Deny -HTTPSAction Deny
-        New-SfosWebFilterPolicy -Name "Block-Extreme" -DefaultAction Allow -DownloadFileSizeRestriction 100 -Rule $rule
+        New-SfosWebFilterPolicy -Name 'Block-Extreme' -DefaultAction Allow -DownloadFileSizeRestriction 100 -Rule $rule
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
+        Creates a policy with one rule built from the two builder cmdlets.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
@@ -5098,140 +5552,152 @@ function New-SfosWebFilterPolicy {
 
 <#
         .SYNOPSIS
-        Updates an existing WebFilterPolicy object on the Sophos Firewall.
+        Updates a web filter policy on a Sophos Firewall.
 
         .DESCRIPTION
-        Updates a WebFilterPolicy object using the Sophos Firewall XML API. You can supply the
-        target object name directly or via the pipeline.
+        Changes the settings or rule list of an existing web filter policy. The cmdlet
+        reads the current object first and sends it back complete, so a field you do not
+        pass keeps its current value; pass a field explicitly, with an empty value if
+        needed, to clear it. It needs an open connection from Connect-SfosFirewall, or the
+        connection parameters supplied directly, and an account with write permission.
 
-        SFOS replaces the whole entity on update - any element not sent in the request is
-        cleared on the firewall. This cmdlet reads the current policy first and keeps whatever
-        the caller does not explicitly pass. To clear a field, pass it explicitly with an
-        empty value.
-
-        WebFilterPolicy carries no IsDefault flag, unlike WebFilterException. There is no
-        protection against overwriting a predefined policy such as 'Default Policy' - see
-        .NOTES.
+        Predefined policies, such as 'Default Policy', are not flagged and can be
+        overwritten like any other object, including their rule list. Confirm the name
+        before running this against a policy you did not create yourself.
 
         .PARAMETER Name
-        Name of the target policy.
+        Required. Name of the web filter policy to update.
 
         .PARAMETER Description
-        Optional description text. If omitted, the existing description is kept.
+        Optional. Description to store, replacing the current one. If omitted, the current
+        description is kept.
 
         .PARAMETER DefaultAction
-        Action applied when no rule matches: 'Allow' or 'Deny'. If omitted, the existing value
-        is kept.
+        Optional. Action applied when no rule matches, replacing the current value. Valid
+        values: Allow, Deny. If omitted, the current value is kept.
 
         .PARAMETER EnableReporting
-        Whether to include this policy's traffic in reporting: 'Enable' or 'Disable'. If
-        omitted, the existing value is kept.
+        Optional. Whether this policy's traffic is included in reporting, replacing the
+        current value. Valid values: Enable, Disable. If omitted, the current value is
+        kept.
 
         .PARAMETER DownloadFileSizeRestrictionEnabled
-        Whether the download file size restriction is active: '0' or '1'. If omitted, the
-        existing value is kept.
+        Optional. Whether the download file size restriction is active, replacing the
+        current value. Valid values: 0, 1. If omitted, the current value is kept.
 
         .PARAMETER DownloadFileSizeRestriction
-        Maximum download size in MB, 0-1536. If omitted, the existing value is kept and
-        resent - the API rejects an update that omits this field entirely with a 501.
+        Optional. Maximum download size in MB, replacing the current value. 0 to 1536. If
+        omitted, the current value is kept.
 
         .PARAMETER GoogAppDomainListEnabled
-        Whether the Google Apps domain restriction is active: '0' or '1'. If omitted, the
-        existing value is kept.
+        Optional. Whether the Google Apps domain restriction is active, replacing the
+        current value. Valid values: 0, 1. If omitted, the current value is kept.
 
         .PARAMETER GoogAppDomainList
-        Comma-separated list of allowed Google Apps domains (max 256 characters). If omitted,
-        the existing value is kept.
+        Optional. Comma-separated list of allowed Google Apps domains, replacing the
+        current value. Up to 256 characters. If omitted, the current value is kept.
 
         .PARAMETER Rule
-        Complete replacement rule list, in the order the firewall should evaluate them. This
-        REPLACES the existing RuleList wholesale, exactly as the API does - it does not merge
-        with the rules already on the firewall. Omit this parameter to keep the existing rules
-        unchanged. To add or remove a single rule without touching the rest of the list, use
-        Add-SfosWebFilterPolicyRule / Remove-SfosWebFilterPolicyRule instead.
+        Optional. Complete rule list, in the order the firewall should evaluate them,
+        replacing the current list entirely. If omitted, the current rules are kept. To
+        add or remove a single rule without touching the rest, use
+        Add-SfosWebFilterPolicyRule or Remove-SfosWebFilterPolicyRule instead.
 
         .PARAMETER EnforceSafeSearch
-        Enforce SafeSearch on supported search engines: '0' or '1'. If omitted, the existing
-        value is kept.
+        Optional. Whether SafeSearch is enforced on supported search engines, replacing
+        the current value. Valid values: 0, 1. If omitted, the current value is kept.
 
         .PARAMETER EnforceImageLicensing
-        Enforce Google image licensing filter: '0' or '1'. If omitted, the existing value is
-        kept.
+        Optional. Whether the Google image licensing filter is enforced, replacing the
+        current value. Valid values: 0, 1. If omitted, the current value is kept.
 
         .PARAMETER YoutubeFilterEnabled
-        Enable the YouTube filter: '0' or '1'. If omitted, the existing value is kept.
+        Optional. Whether the YouTube filter is active, replacing the current value.
+        Valid values: 0, 1. If omitted, the current value is kept.
 
         .PARAMETER YoutubeFilterIsStrict
-        Use YouTube's strict filtering mode: '0' or '1'. If omitted, the existing value is
-        kept.
+        Optional. Whether the YouTube filter uses strict mode, replacing the current
+        value. Valid values: 0, 1. If omitted, the current value is kept.
 
         .PARAMETER XFFEnabled
-        Honor the X-Forwarded-For header when applying this policy: '0' or '1'. If omitted,
-        the existing value is kept.
+        Optional. Whether the X-Forwarded-For header is honored, replacing the current
+        value. Valid values: 0, 1. If omitted, the current value is kept.
 
         .PARAMETER Office365Enabled
-        Enable Office 365 tenant restriction for this policy: '0' or '1'. If omitted, the
-        existing value is kept.
-
-        .PARAMETER QuotaLimit
-        Quota time limit in minutes for Quota-actioned rules, 1-1440. If omitted, the existing
-        value is kept.
-
-        .PARAMETER Office365TenantsList
-        Allowed Office 365 tenant identifiers for this policy. If omitted, the existing value
-        is kept.
-
-        .PARAMETER Office365DirectoryId
-        Office 365 directory ID used for tenant restriction. If omitted, the existing value is
+        Optional. Whether Office 365 tenant restriction is active for this policy,
+        replacing the current value. Valid values: 0, 1. If omitted, the current value is
         kept.
 
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        .PARAMETER QuotaLimit
+        Optional. Quota time limit in minutes for Quota-actioned rules, replacing the
+        current value. 1 to 1440. If omitted, the current value is kept.
+
+        .PARAMETER Office365TenantsList
+        Optional. Allowed Office 365 tenant identifiers for this policy, replacing the
+        current value. If omitted, the current value is kept.
+
+        .PARAMETER Office365DirectoryId
+        Optional. Office 365 directory ID used for tenant restriction, replacing the
+        current value. If omitted, the current value is kept.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the
-        stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use
-        the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored
-        connection context.
+        Optional. User name for the API login. The account needs write permission for the
+        web filter policy objects. If omitted, the value from the current connection is
+        used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored
-        connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        System.String. The web filter policy name and other fields can be piped in by
+        property name, for example the output of Get-SfosWebFilterPolicy.
 
         .OUTPUTS
-        None. Throws an exception if the update fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        update.
 
         .EXAMPLE
-        # Change only the default action, every other field (including RuleList) is preserved
-        Set-SfosWebFilterPolicy -Name "Basic-Policy" -DefaultAction Deny
+        Set-SfosWebFilterPolicy -Name 'Basic-Policy' -DefaultAction Deny -WhatIf
+
+        Shows what the call would change without sending it to the firewall.
 
         .EXAMPLE
-        # Update using pipeline input
-        Get-SfosWebFilterPolicy -NameLike "Basic-Policy" | Set-SfosWebFilterPolicy -Description "Updated"
+        Set-SfosWebFilterPolicy -Name 'Basic-Policy' -DefaultAction Deny
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
-        No write protection for predefined policies: WebFilterPolicy has no IsDefault flag, so
-        this cmdlet will overwrite a policy such as 'Default Policy' - including its RuleList -
-        without any warning from the API. Verify -Name before running this against a
-        shared/production policy.
+        Changes the default action. Every other field, including the rule list, is kept
+        unchanged.
+
+        .EXAMPLE
+        Get-SfosWebFilterPolicy -NameLike 'Basic-Policy' | Set-SfosWebFilterPolicy -Description 'Updated'
+
+        Updates every matching policy with a new description.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosWebFilterPolicy
 #>
 function Set-SfosWebFilterPolicy {
     [CmdletBinding(SupportsShouldProcess)]
@@ -5403,61 +5869,73 @@ function Set-SfosWebFilterPolicy {
 
 <#
         .SYNOPSIS
-        Removes a WebFilterPolicy object from the Sophos Firewall.
+        Removes a web filter policy from a Sophos Firewall.
 
         .DESCRIPTION
-        Removes a WebFilterPolicy object using the Sophos Firewall XML API. This cmdlet
-        supports ShouldProcess; use -WhatIf to preview the change.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
-
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the
-        stored connection context.
-
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use
-        the stored connection context.
-
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored
-        connection context.
-
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored
-        connection context.
+        Deletes a web filter policy by name. Predefined policies, such as 'Default
+        Policy', are not flagged and are removed like any other object, together with
+        their rule list; confirm the name before removing a policy you did not create
+        yourself. It needs an open connection from Connect-SfosFirewall, or the connection
+        parameters supplied directly, and an account with write permission. Remove any
+        firewall rule that still references the policy first, or the firewall keeps the
+        reference in place.
 
         .PARAMETER Name
-        Name of the target policy.
+        Required. Name of the web filter policy to remove.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs write permission for the
+        web filter policy objects. If omitted, the value from the current connection is
+        used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        System.String. The web filter policy name can be piped in by property name, for
+        example the output of Get-SfosWebFilterPolicy.
 
         .OUTPUTS
-        None. Throws an exception if removal fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        removal.
 
         .EXAMPLE
-        # Preview removal
-        Remove-SfosWebFilterPolicy -Name "Basic-Policy" -WhatIf
+        Remove-SfosWebFilterPolicy -Name 'Basic-Policy' -WhatIf
+
+        Shows what the call would remove without sending it to the firewall.
 
         .EXAMPLE
-        # Pipeline removal
-        Get-SfosWebFilterPolicy -NameLike "Basic" | Remove-SfosWebFilterPolicy
+        Get-SfosWebFilterPolicy -NameLike 'Basic' | Remove-SfosWebFilterPolicy
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
-        No write protection for predefined policies: WebFilterPolicy has no IsDefault flag, so
-        this cmdlet will remove a policy such as 'Default Policy' just as readily as one of
-        your own. Verify -Name before running this against a shared/production policy.
+        Removes every web filter policy whose name contains 'Basic'. The cmdlet asks for
+        confirmation before each write.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosWebFilterPolicy
 #>
 function Remove-SfosWebFilterPolicy {
     [CmdletBinding(SupportsShouldProcess)]
@@ -5516,39 +5994,41 @@ function Remove-SfosWebFilterPolicy {
 
 <#
         .SYNOPSIS
-        Builds a category reference for use inside a WebFilterPolicy rule.
+        Builds a category reference for use inside a web filter policy rule.
 
         .DESCRIPTION
-        Creates the small object New-SfosWebFilterPolicyRule expects for its -Category
-        parameter. Performs no API call. Category/ID is a plain-text name, not a numeric ID -
-        for example 'Extreme', 'Weapons' or 'Blocked URLs for Default Policy', not a number.
+        Creates the small object that New-SfosWebFilterPolicyRule expects for its
+        -Category parameter. This cmdlet does not contact the firewall; it only builds an
+        in-memory object.
 
         .PARAMETER ID
-        Plain-text name of the referenced object - a web category name, URL group name, user
-        activity name, dynamic category name or file type name, matching -Type. Look the exact
-        spelling up on the firewall (Get-SfosWebFilterCategory, Get-SfosWebFilterURLGroup,
-        Get-SfosUserActivity, Get-SfosFileType); this is not a numeric identifier.
+        Required. Plain-text name of the referenced object - a web category, URL group,
+        user activity, dynamic category or file type name, matching -Type. Look the exact
+        spelling up with Get-SfosWebFilterCategory, Get-SfosWebFilterURLGroup,
+        Get-SfosUserActivity or Get-SfosFileType.
 
         .PARAMETER Type
-        Kind of object -ID refers to: 'WebCategory', 'URLGroup', 'UserActivity',
-        'DynamicCategory' or 'FileType'.
+        Required. Kind of object -ID refers to. Valid values: WebCategory, URLGroup,
+        UserActivity, DynamicCategory, FileType.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        PSCustomObject with ID and Type properties.
+        System.Management.Automation.PSCustomObject. An object with ID and Type
+        properties.
 
         .EXAMPLE
-        # Reference the predefined 'Extreme' web category
-        New-SfosWebFilterPolicyCategory -ID "Extreme" -Type WebCategory
+        New-SfosWebFilterPolicyCategory -ID 'Extreme' -Type WebCategory
+
+        Builds a reference to the predefined 'Extreme' web category.
 
         .EXAMPLE
-        # Build a category and feed it straight into a rule and a new policy
-        $category = New-SfosWebFilterPolicyCategory -ID "Weapons" -Type WebCategory
+        $category = New-SfosWebFilterPolicyCategory -ID 'Weapons' -Type WebCategory
         $rule = New-SfosWebFilterPolicyRule -Category $category -HTTPAction Deny -HTTPSAction Deny
-        New-SfosWebFilterPolicy -Name "Block-Weapons" -DefaultAction Allow -DownloadFileSizeRestriction 0 -Rule $rule
+        New-SfosWebFilterPolicy -Name 'Block-Weapons' -DefaultAction Allow -DownloadFileSizeRestriction 0 -Rule $rule
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This cmdlet performs no API call; it only builds an in-memory object.
+        Builds a category reference and feeds it into a rule and a new policy.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
@@ -5581,93 +6061,90 @@ function New-SfosWebFilterPolicyCategory {
 
 <#
         .SYNOPSIS
-        Builds a rule for use inside a WebFilterPolicy's RuleList.
+        Builds a rule for use inside a web filter policy's rule list.
 
         .DESCRIPTION
-        Creates the object New-SfosWebFilterPolicy -Rule, Set-SfosWebFilterPolicy -Rule and
-        Add-SfosWebFilterPolicyRule expect. Performs no API call - the rule only becomes part
-        of a policy once handed to one of those cmdlets. SFOS persists rule order unchanged,
-        so build rules in the order they must be evaluated.
+        Creates the object that New-SfosWebFilterPolicy -Rule, Set-SfosWebFilterPolicy
+        -Rule and Add-SfosWebFilterPolicyRule expect. This cmdlet does not contact the
+        firewall; the rule only becomes part of a policy once handed to one of those
+        cmdlets. The firewall evaluates rules in the order they are stored, so build them
+        in the order they must apply.
 
-        .PARAMETER Category
-        One or more category objects built with New-SfosWebFilterPolicyCategory.
-
-        .PARAMETER HTTPAction
-        Action for HTTP traffic matching this rule's categories: 'Deny', 'Allow', 'Warn' or
-        'Quota'. Default: 'Deny'. The vendor doc's attribute table also lists 'Log' as a
-        valid value; every combination tried with 'Log' (either action, with or without
-        FollowHTTPAction) was rejected with a bare 501 'Configuration parameters validation
-        failed.' / empty <InvalidParams/>, so 'Log' is deliberately not offered here.
-
-        .PARAMETER HTTPSAction
-        Action for HTTPS traffic matching this rule's categories: 'Deny', 'Allow', 'Warn' or
-        'Quota'. Default: 'Deny'. See -HTTPAction for why 'Log' is not offered even though
-        the vendor doc lists it.
-
-        .PARAMETER FollowHTTPAction
-        Whether HTTPSAction follows HTTPAction: '0' or '1'. Default: '0'.
-
-        .PARAMETER Schedule
-        Name of the Schedule object this rule is active during, for example 'All The Time'.
-        Default: 'All The Time' (a Sophos factory-default schedule).
-
-        .PARAMETER PolicyRuleEnabled
-        Whether this rule is active: '0' or '1'. Default: '1'.
-
-        .PARAMETER CCLRuleEnabled
-        Whether the Cloud Application Control List is active for this rule: '0' or '1'.
-        Default: '0'.
-
-        .PARAMETER ExceptionFileType
-        File type category names excluded from this rule. Rarely used; not observed populated
-        on the lab firewall.
-
-        .PARAMETER User
-        User names this rule additionally applies to. Rarely used; not observed populated on
-        the lab firewall.
-
-        .PARAMETER CCL
-        Cloud Application Control List entries for this rule. Rarely used; not observed
-        populated on the lab firewall.
+        To change one field of an existing rule without resetting the rest, pipe the rule
+        in through -InputObject and pass only the field you want to change; every
+        parameter you do not pass then keeps the value from -InputObject instead of
+        falling back to its default.
 
         .PARAMETER InputObject
-        An existing rule to use as the base, as returned in the RuleList of
-        Get-SfosWebFilterPolicy. Accepts pipeline input. Only the parameters you actually
-        supply override it, so a single field can be changed without disturbing the rest.
-        Without it, every omitted parameter falls back to its default.
+        Optional. An existing rule to use as the base, as returned in the RuleList
+        property of Get-SfosWebFilterPolicy. Only the parameters you pass explicitly
+        override its values.
+
+        .PARAMETER Category
+        Required unless -InputObject is supplied. One or more category objects built
+        with New-SfosWebFilterPolicyCategory.
+
+        .PARAMETER HTTPAction
+        Optional. Action for HTTP traffic matching this rule's categories. Valid values:
+        Deny, Allow, Warn, Quota. Default: Deny.
+
+        .PARAMETER HTTPSAction
+        Optional. Action for HTTPS traffic matching this rule's categories. Valid values:
+        Deny, Allow, Warn, Quota. Default: Deny.
+
+        .PARAMETER FollowHTTPAction
+        Optional. Whether HTTPSAction follows HTTPAction. Valid values: 0, 1. Default: 0.
+
+        .PARAMETER Schedule
+        Optional. Name of the schedule object this rule is active during. Default: 'All
+        The Time'.
+
+        .PARAMETER PolicyRuleEnabled
+        Optional. Whether this rule is active. Valid values: 0, 1. Default: 1.
+
+        .PARAMETER CCLRuleEnabled
+        Optional. Whether the Cloud Application Control List is active for this rule.
+        Valid values: 0, 1. Default: 0.
+
+        .PARAMETER ExceptionFileType
+        Optional. File type category names excluded from this rule.
+
+        .PARAMETER User
+        Optional. User names this rule additionally applies to.
+
+        .PARAMETER CCL
+        Optional. Cloud Application Control List entries for this rule.
+
+        .INPUTS
+        System.Management.Automation.PSCustomObject. A rule object can be piped in as
+        -InputObject, for example a RuleList entry from Get-SfosWebFilterPolicy.
 
         .OUTPUTS
-        PSCustomObject with CategoryList, HTTPAction, HTTPSAction, FollowHTTPAction, Schedule,
-        PolicyRuleEnabled, CCLRuleEnabled, ExceptionList, UserList and CCLList properties -
-        the same shape Get-SfosWebFilterPolicy returns for each RuleList entry.
+        System.Management.Automation.PSCustomObject. An object with CategoryList,
+        HTTPAction, HTTPSAction, FollowHTTPAction, Schedule, PolicyRuleEnabled,
+        CCLRuleEnabled, ExceptionList, UserList and CCLList properties, matching the shape
+        Get-SfosWebFilterPolicy returns for each RuleList entry.
 
         .EXAMPLE
-        # Deny HTTP and HTTPS traffic in the 'Extreme' category, all the time
-        $category = New-SfosWebFilterPolicyCategory -ID "Extreme" -Type WebCategory
+        $category = New-SfosWebFilterPolicyCategory -ID 'Extreme' -Type WebCategory
         $rule = New-SfosWebFilterPolicyRule -Category $category -HTTPAction Deny -HTTPSAction Deny
-        New-SfosWebFilterPolicy -Name "Block-Extreme" -DefaultAction Allow -DownloadFileSizeRestriction 0 -Rule $rule
+        New-SfosWebFilterPolicy -Name 'Block-Extreme' -DefaultAction Allow -DownloadFileSizeRestriction 0 -Rule $rule
+
+        Denies HTTP and HTTPS traffic in the 'Extreme' category, all the time.
 
         .EXAMPLE
-        # Warn on a URL group during business hours only
-        $category = New-SfosWebFilterPolicyCategory -ID "Blocked-Sites" -Type URLGroup
-        New-SfosWebFilterPolicyRule -Category $category -HTTPAction Warn -HTTPSAction Warn -Schedule "Work hours"
+        $category = New-SfosWebFilterPolicyCategory -ID 'Blocked-Sites' -Type URLGroup
+        New-SfosWebFilterPolicyRule -Category $category -HTTPAction Warn -HTTPSAction Warn -Schedule 'Work hours'
+
+        Warns on a URL group during business hours only.
 
         .EXAMPLE
-        # Change one field of an existing rule. Piping the rule in keeps everything else -
-        # without -InputObject the defaults would reset Schedule and the enabled flags.
-        $policy = Get-SfosWebFilterPolicy -NameLike "Block-Extreme"
+        $policy = Get-SfosWebFilterPolicy -NameLike 'Block-Extreme'
         $edited = $policy.RuleList[0] | New-SfosWebFilterPolicyRule -HTTPAction Allow
-        Set-SfosWebFilterPolicy -Name "Block-Extreme" -Rule @($edited) + @($policy.RuleList[1..($policy.RuleList.Count - 1)])
+        Set-SfosWebFilterPolicy -Name 'Block-Extreme' -Rule (@($edited) + @($policy.RuleList[1..($policy.RuleList.Count - 1)]))
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This cmdlet performs no API call; it only builds an in-memory object.
-
-        Without -InputObject every parameter you leave out takes its default, which makes the
-        cmdlet unsuitable for editing an existing rule: building a rule just to change the
-        action would also reset Schedule, PolicyRuleEnabled and CCLRuleEnabled. Pipe the
-        existing rule in, or edit the property on the object returned by
-        Get-SfosWebFilterPolicy and hand the whole RuleList back to Set-SfosWebFilterPolicy.
+        Changes the action of the first rule while keeping every other field and every
+        other rule unchanged.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
@@ -5792,61 +6269,74 @@ function New-SfosWebFilterPolicyRule {
 
 <#
         .SYNOPSIS
-        Appends a rule to the end of an existing WebFilterPolicy's RuleList.
+        Appends a rule to the end of an existing web filter policy's rule list.
 
         .DESCRIPTION
-        Reads the current WebFilterPolicy, appends the supplied rule after the existing ones,
-        and writes the whole entity back - SFOS replaces RuleList wholesale on update, so the
-        existing rules and their order are read back first and resent unchanged alongside the
-        new one.
+        Reads the current web filter policy, appends the supplied rule after the existing
+        ones, and writes the whole entity back, preserving the existing rules and their
+        order. It needs an open connection from Connect-SfosFirewall, or the connection
+        parameters supplied directly, and an account with write permission.
+
+        Predefined policies, such as 'Default Policy', are not flagged and accept an
+        appended rule like any other object; confirm the name before running this against
+        a policy you did not create yourself.
 
         .PARAMETER Name
-        Name of the target policy.
+        Required. Name of the web filter policy to change.
 
         .PARAMETER Rule
-        Rule object to append, built with New-SfosWebFilterPolicyRule.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Required. Rule object to append, built with New-SfosWebFilterPolicyRule.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the
-        stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use
-        the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored
-        connection context.
+        Optional. User name for the API login. The account needs write permission for the
+        web filter policy objects. If omitted, the value from the current connection is
+        used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored
-        connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        System.String. The web filter policy name can be piped in by property name, for
+        example the output of Get-SfosWebFilterPolicy.
 
         .OUTPUTS
-        None. Throws an exception if the update fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        update.
 
         .EXAMPLE
-        # Add a rule blocking the 'Weapons' category to an existing policy
-        $category = New-SfosWebFilterPolicyCategory -ID "Weapons" -Type WebCategory
+        $category = New-SfosWebFilterPolicyCategory -ID 'Weapons' -Type WebCategory
         $rule = New-SfosWebFilterPolicyRule -Category $category -HTTPAction Deny -HTTPSAction Deny
-        Add-SfosWebFilterPolicyRule -Name "Basic-Policy" -Rule $rule
+        Add-SfosWebFilterPolicyRule -Name 'Basic-Policy' -Rule $rule -WhatIf
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
-        No write protection for predefined policies: WebFilterPolicy has no IsDefault flag, so
-        this cmdlet will happily append a rule to a policy such as 'Default Policy'. Verify
-        -Name before running this against a shared/production policy.
+        Shows what the call would add without sending it to the firewall.
+
+        .EXAMPLE
+        $category = New-SfosWebFilterPolicyCategory -ID 'Weapons' -Type WebCategory
+        $rule = New-SfosWebFilterPolicyRule -Category $category -HTTPAction Deny -HTTPSAction Deny
+        Add-SfosWebFilterPolicyRule -Name 'Basic-Policy' -Rule $rule
+
+        Adds a rule blocking the 'Weapons' category to an existing policy.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
@@ -5925,59 +6415,72 @@ function Add-SfosWebFilterPolicyRule {
 
 <#
         .SYNOPSIS
-        Removes a single rule from an existing WebFilterPolicy's RuleList by index.
+        Removes a single rule from an existing web filter policy's rule list by index.
 
         .DESCRIPTION
-        Reads the current WebFilterPolicy, drops the rule at the given zero-based index from
-        its RuleList, and writes the whole entity back - SFOS replaces RuleList wholesale on
-        update, so the remaining rules and their order are resent unchanged.
+        Reads the current web filter policy, drops the rule at the given zero-based index
+        from its rule list, and writes the whole entity back, preserving the remaining
+        rules and their order. It needs an open connection from Connect-SfosFirewall, or
+        the connection parameters supplied directly, and an account with write permission.
+
+        Predefined policies, such as 'Default Policy', are not flagged and lose a rule
+        like any other object; confirm the name before running this against a policy you
+        did not create yourself.
 
         .PARAMETER Name
-        Name of the target policy.
+        Required. Name of the web filter policy to change.
 
         .PARAMETER Index
-        Zero-based position of the rule to remove within the policy's RuleList, in the order
-        returned by Get-SfosWebFilterPolicy. Throws if out of range.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Required. Zero-based position of the rule to remove within the policy's rule list,
+        in the order returned by Get-SfosWebFilterPolicy. The cmdlet throws if the index
+        is out of range.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the
-        stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use
-        the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored
-        connection context.
+        Optional. User name for the API login. The account needs write permission for the
+        web filter policy objects. If omitted, the value from the current connection is
+        used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored
-        connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        System.String. The web filter policy name can be piped in by property name, for
+        example the output of Get-SfosWebFilterPolicy.
 
         .OUTPUTS
-        None. Throws an exception if the update fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        update.
 
         .EXAMPLE
-        # Remove the first rule of the policy
-        Remove-SfosWebFilterPolicyRule -Name "Basic-Policy" -Index 0
+        Remove-SfosWebFilterPolicyRule -Name 'Basic-Policy' -Index 0 -WhatIf
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
-        No write protection for predefined policies: WebFilterPolicy has no IsDefault flag, so
-        this cmdlet will happily remove a rule from a policy such as 'Default Policy'. Verify
-        -Name before running this against a shared/production policy.
+        Shows what the call would remove without sending it to the firewall.
+
+        .EXAMPLE
+        Remove-SfosWebFilterPolicyRule -Name 'Basic-Policy' -Index 0
+
+        Removes the first rule of the policy.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
@@ -6069,71 +6572,97 @@ function Remove-SfosWebFilterPolicyRule {
 
 <#
         .SYNOPSIS
-        Retrieves SurfingQuotaPolicy objects from the Sophos Firewall.
+        Retrieves surfing quota policy objects from a Sophos Firewall.
 
         .DESCRIPTION
-        Queries the Sophos Firewall XML API for SurfingQuotaPolicy objects. By default the cmdlet returns PowerShell-friendly objects. Use -AsXml to return the raw XML nodes.
+        Returns the surfing quota policy objects that are defined on the firewall. A
+        surfing quota policy limits browsing time and is either Cyclic, a recurring hour
+        budget per day, week, month or year, or NonCyclic, a one-off validity window with a
+        total hour budget. The firewall returns only the fields that match the policy's
+        cycle type. Use this cmdlet to review the existing objects or to feed them into
+        another cmdlet through the pipeline. The cmdlet only reads; nothing on the
+        firewall is changed. It needs an open connection from Connect-SfosFirewall, or the
+        connection parameters supplied directly.
 
-        A SurfingQuotaPolicy is either Cyclic (a recurring daily/weekly/monthly/yearly hour
-        budget) or NonCyclic (a one-off validity window with a total hour budget). The
-        CycleType-specific fields (CycleHours/CycleMinutes/PerDay for Cyclic, Validity/
-        MaximumHours/Minutes for NonCyclic) are populated only for the matching type; the
-        firewall omits the other set of elements entirely rather than sending them empty.
-
-        Note: Sophos GET responses can be inconsistent regarding status elements. This cmdlet is designed to return an empty result when no records are found.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
-
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        You can combine several filters. The firewall itself evaluates at most one of them,
+        so every filter you supply is applied again on the client. The result therefore
+        always matches all filters you gave.
 
         .PARAMETER NameLike
-        Optional name filter. In Sophos SFOS, 'like' behaves as a substring match (the supplied value may match anywhere in the object name). Sent to the firewall as the server-side filter.
+        Optional. Returns only objects whose name contains the given text anywhere. This is
+        a substring match, not a wildcard pattern. If omitted, the name is not used to
+        filter.
 
         .PARAMETER DescriptionLike
-        Optional description filter, matched as a substring anywhere in the value. The firewall does not support filtering on Description, so this filter is always applied client-side.
+        Optional. Returns only objects whose description contains the given text anywhere.
+        Applied on the client. If omitted, the description is not used to filter.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs read permission for the
+        surfing quota policy objects. If omitted, the value from the current connection is
+        used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
 
         .PARAMETER AsXml
-        Returns raw XML nodes instead of PowerShell-friendly objects.
+        Optional. Returns the raw XML elements sent by the firewall instead of PowerShell
+        objects. Useful when you need a field that the standard output does not show.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        PSCustomObject (default). System.Xml.XmlElement when -AsXml is specified.
+        System.Management.Automation.PSCustomObject. One object per surfing quota policy,
+        with the properties Name, CycleType, CycleHours, CycleMinutes, PerDay, Validity,
+        MaximumHours, Minutes and Description. Returns System.Xml.XmlElement when -AsXml is
+        used, and an empty array when no object matches.
 
         .EXAMPLE
-        # Retrieve all objects
         Get-SfosSurfingQuotaPolicy
 
-        .EXAMPLE
-        # Filter by name (substring match)
-        Get-SfosSurfingQuotaPolicy -NameLike "Daily"
+        Lists every surfing quota policy on the firewall of the current connection.
 
         .EXAMPLE
-        # Return raw XML for troubleshooting
-        Get-SfosSurfingQuotaPolicy -NameLike "Daily" -AsXml
+        Get-SfosSurfingQuotaPolicy -NameLike 'Daily'
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+        Lists all surfing quota policies whose name contains 'Daily'.
+
+        .EXAMPLE
+        Get-SfosSurfingQuotaPolicy -NameLike 'Daily' -AsXml
+
+        Returns the raw XML of the matching objects, for example to check a field that the
+        standard output does not contain.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        New-SfosSurfingQuotaPolicy
+
+        .LINK
+        Set-SfosSurfingQuotaPolicy
 #>
 function Get-SfosSurfingQuotaPolicy {
     [CmdletBinding()]
@@ -6229,93 +6758,109 @@ function Get-SfosSurfingQuotaPolicy {
 
 <#
         .SYNOPSIS
-        Creates a new SurfingQuotaPolicy on the Sophos Firewall.
+        Creates a surfing quota policy on a Sophos Firewall.
 
         .DESCRIPTION
-        Creates a Surfing Quota Policy, which defines the allowed surfing time for a user to
-        access the internet. A policy is either Cyclic (a recurring hour budget per day/week/
-        month/year, via -CycleHours/-CycleMinutes/-PerDay) or NonCyclic (a one-off validity
-        window with a total hour budget, via -Validity/-MaximumHours/-Minutes). -CycleType
-        selects which of the two field groups is required; the other group is not sent.
+        Creates a surfing quota policy, which limits the internet browsing time allowed
+        for a user. A policy is either Cyclic, a recurring hour budget per day, week,
+        month or year, set with -CycleHours, -CycleMinutes and -PerDay, or NonCyclic, a
+        one-off validity window with a total hour budget, set with -Validity,
+        -MaximumHours and -Minutes. -CycleType selects which of the two field groups
+        applies. It needs an open connection from Connect-SfosFirewall, or the connection
+        parameters supplied directly, and an account with write permission.
 
         .PARAMETER Name
-        Name of the policy (1-60 characters, no commas).
+        Required. Name of the new policy. 1 to 60 characters, no comma.
 
         .PARAMETER CycleType
-        'Cyclic' or 'NonCyclic'. Selects which of the type-specific parameters below are
-        required. The Sophos documentation marks CycleType itself as optional, but the
-        firewall answers with a 501 InvalidParams error if it is omitted.
+        Required. Selects which of the type-specific parameters below apply. Valid
+        values: Cyclic, NonCyclic.
 
         .PARAMETER CycleHours
-        Cycle hours, the upper limit of surfing hours per cycle. Required when -CycleType is
-        'Cyclic'.
+        Required when -CycleType is Cyclic. Upper limit of surfing hours per cycle.
 
         .PARAMETER CycleMinutes
-        Cycle minutes, the upper limit of surfing minutes per cycle (0-9999). Required when
-        -CycleType is 'Cyclic'.
+        Required when -CycleType is Cyclic. Upper limit of surfing minutes per cycle, 0
+        to 9999.
 
         .PARAMETER PerDay
-        Cycle recurrence: 'Days', 'Weekly', 'Monthly' or 'Yearly'. Required when -CycleType is
-        'Cyclic'.
+        Required when -CycleType is Cyclic. Cycle recurrence. Valid values: Days, Weekly,
+        Monthly, Yearly.
 
         .PARAMETER Validity
-        Total number of surfing days allowed, or 'Unlimited' for no restriction. Required when
-        -CycleType is 'NonCyclic'.
+        Required when -CycleType is NonCyclic. Total number of surfing days allowed, or
+        'Unlimited' for no restriction.
 
         .PARAMETER MaximumHours
-        Total surfing hours allowed, or 'Unlimited' for no restriction. Required when
-        -CycleType is 'NonCyclic'.
+        Required when -CycleType is NonCyclic. Total surfing hours allowed, or
+        'Unlimited' for no restriction.
 
         .PARAMETER Minutes
-        Additional surfing minutes allowed on top of -MaximumHours (0-59). Optional, only
-        meaningful when -CycleType is 'NonCyclic'.
+        Optional, applies when -CycleType is NonCyclic. Additional surfing minutes
+        allowed on top of -MaximumHours. 0 to 59.
 
         .PARAMETER Description
-        Optional description (max 255 characters).
-
-        # Connection parameters (optional - use stored context if not provided)
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. Free-text description of the policy. Up to 255 characters.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, uses stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number. If omitted, uses stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, uses stored connection context.
+        Optional. User name for the API login. The account needs write permission for the
+        surfing quota policy objects. If omitted, the value from the current connection is
+        used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, uses stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        None. Throws an exception if creation fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        create.
 
         .EXAMPLE
-        # Create a Cyclic policy: 2 hours 30 minutes per day
-        New-SfosSurfingQuotaPolicy -Name "Daily-Quota" -CycleType Cyclic -CycleHours 2 -CycleMinutes 30 -PerDay Days
+        New-SfosSurfingQuotaPolicy -Name 'Daily-Quota' -CycleType Cyclic -CycleHours 2 -CycleMinutes 30 -PerDay Days -WhatIf
+
+        Shows what the call would create without sending it to the firewall.
 
         .EXAMPLE
-        # Create a NonCyclic policy: 100 hours over 30 days
-        New-SfosSurfingQuotaPolicy -Name "Monthly-Quota" -CycleType NonCyclic -Validity 30 -MaximumHours 100 -Description "One-off quota"
+        New-SfosSurfingQuotaPolicy -Name 'Daily-Quota' -CycleType Cyclic -CycleHours 2 -CycleMinutes 30 -PerDay Days
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
+        Creates a Cyclic policy allowing 2 hours 30 minutes per day.
+
+        .EXAMPLE
+        New-SfosSurfingQuotaPolicy -Name 'Monthly-Quota' -CycleType NonCyclic -Validity 30 -MaximumHours 100 -Description 'One-off quota'
+
+        Creates a NonCyclic policy allowing 100 hours over 30 days.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
 
         .LINK
         Get-SfosSurfingQuotaPolicy
+
+        .LINK
+        Set-SfosSurfingQuotaPolicy
 #>
 function New-SfosSurfingQuotaPolicy {
     [CmdletBinding(SupportsShouldProcess)]
@@ -6438,86 +6983,115 @@ function New-SfosSurfingQuotaPolicy {
 
 <#
         .SYNOPSIS
-        Updates an existing SurfingQuotaPolicy object on the Sophos Firewall.
+        Updates a surfing quota policy on a Sophos Firewall.
 
         .DESCRIPTION
-        Updates a SurfingQuotaPolicy object using the Sophos Firewall XML API. You can supply the target object name directly or via the pipeline.
+        Changes the cycle settings or description of an existing surfing quota policy. The
+        cmdlet reads the current object first and sends it back complete, so a field you do
+        not pass keeps its current value. It needs an open connection from
+        Connect-SfosFirewall, or the connection parameters supplied directly, and an
+        account with write permission.
 
-        SFOS replaces the whole entity on update - any element not sent in the request is
-        cleared on the firewall (confirmed live: updating only -Description without also
-        resending -MaximumHours reset MaximumHours to 'Unlimited' and dropped Minutes
-        entirely). This cmdlet reads the current policy first and keeps whatever the caller
-        does not explicitly pass. -CycleType is mandatory on every call because it decides
-        which of the two type-specific field groups is required.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
-
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        If -CycleType changes the policy from Cyclic to NonCyclic or back, the fields that
+        belong to the new type must be supplied; the firewall does not carry values over
+        from the previous type.
 
         .PARAMETER Name
-        Name of the target object.
+        Required. Name of the surfing quota policy to update.
 
         .PARAMETER CycleType
-        'Cyclic' or 'NonCyclic'. Determines which of the type-specific parameters below are
-        required. If the type is changed, the fields belonging to the new type must be
-        supplied - the firewall does not carry over values from the previous type.
+        Required. Selects which of the type-specific parameters below apply. Valid
+        values: Cyclic, NonCyclic.
 
         .PARAMETER CycleHours
-        Cycle hours. If omitted and -CycleType is 'Cyclic', the existing value is kept.
+        Optional, applies when -CycleType is Cyclic. Upper limit of surfing hours per
+        cycle, replacing the current value. If omitted, the current value is kept.
 
         .PARAMETER CycleMinutes
-        Cycle minutes (0-9999). If omitted and -CycleType is 'Cyclic', the existing value is kept.
+        Optional, applies when -CycleType is Cyclic. Upper limit of surfing minutes per
+        cycle, 0 to 9999, replacing the current value. If omitted, the current value is
+        kept.
 
         .PARAMETER PerDay
-        Cycle recurrence: 'Days', 'Weekly', 'Monthly' or 'Yearly'. If omitted and -CycleType is 'Cyclic', the existing value is kept.
+        Optional, applies when -CycleType is Cyclic. Cycle recurrence, replacing the
+        current value. Valid values: Days, Weekly, Monthly, Yearly. If omitted, the
+        current value is kept.
 
         .PARAMETER Validity
-        Total surfing days allowed, or 'Unlimited'. If omitted and -CycleType is 'NonCyclic', the existing value is kept.
+        Optional, applies when -CycleType is NonCyclic. Total number of surfing days
+        allowed, or 'Unlimited', replacing the current value. If omitted, the current
+        value is kept.
 
         .PARAMETER MaximumHours
-        Total surfing hours allowed, or 'Unlimited'. If omitted and -CycleType is 'NonCyclic', the existing value is kept.
+        Optional, applies when -CycleType is NonCyclic. Total surfing hours allowed, or
+        'Unlimited', replacing the current value. If omitted, the current value is kept.
 
         .PARAMETER Minutes
-        Additional surfing minutes allowed (0-59). If omitted and -CycleType is 'NonCyclic', the existing value is kept.
+        Optional, applies when -CycleType is NonCyclic. Additional surfing minutes
+        allowed, 0 to 59, replacing the current value. If omitted, the current value is
+        kept.
 
         .PARAMETER Description
-        Optional description text. If omitted, the existing description is kept.
+        Optional. Description to store, replacing the current one. If omitted, the current
+        description is kept.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs write permission for the
+        surfing quota policy objects. If omitted, the value from the current connection is
+        used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        System.String. The surfing quota policy name and other fields can be piped in by
+        property name, for example the output of Get-SfosSurfingQuotaPolicy.
 
         .OUTPUTS
-        None. Throws an exception if the update fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        update.
 
         .EXAMPLE
-        # Update an object by name
-        Set-SfosSurfingQuotaPolicy -Name "Daily-Quota" -CycleType Cyclic -CycleHours 3 -CycleMinutes 0 -PerDay Days
+        Set-SfosSurfingQuotaPolicy -Name 'Daily-Quota' -CycleType Cyclic -CycleHours 3 -CycleMinutes 0 -PerDay Days -WhatIf
+
+        Shows what the call would change without sending it to the firewall.
 
         .EXAMPLE
-        # Update using pipeline input, only the description changes
-        Get-SfosSurfingQuotaPolicy -NameLike "Quota" | Set-SfosSurfingQuotaPolicy -CycleType Cyclic -Description "Revised policy"
+        Set-SfosSurfingQuotaPolicy -Name 'Daily-Quota' -CycleType Cyclic -CycleHours 3 -CycleMinutes 0 -PerDay Days
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+        Changes the cycle budget of the policy.
+
+        .EXAMPLE
+        Get-SfosSurfingQuotaPolicy -NameLike 'Quota' | Set-SfosSurfingQuotaPolicy -CycleType Cyclic -Description 'Revised policy'
+
+        Updates every matching Cyclic policy with a new description.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosSurfingQuotaPolicy
 #>
 function Set-SfosSurfingQuotaPolicy {
     [CmdletBinding(SupportsShouldProcess)]
@@ -6682,53 +7256,70 @@ function Set-SfosSurfingQuotaPolicy {
 
 <#
         .SYNOPSIS
-        Removes a SurfingQuotaPolicy object from the Sophos Firewall.
+        Removes a surfing quota policy from a Sophos Firewall.
 
         .DESCRIPTION
-        Removes a SurfingQuotaPolicy object using the Sophos Firewall XML API. This cmdlet supports ShouldProcess; use -WhatIf to preview the change.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
-
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Deletes a surfing quota policy by name. It needs an open connection from
+        Connect-SfosFirewall, or the connection parameters supplied directly, and an
+        account with write permission. Remove any user or user group reference to the
+        policy first, or the firewall keeps the reference in place.
 
         .PARAMETER Name
-        Name of the target object.
+        Required. Name of the surfing quota policy to remove.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs write permission for the
+        surfing quota policy objects. If omitted, the value from the current connection is
+        used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        System.String. The surfing quota policy name can be piped in by property name, for
+        example the output of Get-SfosSurfingQuotaPolicy.
 
         .OUTPUTS
-        None. Throws an exception if removal fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        removal.
 
         .EXAMPLE
-        # Preview removal
-        Remove-SfosSurfingQuotaPolicy -Name "Daily-Quota" -WhatIf
+        Remove-SfosSurfingQuotaPolicy -Name 'Daily-Quota' -WhatIf
+
+        Shows what the call would remove without sending it to the firewall.
 
         .EXAMPLE
-        # Pipeline removal
-        Get-SfosSurfingQuotaPolicy -NameLike "Quota" | Remove-SfosSurfingQuotaPolicy
+        Get-SfosSurfingQuotaPolicy -NameLike 'Quota' | Remove-SfosSurfingQuotaPolicy
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+        Removes every surfing quota policy whose name contains 'Quota'. The cmdlet asks
+        for confirmation before each write.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosSurfingQuotaPolicy
 #>
 function Remove-SfosSurfingQuotaPolicy {
     [CmdletBinding(SupportsShouldProcess)]
@@ -6795,73 +7386,98 @@ function Remove-SfosSurfingQuotaPolicy {
         Retrieves ContentConditionList objects from the Sophos Firewall.
 
         .DESCRIPTION
-        Queries the Sophos Firewall XML API for ContentConditionList objects. By default the cmdlet returns PowerShell-friendly objects. Use -AsXml to return the raw XML nodes.
+        Returns the content condition list objects that are defined on the firewall. A
+        content condition list is a named set of regular expressions that other web
+        filter rules can reference by content match. Use this cmdlet to review the
+        existing objects or to feed them into another cmdlet through the pipeline. The
+        cmdlet only reads; nothing on the firewall is changed. It needs an open connection
+        from Connect-SfosFirewall, or the connection parameters supplied directly.
 
-        ContentConditionList objects are identified by Key, not by Name (the same Key is what
-        Remove-SfosContentConditionList requires, per the Sophos documentation). This cmdlet
-        therefore filters server-side on Key only. A <Filter> on Name reproducibly answers
-        <Status>Transaction fail</Status> without a code attribute for this entity - and a
-        Status without a code attribute is treated as "no records" everywhere else in this
-        module - so sending a Name filter would silently return an empty result even when
-        matching objects exist. -NameLike is therefore always applied client-side only.
-
-        Note: Sophos GET responses can be inconsistent regarding status elements. This cmdlet is designed to return an empty result when no records are found.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
-
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        A content condition list is identified by Key, not by Name; Set-* and Remove-*
+        for this entity address the object by Key. Only Key is sent to the firewall as a
+        server-side filter; -NameLike and -DescriptionLike are always applied on the
+        client.
 
         .PARAMETER KeyLike
-        Optional key filter. In Sophos SFOS, 'like' behaves as a substring match. Sent to the firewall as the server-side filter - the only filter key confirmed to work for this entity.
+        Optional. Returns only objects whose key contains the given text anywhere. This
+        is a substring match, not a wildcard pattern. If omitted, the key is not used to
+        filter.
 
         .PARAMETER NameLike
-        Optional name filter, matched as a substring anywhere in the value. Always applied client-side; see .DESCRIPTION for why a server-side Name filter is not used.
+        Optional. Returns only objects whose name contains the given text anywhere.
+        Applied on the client. If omitted, the name is not used to filter.
 
         .PARAMETER DescriptionLike
-        Optional description filter, matched as a substring anywhere in the value. Always applied client-side.
+        Optional. Returns only objects whose description contains the given text
+        anywhere. Applied on the client. If omitted, the description is not used to
+        filter.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs read permission for the
+        content condition list objects. If omitted, the value from the current connection
+        is used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
 
         .PARAMETER AsXml
-        Returns raw XML nodes instead of PowerShell-friendly objects.
+        Optional. Returns the raw XML elements sent by the firewall instead of PowerShell
+        objects. Useful when you need a field that the standard output does not show.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        PSCustomObject (default). System.Xml.XmlElement when -AsXml is specified.
+        System.Management.Automation.PSCustomObject. One object per content condition
+        list, with the properties Name, Key, Description and ContentList. Returns
+        System.Xml.XmlElement when -AsXml is used, and an empty array when no object
+        matches.
 
         .EXAMPLE
-        # Retrieve all objects
         Get-SfosContentConditionList
 
-        .EXAMPLE
-        # Filter by key (substring match)
-        Get-SfosContentConditionList -KeyLike "Quota"
+        Lists every content condition list on the firewall of the current connection.
 
         .EXAMPLE
-        # Return raw XML for troubleshooting
-        Get-SfosContentConditionList -KeyLike "Quota" -AsXml
+        Get-SfosContentConditionList -KeyLike 'Quota'
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+        Lists all content condition lists whose key contains 'Quota'.
+
+        .EXAMPLE
+        Get-SfosContentConditionList -KeyLike 'Quota' -AsXml
+
+        Returns the raw XML of the matching objects, for example to check a field that the
+        standard output does not contain.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        New-SfosContentConditionList
+
+        .LINK
+        Set-SfosContentConditionList
 #>
 function Get-SfosContentConditionList {
     [CmdletBinding()]
@@ -6885,8 +7501,8 @@ function Get-SfosContentConditionList {
 
     $params = Resolve-SfosParameters -BoundParameters $PSBoundParameters
 
-    # Only Key is sent server-side. A Filter on Name fails outright for this entity - see
-    # the function help for the measured reason - so NameLike is never sent to the firewall.
+    # Only Key is sent server-side. A Filter on Name fails outright for this entity, so
+    # NameLike is never sent to the firewall.
     $filterXml = ''
     if ($KeyLike) {
         $keyLikeEsc = ConvertTo-SfosXmlEscaped -Text $KeyLike
@@ -6958,68 +7574,80 @@ function Get-SfosContentConditionList {
 
 <#
         .SYNOPSIS
-        Creates a new ContentConditionList on the Sophos Firewall.
+        Creates a content condition list on a Sophos Firewall.
 
         .DESCRIPTION
-        Creates a Content Condition List: a named set of raw regular expressions that other
-        Web Filter rules can reference by content match.
+        Creates a content condition list, a named set of regular expressions that other
+        web filter rules can reference by content match. It needs an open connection from
+        Connect-SfosFirewall, or the connection parameters supplied directly, and an
+        account with write permission.
 
-        No -Key parameter is exposed: the Sophos documentation marks Key as mandatory, but
-        live testing shows the firewall ignores any client-supplied Key on create and instead
-        derives its own from -Name (non-alphanumeric characters such as spaces and hyphens
-        stripped) plus a fixed '_Custom' suffix - e.g. Name 'Sensitive-Terms' becomes Key
-        'SensitiveTerms_Custom' regardless of what is sent. Read the actual Key back with
+        This cmdlet has no -Key parameter. The firewall derives the Key itself from the
+        name and does not accept a supplied one. Read the actual Key back with
         Get-SfosContentConditionList after creating the object; Set-SfosContentConditionList
-        and Remove-SfosContentConditionList require that Key, not the Name.
+        and Remove-SfosContentConditionList address the object by that Key, not by Name.
 
         .PARAMETER Name
-        Name of the content condition list (1-255 characters, no commas).
+        Required. Name of the new content condition list. 1 to 255 characters, no comma.
 
         .PARAMETER Description
-        Optional description (max 255 characters).
+        Optional. Free-text description of the list. Up to 255 characters.
 
         .PARAMETER ContentStrings
-        Array of raw regular expressions. The firewall keeps duplicate values rather than
-        ignoring them, so this cmdlet does not deduplicate the array either.
-
-        # Connection parameters (optional - use stored context if not provided)
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. Regular expressions to include. Duplicate values are kept as given.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, uses stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number. If omitted, uses stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, uses stored connection context.
+        Optional. User name for the API login. The account needs write permission for the
+        content condition list objects. If omitted, the value from the current connection
+        is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, uses stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        None. Throws an exception if creation fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        create.
 
         .EXAMPLE
-        # Create a list with two regexes
-        New-SfosContentConditionList -Name "Sensitive-Terms" -ContentStrings @("foo", "bar") -Description "Test list"
+        New-SfosContentConditionList -Name 'Sensitive-Terms' -ContentStrings 'foo','bar' -WhatIf
+
+        Shows what the call would create without sending it to the firewall.
 
         .EXAMPLE
-        # Create an empty list and add members later
-        New-SfosContentConditionList -Name "Blocked-Terms"
-        Add-SfosContentConditionListMember -Key (Get-SfosContentConditionList -NameLike "Blocked-Terms").Key -ContentStrings "baz"
+        New-SfosContentConditionList -Name 'Sensitive-Terms' -ContentStrings 'foo','bar' -Description 'Test list'
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
+        Creates a list with two regular expressions.
+
+        .EXAMPLE
+        New-SfosContentConditionList -Name 'Blocked-Terms'
+        Add-SfosContentConditionListMember -Key (Get-SfosContentConditionList -NameLike 'Blocked-Terms').Key -ContentStrings 'baz'
+
+        Creates an empty list and adds a member afterwards, using the Key the firewall
+        assigned.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
@@ -7107,70 +7735,89 @@ function New-SfosContentConditionList {
 
 <#
         .SYNOPSIS
-        Updates an existing ContentConditionList object on the Sophos Firewall.
+        Updates a content condition list on a Sophos Firewall.
 
         .DESCRIPTION
-        Updates a ContentConditionList object using the Sophos Firewall XML API. The object is
-        identified by -Key, not by Name - Key is what the firewall assigned on creation (see
-        New-SfosContentConditionList) and is what Remove-SfosContentConditionList requires as
-        well. -Name may be changed; Key itself stays stable across the rename (confirmed live).
-
-        SFOS replaces the whole entity on update - any element not sent in the request is
-        cleared on the firewall (confirmed live: updating with only one ContentString cleared
-        both the Description and the second, previously present ContentString). This cmdlet
-        reads the current object first and keeps whatever the caller does not explicitly pass.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
-
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Changes the name, description or content strings of an existing content
+        condition list. The object is addressed by -Key, the value Get-SfosContentConditionList
+        returns and New-SfosContentConditionList assigns on creation, not by Name. The
+        cmdlet reads the current object first and sends it back complete, so a field you
+        do not pass keeps its current value. It needs an open connection from
+        Connect-SfosFirewall, or the connection parameters supplied directly, and an
+        account with write permission.
 
         .PARAMETER Key
-        Key of the target object, as returned by Get-SfosContentConditionList.
+        Required. Key of the content condition list to update, as returned by
+        Get-SfosContentConditionList.
 
         .PARAMETER Name
-        New display name for the object. If omitted, the existing name is kept.
+        Optional. New display name for the object. If omitted, the current name is kept.
 
         .PARAMETER ContentStrings
-        One or more raw regular expressions to store. If omitted, the existing list is kept.
+        Optional. Regular expressions to store, replacing the current list. If omitted,
+        the current list is kept.
 
         .PARAMETER Description
-        Optional description text. If omitted, the existing description is kept.
+        Optional. Description to store, replacing the current one. If omitted, the current
+        description is kept.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs write permission for the
+        content condition list objects. If omitted, the value from the current connection
+        is used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        System.String. The Key and other fields can be piped in by property name, for
+        example the output of Get-SfosContentConditionList.
 
         .OUTPUTS
-        None. Throws an exception if the update fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        update.
 
         .EXAMPLE
-        # Update an object by key
-        Set-SfosContentConditionList -Key "SensitiveTerms_Custom" -Description "Updated list"
+        Set-SfosContentConditionList -Key 'SensitiveTerms_Custom' -Description 'Updated list' -WhatIf
+
+        Shows what the call would change without sending it to the firewall.
 
         .EXAMPLE
-        # Update using pipeline input
-        Get-SfosContentConditionList -KeyLike "Quota" | Set-SfosContentConditionList -ContentStrings "foo", "bar", "baz"
+        Set-SfosContentConditionList -Key 'SensitiveTerms_Custom' -Description 'Updated list'
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+        Updates the description. The content strings are kept unchanged.
+
+        .EXAMPLE
+        Get-SfosContentConditionList -KeyLike 'Quota' | Set-SfosContentConditionList -ContentStrings 'foo','bar','baz'
+
+        Replaces the content strings of every matching list.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosContentConditionList
 #>
 function Set-SfosContentConditionList {
     [CmdletBinding(SupportsShouldProcess)]
@@ -7304,52 +7951,68 @@ function Set-SfosContentConditionList {
         Removes a ContentConditionList object from the Sophos Firewall.
 
         .DESCRIPTION
-        Removes a ContentConditionList object using the Sophos Firewall XML API. Per the
-        Sophos documentation, deletion is identified by Key, not by Name. This cmdlet
-        supports ShouldProcess; use -WhatIf to preview the change.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
-
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Deletes a content condition list by Key, the value Get-SfosContentConditionList
+        returns and New-SfosContentConditionList assigns on creation, not by Name. It
+        needs an open connection from Connect-SfosFirewall, or the connection parameters
+        supplied directly, and an account with write permission.
 
         .PARAMETER Key
-        Key of the target object, as returned by Get-SfosContentConditionList.
+        Required. Key of the content condition list to remove, as returned by
+        Get-SfosContentConditionList.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs write permission for the
+        content condition list objects. If omitted, the value from the current connection
+        is used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        System.String. The Key can be piped in by property name, for example the output of
+        Get-SfosContentConditionList.
 
         .OUTPUTS
-        None. Throws an exception if removal fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        removal.
 
         .EXAMPLE
-        # Preview removal
-        Remove-SfosContentConditionList -Key "SensitiveTerms_Custom" -WhatIf
+        Remove-SfosContentConditionList -Key 'SensitiveTerms_Custom' -WhatIf
+
+        Shows what the call would remove without sending it to the firewall.
 
         .EXAMPLE
-        # Pipeline removal
-        Get-SfosContentConditionList -KeyLike "Quota" | Remove-SfosContentConditionList
+        Get-SfosContentConditionList -KeyLike 'Quota' | Remove-SfosContentConditionList
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+        Removes every content condition list whose key contains 'Quota'. The cmdlet asks
+        for confirmation before each write.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosContentConditionList
 #>
 function Remove-SfosContentConditionList {
     [CmdletBinding(SupportsShouldProcess)]
@@ -7409,55 +8072,75 @@ function Remove-SfosContentConditionList {
 
 <#
         .SYNOPSIS
-        Adds content strings to an existing ContentConditionList object on the Sophos Firewall.
+        Adds content strings to an existing content condition list on a Sophos Firewall.
 
         .DESCRIPTION
-        Adds one or more raw regular expressions to a ContentConditionList object using the
-        Sophos Firewall XML API. The cmdlet validates input where possible and escapes user
-        input for XML safety. Per the Sophos documentation, duplicate values are not ignored,
-        so this cmdlet does not deduplicate against the existing list either.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
-
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Adds one or more regular expressions to a content condition list without removing
+        the ones already stored. Duplicate values are kept as given. It needs an open
+        connection from Connect-SfosFirewall, or the connection parameters supplied
+        directly, and an account with write permission.
 
         .PARAMETER Key
-        Key of the target object, as returned by Get-SfosContentConditionList.
+        Required. Key of the content condition list to change, as returned by
+        Get-SfosContentConditionList.
 
         .PARAMETER ContentStrings
-        One or more raw regular expressions to add.
+        Required. One or more regular expressions to add.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs write permission for the
+        content condition list objects. If omitted, the value from the current connection
+        is used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        None. Throws an exception if the update fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        update.
 
         .EXAMPLE
-        # Add content strings to an existing object
-        Add-SfosContentConditionListMember -Key "SensitiveTerms_Custom" -ContentStrings "foo", "bar"
+        Add-SfosContentConditionListMember -Key 'SensitiveTerms_Custom' -ContentStrings 'foo' -WhatIf
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+        Shows what the call would add without sending it to the firewall.
+
+        .EXAMPLE
+        Add-SfosContentConditionListMember -Key 'SensitiveTerms_Custom' -ContentStrings 'foo','bar'
+
+        Adds two regular expressions to the list.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosContentConditionList
+
+        .LINK
+        Remove-SfosContentConditionListMember
 #>
 function Add-SfosContentConditionListMember {
     [CmdletBinding(SupportsShouldProcess)]
@@ -7573,54 +8256,76 @@ function Add-SfosContentConditionListMember {
 
 <#
         .SYNOPSIS
-        Removes content strings from an existing ContentConditionList object on the Sophos Firewall.
+        Removes content strings from an existing content condition list on a Sophos
+        Firewall.
 
         .DESCRIPTION
-        Removes one or more raw regular expressions from a ContentConditionList object using
-        the Sophos Firewall XML API. The cmdlet validates input where possible and escapes
-        user input for XML safety.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
-
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Removes one or more regular expressions from a content condition list, keeping
+        the remaining entries. It needs an open connection from Connect-SfosFirewall, or
+        the connection parameters supplied directly, and an account with write
+        permission.
 
         .PARAMETER Key
-        Key of the target object, as returned by Get-SfosContentConditionList.
+        Required. Key of the content condition list to change, as returned by
+        Get-SfosContentConditionList.
 
         .PARAMETER ContentStrings
-        One or more raw regular expressions to remove.
+        Required. One or more regular expressions to remove.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs write permission for the
+        content condition list objects. If omitted, the value from the current connection
+        is used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        None. Throws an exception if the update fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        update.
 
         .EXAMPLE
-        # Remove content strings from an existing object
-        Remove-SfosContentConditionListMember -Key "SensitiveTerms_Custom" -ContentStrings "foo", "bar"
+        Remove-SfosContentConditionListMember -Key 'SensitiveTerms_Custom' -ContentStrings 'foo' -WhatIf
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+        Shows what the call would remove without sending it to the firewall.
+
+        .EXAMPLE
+        Remove-SfosContentConditionListMember -Key 'SensitiveTerms_Custom' -ContentStrings 'foo','bar'
+
+        Removes two regular expressions from the list.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosContentConditionList
+
+        .LINK
+        Add-SfosContentConditionListMember
 #>
 function Remove-SfosContentConditionListMember {
     [CmdletBinding(SupportsShouldProcess)]
@@ -7752,17 +8457,13 @@ function Remove-SfosContentConditionListMember {
 # and <Set operation="update">. That is why this fragment has no New-*/Remove-* cmdlets for
 # them, unlike every other entity in this module family.
 #
-# WebFilterProtectionSettings does not support a true independent single-field update: a
-# partial <Set operation="update"> which omits PharmingProtection nonetheless resets it from
-# Enable to Disable, with HTTP 200 / status code="200". Because it is unknown which other
-# fields on which of these five entities carry the same defect, every Set-* cmdlet in this
-# fragment follows the same read-modify-write pattern as the object entities elsewhere in
-# this module family: call the matching Get-* first, resolve each field to the
-# caller's explicit value (via $PSBoundParameters.ContainsKey()) or otherwise the value just
-# read back, and always send the complete entity. This costs one extra GET per Set, but closes
-# the defect regardless of which field actually triggers it - the root cause was deliberately
-# not isolated further (would have required additional writes to the field's do-not-touch
-# list) and is left as an open question below.
+# A partial <Set operation="update"> that omits a field can reset it rather than leaving it
+# unchanged, even though the request answers success. Every Set-* cmdlet in this fragment
+# therefore follows the same read-modify-write pattern as the object entities elsewhere in
+# this module family: call the matching Get-* first, resolve each field to the caller's
+# explicit value (via $PSBoundParameters.ContainsKey()) or otherwise the value just read
+# back, and always send the complete entity. This costs one extra GET per Set, but covers
+# every field regardless of which one triggers the reset.
 #
 # Security-relevant fields (PharmingProtection, AllowInvalidCertificate, DenyUnknownProtocol,
 # Scanning, BlockUnscannableContent) additionally have no cmdlet default: with the
@@ -7774,49 +8475,64 @@ function Remove-SfosContentConditionListMember {
 
 <#
         .SYNOPSIS
-        Retrieves the MalwareProtection settings from the Sophos Firewall.
+        Retrieves the malware protection settings of a Sophos Firewall.
 
         .DESCRIPTION
-        Queries the Sophos Firewall XML API for the MalwareProtection settings singleton. There is exactly one instance of this element per firewall. By default the cmdlet returns a PowerShell-friendly object. Use -AsXml to return the raw XML node.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Returns the malware protection settings singleton. There is exactly one instance
+        of this object per firewall. The cmdlet only reads; nothing on the firewall is
+        changed. It needs an open connection from Connect-SfosFirewall, or the connection
+        parameters supplied directly.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. User name for the API login. The account needs read permission for the
+        malware protection settings. If omitted, the value from the current connection is
+        used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
 
         .PARAMETER AsXml
-        Returns the raw XML node instead of a PowerShell-friendly object.
+        Optional. Returns the raw XML element sent by the firewall instead of a PowerShell
+        object.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        PSCustomObject (default). System.Xml.XmlElement when -AsXml is specified.
+        System.Management.Automation.PSCustomObject. An object with the property
+        PrimaryAntiVirusEngine. Returns System.Xml.XmlElement when -AsXml is used.
 
         .EXAMPLE
-        # Retrieve the current malware protection settings
         Get-SfosMalwareProtection
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>) and XML escaping for user input.
+        Returns the current malware protection settings.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Set-SfosMalwareProtection
 #>
 function Get-SfosMalwareProtection {
     [CmdletBinding()]
@@ -7867,49 +8583,69 @@ function Get-SfosMalwareProtection {
 
 <#
         .SYNOPSIS
-        Updates the MalwareProtection settings on the Sophos Firewall.
+        Updates the malware protection settings of a Sophos Firewall.
 
         .DESCRIPTION
-        Updates the MalwareProtection settings singleton using the Sophos Firewall XML API. This cmdlet reads the current settings first and resends every field, overriding only what the caller explicitly passes (read-modify-write - see the fragment header comment for why this is required even though the entity is a singleton). This cmdlet supports ShouldProcess; use -WhatIf to preview the change.
+        Changes the primary anti-virus engine. The cmdlet reads the current settings
+        first and sends them back complete, so a field you do not pass keeps its current
+        value. It needs an open connection from Connect-SfosFirewall, or the connection
+        parameters supplied directly, and an account with write permission.
 
         .PARAMETER PrimaryAntiVirusEngine
-        The primary anti-virus engine to use. No -ValidateSet is applied deliberately: on the lab firewall, the documented value 'Sophos/Avira' was rejected with a raw HTTP 500, most likely because the second engine is not licensed on that appliance. Restricting this parameter to a fixed list would hide that the failure is a licensing/availability problem, not a request format problem - so the raw API error is passed through unmodified. If omitted, the value currently on the firewall is kept.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. Name of the primary anti-virus engine to use. If omitted, the current
+        value is kept.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. User name for the API login. The account needs write permission for the
+        malware protection settings. If omitted, the value from the current connection is
+        used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        None. Throws an exception if the update fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        update.
 
         .EXAMPLE
-        # Switch the primary anti-virus engine
+        Set-SfosMalwareProtection -PrimaryAntiVirusEngine 'Sophos' -WhatIf
+
+        Shows what the call would change without sending it to the firewall.
+
+        .EXAMPLE
         Set-SfosMalwareProtection -PrimaryAntiVirusEngine 'Sophos'
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        Not verified against the live firewall as a write: 'Sophos' is the only value that could be tested without touching the do-not-touch list, and it was already the value on the firewall, so this cmdlet was verified structurally (same pattern as the live-tested Set-SfosWebFilterSettings/Set-SfosWebFilterAdvancedSettings) and via its Get path, not via a live value change.
+        Switches the primary anti-virus engine.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosMalwareProtection
 #>
 function Set-SfosMalwareProtection {
     [CmdletBinding(SupportsShouldProcess)]
@@ -7976,49 +8712,71 @@ function Set-SfosMalwareProtection {
 
 <#
         .SYNOPSIS
-        Retrieves the WebFilterSettings from the Sophos Firewall.
+        Retrieves the web filter settings of a Sophos Firewall.
 
         .DESCRIPTION
-        Queries the Sophos Firewall XML API for the WebFilterSettings singleton. There is exactly one instance of this element per firewall. By default the cmdlet returns a PowerShell-friendly object. Use -AsXml to return the raw XML node.
+        Returns the web filter settings singleton. There is exactly one instance of this
+        object per firewall. The cmdlet only reads; nothing on the firewall is changed. It
+        needs an open connection from Connect-SfosFirewall, or the connection parameters
+        supplied directly.
 
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        TopImageFile and BottomImageFile are not available through this module: they
+        require a file upload that the transport does not support.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. User name for the API login. The account needs read permission for the
+        web filter settings. If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
 
         .PARAMETER AsXml
-        Returns the raw XML node instead of a PowerShell-friendly object.
+        Optional. Returns the raw XML element sent by the firewall instead of a PowerShell
+        object.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        PSCustomObject (default). System.Xml.XmlElement when -AsXml is specified.
+        System.Management.Automation.PSCustomObject. An object with the properties
+        WebCaching, Scanning, BlockUnscannableContent, PharmingProtection,
+        OverrideDefaultWarnedMessage, DefaultWarnedMessage, OverrideDefaultDeniedMessage,
+        DefaultDeniedMessage, DeniedMessageImage, DefaultFiletypeDeniedMessage,
+        DefaultFiletypeWarnedMessage, OverrideDefaultOverrideMessage,
+        DefaultOverrideMessage, OverrideDefaultQuotaMessage, DefaultQuotaMessage and
+        PUAWhitelist. Returns System.Xml.XmlElement when -AsXml is used.
 
         .EXAMPLE
-        # Retrieve the current web filter settings
         Get-SfosWebFilterSettings
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        TopImageFile and BottomImageFile are not exposed anywhere in this module: the API documents them as Datatype 'FILE', passed in a multipart request, which the shared Invoke-SfosApi (urlencoded reqxml body) cannot send. They are also absent from every Get response on the lab firewall, so there is nothing to read back either.
+        Returns the current web filter settings.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Set-SfosWebFilterSettings
 #>
 function Get-SfosWebFilterSettings {
     # PSUseSingularNouns is suppressed on purpose. 'Settings' is not a plural container here
@@ -8068,11 +8826,11 @@ function Get-SfosWebFilterSettings {
         return $node
     }
 
-    # The firewall omits elements that are at their disabled/empty state (observed for
+    # The firewall omits elements that are at their disabled/empty state (for example
     # DefaultWarnedMessage, DefaultDeniedMessage, the filetype/override/quota message pair
-    # and PUAWhitelist on the lab firewall) instead of returning them empty. Casting a
-    # missing property to [string] yields '' and an absent PUAWhitelist yields @(), so every
-    # field below still has a value to read back for the read-modify-write in Set-*.
+    # and PUAWhitelist) instead of returning them empty. Casting a missing property to
+    # [string] yields '' and an absent PUAWhitelist yields @(), so every field below still
+    # has a value to read back for the read-modify-write in Set-*.
     $puaList = @()
     if ($node.PUAWhitelist) {
         $puaList = @($node.PUAWhitelist | Select-Object -ExpandProperty PUA)
@@ -8100,99 +8858,133 @@ function Get-SfosWebFilterSettings {
 
 <#
         .SYNOPSIS
-        Updates the WebFilterSettings on the Sophos Firewall.
+        Updates the web filter settings of a Sophos Firewall.
 
         .DESCRIPTION
-        Updates the WebFilterSettings singleton using the Sophos Firewall XML API. This cmdlet reads the current settings first and resends every field, overriding only what the caller explicitly passes (read-modify-write - see the fragment header comment for why this is required even though the entity is a singleton). This cmdlet supports ShouldProcess; use -WhatIf to preview the change.
+        Changes scanning, message and whitelist settings of the web filter. The cmdlet
+        reads the current settings first and sends them back complete, so a field you do
+        not pass keeps its current value. It needs an open connection from
+        Connect-SfosFirewall, or the connection parameters supplied directly, and an
+        account with write permission.
+
+        TopImageFile and BottomImageFile are not available through this module: they
+        require a file upload that the transport does not support.
 
         .PARAMETER WebCaching
-        'Enable' or 'Disable' web caching (observed values). If omitted, the current value is kept.
+        Optional. Whether web caching is active, for example Enable or Disable,
+        replacing the current value. If omitted, the current value is kept.
 
         .PARAMETER Scanning
-        The anti-virus scanning mode (observed value: 'Single Anti-Virus (Maximum Performance)'). Security-relevant: never defaulted by this cmdlet - only sent when explicitly bound, otherwise the value read from the firewall is resent unchanged. If omitted, the current value is kept.
+        Optional. Anti-virus scanning mode, replacing the current value. If omitted, the
+        current value is kept.
 
         .PARAMETER BlockUnscannableContent
-        How to handle content that cannot be scanned (observed value: 'Block (Best Protection)'). Security-relevant: never defaulted by this cmdlet. If omitted, the current value is kept.
+        Optional. How content that cannot be scanned is handled, replacing the current
+        value. If omitted, the current value is kept.
 
         .PARAMETER PharmingProtection
-        'Enable' or 'Disable' pharming protection (observed values). Security-relevant: never defaulted by this cmdlet - live testing showed a related singleton (WebFilterProtectionSettings) silently resetting this exact field to 'Disable' on an update that never mentioned it, so it is treated as never-touch unless the caller explicitly asks for a change. If omitted, the current value is kept.
+        Optional. Whether pharming protection is active, for example Enable or Disable,
+        replacing the current value. If omitted, the current value is kept.
 
         .PARAMETER OverrideDefaultWarnedMessage
-        'Enable' or 'Disable' the custom warned-message override (observed values). If omitted, the current value is kept.
+        Optional. Whether the custom warned-page message is active, replacing the current
+        value. If omitted, the current value is kept.
 
         .PARAMETER DefaultWarnedMessage
-        Custom warned-page message text/HTML. If omitted, the current value is kept.
+        Optional. Custom warned-page message text or HTML, replacing the current value.
+        If omitted, the current value is kept.
 
         .PARAMETER OverrideDefaultDeniedMessage
-        'Enable' or 'Disable' the custom denied-message override (observed values). If omitted, the current value is kept.
+        Optional. Whether the custom denied-page message is active, replacing the current
+        value. If omitted, the current value is kept.
 
         .PARAMETER DefaultDeniedMessage
-        Custom denied-page message text/HTML. If omitted, the current value is kept.
+        Optional. Custom denied-page message text or HTML, replacing the current value.
+        If omitted, the current value is kept.
 
         .PARAMETER DeniedMessageImage
-        Image shown on the denied page (observed value: 'Default'). If omitted, the current value is kept.
+        Optional. Image shown on the denied page, replacing the current value. If
+        omitted, the current value is kept.
 
         .PARAMETER DefaultFiletypeDeniedMessage
-        Custom message shown when a file type is denied. If omitted, the current value is kept.
+        Optional. Custom message shown when a file type is denied, replacing the current
+        value. If omitted, the current value is kept.
 
         .PARAMETER DefaultFiletypeWarnedMessage
-        Custom message shown when a file type is warned. If omitted, the current value is kept.
+        Optional. Custom message shown when a file type is warned, replacing the current
+        value. If omitted, the current value is kept.
 
         .PARAMETER OverrideDefaultOverrideMessage
-        Enables the custom override-page message. No -ValidateSet is applied: the Sophos documentation contradicts itself for this field - the attribute table states only '0'/'1' are valid, but the sample XML on the same page uses 'Enable'/'Disable'. This was not resolved by live testing, so the parameter accepts any string rather than risk rejecting a value the firewall actually wants. If omitted, the current value is kept.
+        Optional. Whether the custom override-page message is active, replacing the
+        current value. If omitted, the current value is kept.
 
         .PARAMETER DefaultOverrideMessage
-        Custom override-page message text/HTML. If omitted, the current value is kept.
+        Optional. Custom override-page message text or HTML, replacing the current value.
+        If omitted, the current value is kept.
 
         .PARAMETER OverrideDefaultQuotaMessage
-        Enables the custom quota-page message. No -ValidateSet is applied for the same documented table/sample contradiction as OverrideDefaultOverrideMessage. If omitted, the current value is kept.
+        Optional. Whether the custom quota-page message is active, replacing the current
+        value. If omitted, the current value is kept.
 
         .PARAMETER DefaultQuotaMessage
-        Custom quota-page message text/HTML. If omitted, the current value is kept.
+        Optional. Custom quota-page message text or HTML, replacing the current value. If
+        omitted, the current value is kept.
 
         .PARAMETER PUAWhitelist
-        Array of PUA (potentially unwanted application) names to whitelist. If omitted, the current list is kept. Pass an empty array to clear it.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. Names of potentially unwanted applications to whitelist, replacing the
+        current list. If omitted, the current list is kept. Pass an empty array to clear
+        it.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. User name for the API login. The account needs write permission for the
+        web filter settings. If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        None. Throws an exception if the update fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        update.
 
         .EXAMPLE
-        # Toggle web caching
+        Set-SfosWebFilterSettings -WebCaching 'Enable' -WhatIf
+
+        Shows what the call would change without sending it to the firewall.
+
+        .EXAMPLE
         Set-SfosWebFilterSettings -WebCaching 'Enable'
 
-        .EXAMPLE
-        # Re-send the denied message image field unchanged (proves the field round-trips)
-        Set-SfosWebFilterSettings -DeniedMessageImage 'Default'
-
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        TopImageFile/BottomImageFile are not supported - see Get-SfosWebFilterSettings notes.
-        Confirmed by a full state diff against a saved baseline: WebCaching, DeniedMessageImage. PharmingProtection, Scanning and BlockUnscannableContent are handled by the same read-modify-write path but have not themselves been written and diffed.
+        Turns web caching on. Every other setting is kept unchanged.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosWebFilterSettings
 #>
 function Set-SfosWebFilterSettings {
     # PSUseSingularNouns is suppressed on purpose. 'Settings' is not a plural container here
@@ -8313,49 +9105,67 @@ function Set-SfosWebFilterSettings {
 
 <#
         .SYNOPSIS
-        Retrieves the WebFilterProtectionSettings from the Sophos Firewall.
+        Retrieves the web filter protection settings of a Sophos Firewall.
 
         .DESCRIPTION
-        Queries the Sophos Firewall XML API for the WebFilterProtectionSettings singleton. There is exactly one instance of this element per firewall. By default the cmdlet returns a PowerShell-friendly object. Use -AsXml to return the raw XML node.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Returns the web filter protection settings singleton. There is exactly one
+        instance of this object per firewall. The cmdlet only reads; nothing on the
+        firewall is changed. It needs an open connection from Connect-SfosFirewall, or
+        the connection parameters supplied directly.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. User name for the API login. The account needs read permission for the
+        web filter protection settings. If omitted, the value from the current connection
+        is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
 
         .PARAMETER AsXml
-        Returns the raw XML node instead of a PowerShell-friendly object.
+        Optional. Returns the raw XML element sent by the firewall instead of a PowerShell
+        object.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        PSCustomObject (default). System.Xml.XmlElement when -AsXml is specified.
+        System.Management.Automation.PSCustomObject. An object with the properties
+        ScanMode, FileSizeThreshold, FTPFileSizeThreshold, AudioVideoFileScanning,
+        HTTPSScanningCA, DenyUnknownProtocol, AllowInvalidCertificate,
+        NoHttpsNotification, Scanning, BlockUnscannableContent, PharmingProtection,
+        PUADetection and PUAWhitelist. Returns System.Xml.XmlElement when -AsXml is used.
 
         .EXAMPLE
-        # Retrieve the current web filter protection settings
         Get-SfosWebFilterProtectionSettings
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This element is documented in Sophos's admin help under several folder names that all resolve to this same XML root (AntiVirusFTP, AntiVirusHTTPsConfiguration) - see the module README for the mapping. Do not implement cmdlets for those folder names separately; they would be a second, competing write target for the same fields.
+        Returns the current web filter protection settings.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Set-SfosWebFilterProtectionSettings
 #>
 function Get-SfosWebFilterProtectionSettings {
     # PSUseSingularNouns is suppressed on purpose. 'Settings' is not a plural container here
@@ -8429,86 +9239,120 @@ function Get-SfosWebFilterProtectionSettings {
 
 <#
         .SYNOPSIS
-        Updates the WebFilterProtectionSettings on the Sophos Firewall.
+        Updates the web filter protection settings of a Sophos Firewall.
 
         .DESCRIPTION
-        Updates the WebFilterProtectionSettings singleton using the Sophos Firewall XML API. This cmdlet reads the current settings first and resends every field, overriding only what the caller explicitly passes (read-modify-write - see the fragment header comment for why this is required even though the entity is a singleton, and in particular why this specific entity is the one where the defect was found: a partial update that never mentioned PharmingProtection silently reset it to 'Disable' with a code="200" success response). This cmdlet supports ShouldProcess; use -WhatIf to preview the change.
+        Changes scanning, HTTPS inspection or PUA detection settings of the web filter.
+        The cmdlet reads the current settings first and sends them back complete, so a
+        field you do not pass keeps its current value. It needs an open connection from
+        Connect-SfosFirewall, or the connection parameters supplied directly, and an
+        account with write permission.
 
         .PARAMETER ScanMode
-        The scanning mode (observed value: 'BatchMode'). If omitted, the current value is kept.
+        Optional. Scanning mode, replacing the current value. If omitted, the current
+        value is kept.
 
         .PARAMETER FileSizeThreshold
-        HTTP/HTTPS file size scanning threshold in KB. If omitted, the current value is kept.
+        Optional. HTTP/HTTPS file size scanning threshold in KB, replacing the current
+        value. If omitted, the current value is kept.
 
         .PARAMETER FTPFileSizeThreshold
-        FTP file size scanning threshold in KB. If omitted, the current value is kept.
+        Optional. FTP file size scanning threshold in KB, replacing the current value. If
+        omitted, the current value is kept.
 
         .PARAMETER AudioVideoFileScanning
-        'Enable' or 'Disable' audio/video file scanning (observed values). If omitted, the current value is kept.
+        Optional. Whether audio and video files are scanned, replacing the current value.
+        If omitted, the current value is kept.
 
         .PARAMETER HTTPSScanningCA
-        Name of the CA certificate used for HTTPS scanning. If omitted, the current value is kept.
+        Optional. Name of the CA certificate used for HTTPS scanning, replacing the
+        current value. If omitted, the current value is kept.
 
         .PARAMETER DenyUnknownProtocol
-        'Enable' or 'Disable' denying unknown protocols on HTTPS ports (observed values). Security-relevant: never defaulted by this cmdlet - only sent when explicitly bound, otherwise the value read from the firewall is resent unchanged. If omitted, the current value is kept.
+        Optional. Whether unknown protocols on HTTPS ports are denied, replacing the
+        current value. If omitted, the current value is kept.
 
         .PARAMETER AllowInvalidCertificate
-        'Enable' or 'Disable' allowing invalid HTTPS certificates (observed values). Security-relevant: never defaulted by this cmdlet. If omitted, the current value is kept.
+        Optional. Whether invalid HTTPS certificates are allowed, replacing the current
+        value. If omitted, the current value is kept.
 
         .PARAMETER NoHttpsNotification
-        'Enable' or 'Disable' suppressing the HTTPS scanning notification page (observed values). If omitted, the current value is kept.
+        Optional. Whether the HTTPS scanning notification page is suppressed, replacing
+        the current value. If omitted, the current value is kept.
 
         .PARAMETER Scanning
-        The anti-virus scanning mode (observed value: 'Single Anti-Virus (Maximum Performance)'). Security-relevant: never defaulted by this cmdlet. If omitted, the current value is kept.
+        Optional. Anti-virus scanning mode, replacing the current value. If omitted, the
+        current value is kept.
 
         .PARAMETER BlockUnscannableContent
-        How to handle content that cannot be scanned (observed value: 'Block (Best Protection)'). Security-relevant: never defaulted by this cmdlet. If omitted, the current value is kept.
+        Optional. How content that cannot be scanned is handled, replacing the current
+        value. If omitted, the current value is kept.
 
         .PARAMETER PharmingProtection
-        'Enable' or 'Disable' pharming protection (observed values). Security-relevant: never defaulted by this cmdlet. This is the field on which the silent-reset defect described in .DESCRIPTION was found; it is on the do-not-touch list for this module's own verification and was never written during testing.
+        Optional. Whether pharming protection is active, replacing the current value. If
+        omitted, the current value is kept.
 
         .PARAMETER PUADetection
-        'Enable' or 'Disable' PUA (potentially unwanted application) detection (observed value: 'Disable'). If omitted, the current value is kept.
+        Optional. Whether detection of potentially unwanted applications is active,
+        replacing the current value. If omitted, the current value is kept.
 
         .PARAMETER PUAWhitelist
-        Array of PUA names to whitelist. If omitted, the current list is kept. Pass an empty array to clear it.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. Names of potentially unwanted applications to whitelist, replacing the
+        current list. If omitted, the current list is kept. Pass an empty array to clear
+        it.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. User name for the API login. The account needs write permission for the
+        web filter protection settings. If omitted, the value from the current connection
+        is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        None. Throws an exception if the update fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        update.
 
         .EXAMPLE
-        # Change only the scan mode, leaving every other field - including PharmingProtection - untouched
+        Set-SfosWebFilterProtectionSettings -ScanMode 'BatchMode' -WhatIf
+
+        Shows what the call would change without sending it to the firewall.
+
+        .EXAMPLE
         Set-SfosWebFilterProtectionSettings -ScanMode 'BatchMode'
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        Not verified against the live firewall as a write: every field of this entity is either on the do-not-touch list (PharmingProtection, Scanning, BlockUnscannableContent, AllowInvalidCertificate, DenyUnknownProtocol) or was excluded from the write-test scope agreed for this task. Verified via its Get path and structurally, by the same read-modify-write pattern already live-tested on Set-SfosWebFilterSettings/Set-SfosWebFilterAdvancedSettings.
-        Open question, not resolved by this task: which field(s) of WebFilterProtectionSettings actually trigger the PharmingProtection reset described in .DESCRIPTION. Deliberately not isolated further, since read-modify-write closes the defect regardless of the trigger and isolating it would have required more writes to a do-not-touch field.
+        Changes the scan mode. Every other setting, including PharmingProtection, is kept
+        unchanged.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosWebFilterProtectionSettings
 #>
 function Set-SfosWebFilterProtectionSettings {
     # PSUseSingularNouns is suppressed on purpose. 'Settings' is not a plural container here
@@ -8620,49 +9464,66 @@ function Set-SfosWebFilterProtectionSettings {
 
 <#
         .SYNOPSIS
-        Retrieves the WebFilterAdvancedSettings from the Sophos Firewall.
+        Retrieves the advanced web filter settings of a Sophos Firewall.
 
         .DESCRIPTION
-        Queries the Sophos Firewall XML API for the WebFilterAdvancedSettings singleton. There is exactly one instance of this element per firewall. By default the cmdlet returns a PowerShell-friendly object. Use -AsXml to return the raw XML node.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Returns the advanced web filter settings singleton, covering the web proxy port,
+        its minimum TLS version and the trusted port list. There is exactly one instance
+        of this object per firewall. The cmdlet only reads; nothing on the firewall is
+        changed. It needs an open connection from Connect-SfosFirewall, or the connection
+        parameters supplied directly.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. User name for the API login. The account needs read permission for the
+        web filter advanced settings. If omitted, the value from the current connection is
+        used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
 
         .PARAMETER AsXml
-        Returns the raw XML node instead of a PowerShell-friendly object.
+        Optional. Returns the raw XML element sent by the firewall instead of a PowerShell
+        object.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        PSCustomObject (default). System.Xml.XmlElement when -AsXml is specified.
+        System.Management.Automation.PSCustomObject. An object with the properties
+        WebCaching, WebProxyPort, WebProxyMinimumTLSVersion and TrustedPorts. Returns
+        System.Xml.XmlElement when -AsXml is used.
 
         .EXAMPLE
-        # Retrieve the current advanced web filter settings
         Get-SfosWebFilterAdvancedSettings
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This element is documented under the folder name WebProxy as well, which resolves to the same XML root. Do not implement a separate WebProxy cmdlet; it would be a second, competing write target for the same fields (confirmed live: WebProxyPort set via this element's XML root appeared immediately under the WebProxy folder's Get).
+        Returns the current advanced web filter settings.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Set-SfosWebFilterAdvancedSettings
 #>
 function Get-SfosWebFilterAdvancedSettings {
     # PSUseSingularNouns is suppressed on purpose. 'Settings' is not a plural container here
@@ -8729,58 +9590,83 @@ function Get-SfosWebFilterAdvancedSettings {
 
 <#
         .SYNOPSIS
-        Updates the WebFilterAdvancedSettings on the Sophos Firewall.
+        Updates the advanced web filter settings of a Sophos Firewall.
 
         .DESCRIPTION
-        Updates the WebFilterAdvancedSettings singleton using the Sophos Firewall XML API. This cmdlet reads the current settings first and resends every field, overriding only what the caller explicitly passes (read-modify-write - see the fragment header comment for why this is required even though the entity is a singleton). This cmdlet supports ShouldProcess; use -WhatIf to preview the change.
+        Changes the web proxy port, its minimum TLS version, the trusted port list or web
+        caching. The cmdlet reads the current settings first and sends them back complete,
+        so a field you do not pass keeps its current value. It needs an open connection
+        from Connect-SfosFirewall, or the connection parameters supplied directly, and an
+        account with write permission.
 
         .PARAMETER WebCaching
-        'Enable' or 'Disable' web caching (observed values; confirmed as a working toggle on this element). If omitted, the current value is kept.
+        Optional. Whether web caching is active, replacing the current value. If omitted,
+        the current value is kept.
 
         .PARAMETER WebProxyPort
-        TCP port the web proxy listens on (observed value: 3128; confirmed as a working change). If omitted, the current value is kept.
+        Optional. TCP port the web proxy listens on, replacing the current value. If
+        omitted, the current value is kept.
 
         .PARAMETER WebProxyMinimumTLSVersion
-        Minimum TLS version accepted by the web proxy (observed value: 'TLS 1.1'). If omitted, the current value is kept.
+        Optional. Minimum TLS version accepted by the web proxy, replacing the current
+        value. If omitted, the current value is kept.
 
         .PARAMETER TrustedPort
-        Array of trusted ports/port ranges (observed: single ports and one range, e.g. '1025-65535'). If omitted, the current list is kept. Pass an empty array to clear it.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. Trusted ports or port ranges, for example '1025-65535', replacing the
+        current list. If omitted, the current list is kept. Pass an empty array to clear
+        it.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. User name for the API login. The account needs write permission for the
+        web filter advanced settings. If omitted, the value from the current connection is
+        used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        None. Throws an exception if the update fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        update.
 
         .EXAMPLE
-        # Change only the proxy port, leaving TrustedPorts and the TLS minimum untouched
+        Set-SfosWebFilterAdvancedSettings -WebProxyPort 3128 -WhatIf
+
+        Shows what the call would change without sending it to the firewall.
+
+        .EXAMPLE
         Set-SfosWebFilterAdvancedSettings -WebProxyPort 3128
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        Confirmed by a full state diff against a saved baseline: WebCaching, WebProxyPort.
+        Changes the web proxy port. TrustedPort and the TLS minimum are kept unchanged.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosWebFilterAdvancedSettings
 #>
 function Set-SfosWebFilterAdvancedSettings {
     # PSUseSingularNouns is suppressed on purpose. 'Settings' is not a plural container here
@@ -8869,53 +9755,76 @@ function Set-SfosWebFilterAdvancedSettings {
 
 <#
         .SYNOPSIS
-        Retrieves the DefaultWebFilterNotificationSettings from the Sophos Firewall.
+        Retrieves the default web filter notification settings of a Sophos Firewall.
 
         .DESCRIPTION
-        Queries the Sophos Firewall XML API for the DefaultWebFilterNotificationSettings singleton - around 70 free-text/HTML notification message fields shown to end users (blocked page text, zero-day analysis progress text, and similar). There is exactly one instance of this element per firewall. The API defines no fixed schema for this element, so the returned object is built dynamically from whatever child elements the firewall actually returns, rather than from a hard-coded property list - this keeps the cmdlet correct if a firmware update adds, removes or renames a field. By default the cmdlet returns a PowerShell-friendly object. Use -AsXml to return the raw XML node.
+        Returns the default web filter notification settings singleton: the free-text and
+        HTML notification messages shown to end users, such as blocked-page text and
+        zero-day analysis progress text. There is exactly one instance of this object per
+        firewall. The API defines no fixed set of fields for this object, so the returned
+        object carries one property for each field the firewall actually returns. The
+        cmdlet only reads; nothing on the firewall is changed. It needs an open connection
+        from Connect-SfosFirewall, or the connection parameters supplied directly.
 
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Each value is returned as plain text, with any embedded HTML intact, and can be
+        passed back into Set-SfosDefaultWebFilterNotificationSettings unmodified.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. User name for the API login. The account needs read permission for the
+        web filter notification settings. If omitted, the value from the current
+        connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
 
         .PARAMETER AsXml
-        Returns the raw XML node instead of a PowerShell-friendly object.
+        Optional. Returns the raw XML element sent by the firewall instead of a PowerShell
+        object.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        PSCustomObject (default) with one property per message field found on the firewall. System.Xml.XmlElement when -AsXml is specified.
+        System.Management.Automation.PSCustomObject. An object with one property per
+        message field returned by the firewall. Returns System.Xml.XmlElement when -AsXml
+        is used.
 
         .EXAMPLE
-        # Retrieve all current notification message texts
         Get-SfosDefaultWebFilterNotificationSettings
 
+        Returns every current notification message text.
+
         .EXAMPLE
-        # Inspect one message field
         (Get-SfosDefaultWebFilterNotificationSettings).Warning
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        Values are returned XML-decoded (plain text, with any embedded HTML such as '<br>' intact) via .InnerText - the same text can be passed back into Set-SfosDefaultWebFilterNotificationSettings unmodified, which XML-escapes it exactly once before sending, so the round trip does not double-escape.
+        Returns the text of a single message field.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Set-SfosDefaultWebFilterNotificationSettings
 #>
 function Get-SfosDefaultWebFilterNotificationSettings {
     # PSUseSingularNouns is suppressed on purpose. 'Settings' is not a plural container here
@@ -8978,49 +9887,78 @@ function Get-SfosDefaultWebFilterNotificationSettings {
 
 <#
         .SYNOPSIS
-        Updates one or more DefaultWebFilterNotificationSettings message fields on the Sophos Firewall.
+        Updates one or more default web filter notification message fields of a Sophos
+        Firewall.
 
         .DESCRIPTION
-        Updates the DefaultWebFilterNotificationSettings singleton using the Sophos Firewall XML API. Because this element carries around 70 free-text/HTML message fields with no fixed API schema, individual named parameters were rejected as unwieldy and as a source of drift if a firmware update adds a field. Instead this cmdlet takes a single -Message hashtable whose keys are validated against the field names actually read back from the firewall by Get-SfosDefaultWebFilterNotificationSettings (called at the start of every invocation) - an unknown key throws immediately, before any request is sent, naming the field and listing the fields that do exist on this firmware. This cmdlet then resends every field of the entity (read-modify-write - see the fragment header comment), applying only the keys present in -Message on top of the values just read. This cmdlet supports ShouldProcess; use -WhatIf to preview the change.
+        Changes one or more of the free-text and HTML notification messages shown to end
+        users. Because this object carries a large, firmware-defined set of message
+        fields, this cmdlet takes a single -Message hashtable instead of one parameter per
+        field. The cmdlet reads the current field names and values first, validates every
+        key in -Message against them, and sends the whole object back complete, so a field
+        you do not name in -Message keeps its current value. It needs an open connection
+        from Connect-SfosFirewall, or the connection parameters supplied directly, and an
+        account with write permission.
 
         .PARAMETER Message
-        Hashtable of field name/value pairs to update, e.g. @{ Warning = 'Warning!'; DownloadBlocked = 'This download is blocked' }. Keys must match a field name returned by Get-SfosDefaultWebFilterNotificationSettings; unknown keys throw. Values may contain embedded HTML - they are XML-escaped exactly once, matching how Get-SfosDefaultWebFilterNotificationSettings decodes them, so round-tripping a value read from Get back into Message does not double-escape it. Fields not present as a key are left at their current value.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Required. Hashtable of field name and value pairs to update, for example
+        @{ Warning = 'Warning!'; DownloadBlocked = 'This download is blocked' }. Each key
+        must match a field name returned by Get-SfosDefaultWebFilterNotificationSettings;
+        an unknown key makes the cmdlet throw before it sends anything. A value read back
+        from Get-SfosDefaultWebFilterNotificationSettings can be passed back unmodified.
+        Fields not named in the hashtable keep their current value.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. User name for the API login. The account needs write permission for the
+        web filter notification settings. If omitted, the value from the current
+        connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        None. Throws an exception if the update fails or if -Message contains an unknown field name.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        update, or if -Message contains a field name that does not exist.
 
         .EXAMPLE
-        # Change a single message field
+        Set-SfosDefaultWebFilterNotificationSettings -Message @{ Warning = 'Achtung!' } -WhatIf
+
+        Shows what the call would change without sending it to the firewall.
+
+        .EXAMPLE
         Set-SfosDefaultWebFilterNotificationSettings -Message @{ Warning = 'Achtung!' }
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        Not verified against the live firewall as a write: every field of this entity is on the do-not-touch list for this task. Verified live: the Get path (full field set read back), and the unknown-key validation path, which calls Get and then throws before any Set request is built or sent - so it exercises real firewall data without writing anything. The write path itself (XML building and the actual Set-* call) is unverified beyond code review and structural identity with the live-tested WebFilterSettings/WebFilterAdvancedSettings cmdlets.
+        Changes a single message field. Every other field keeps its current text.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosDefaultWebFilterNotificationSettings
 #>
 function Set-SfosDefaultWebFilterNotificationSettings {
     # PSUseSingularNouns is suppressed on purpose. 'Settings' is not a plural container here

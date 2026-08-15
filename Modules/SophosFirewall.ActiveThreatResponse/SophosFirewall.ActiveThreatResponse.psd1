@@ -1,4 +1,4 @@
-@{
+﻿@{
     RootModule           = 'SophosFirewall.ActiveThreatResponse.psm1'
     ModuleVersion        = '1.1.0'
     GUID                 = '818bf495-5c4e-4bd4-a8e2-fef4b97d2372'
@@ -33,10 +33,9 @@
 
     PrivateData          = @{
         PSData = @{
-            Tags         = @('Sophos', 'Firewall', 'API', 'XGS', 'SFOS', 'ActiveThreatResponse', 'ATP', 'ThreatFeed')
-            LicenseUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/blob/main/Modules/SophosFirewall.ActiveThreatResponse/LICENSE.txt'
-            ProjectUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/tree/main/Modules/SophosFirewall.ActiveThreatResponse'
-            ReleaseNotes = '1.0.1: comment-based help fix; if/else array-unwrap hardening. 1.1.0: Adds the -Session parameter to all 10 cmdlets for multi-session use (requires SophosFirewall.Core 1.3.0).'
+            Tags       = @('Sophos', 'Firewall', 'API', 'XGS', 'SFOS', 'ActiveThreatResponse', 'ATP', 'ThreatFeed')
+            LicenseUri = 'https://github.com/janweis/SophosFirewall-PowerShell/blob/main/Modules/SophosFirewall.ActiveThreatResponse/LICENSE.txt'
+            ProjectUri = 'https://github.com/janweis/SophosFirewall-PowerShell/tree/main/Modules/SophosFirewall.ActiveThreatResponse'
         }
     }
 }

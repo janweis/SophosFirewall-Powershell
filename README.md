@@ -1,7 +1,7 @@
-﻿# Sophos Firewall PowerShell Module Suite
+# Sophos Firewall PowerShell Module Suite
 
-PowerShell module collection for Sophos XGS/SFOS firewall management. Thirteen modules with 521
-cmdlets are shipped; roughly nine further areas of the API are still open.
+A PowerShell module collection for managing Sophos XGS/SFOS firewalls through their XML
+management API. Thirteen modules ship 522 cmdlets, covering thirteen of the API's areas.
 
 ## Quick Start
 
@@ -9,165 +9,87 @@ cmdlets are shipped; roughly nine further areas of the API are still open.
 # 1. Install from the PowerShell Gallery (SophosFirewall.Core is pulled in automatically)
 Install-Module SophosFirewall.HostsAndServices -Repository PSGallery -Scope CurrentUser
 
-# 2. Connect to firewall
+# 2. Connect to the firewall
 $cred = Get-Credential
-Connect-SfosFirewall -Firewall "192.168.1.1" -Port 4444 -Credential $cred -SkipCertificateCheck
+Connect-SfosFirewall -Firewall '192.0.2.10' -Port 4444 -Credential $cred -SkipCertificateCheck
 
-# 3. Use modules
+# 3. Use the cmdlets
 Get-SfosIPHost
-New-SfosIPHost -Name "Server1" -HostType IP -IPAddress "10.0.0.5"
+New-SfosIPHost -Name 'Server1' -HostType IP -IPAddress '192.0.2.50'
 ```
 
 ### Multiple firewalls at once
 
-Every cmdlet accepts `-Session` — a session object returned by `Connect-SfosFirewall`
-or the name of a session registered with `-Name`. That makes piping between two
+Every cmdlet accepts `-Session` - a session object returned by `Connect-SfosFirewall`, or
+the name of a session registered with `-Name`. That makes moving objects between two
 firewalls a one-liner:
 
 ```powershell
-$fw1 = Connect-SfosFirewall -Firewall "fw1.example.test" -Credential $cred1 -Name fw1
-$fw2 = Connect-SfosFirewall -Firewall "fw2.example.test" -Credential $cred2 -Name fw2 -NoDefault
+$fw1 = Connect-SfosFirewall -Firewall '192.0.2.10' -Credential $cred1 -Name fw1
+$fw2 = Connect-SfosFirewall -Firewall '192.0.2.20' -Credential $cred2 -Name fw2 -NoDefault
 
-# Copy a host object from fw1 to fw2. New-SfosIPHost takes no pipeline input
-# (its parameter sets need an explicit -HostType), so map the fields explicitly;
-# cmdlets whose New-* does bind from the pipeline (for example
-# New-SfosApplicationFilterPolicy) work as a direct Get | New pipe.
-Get-SfosIPHost -Session $fw1 -NameLike "Server1" | ForEach-Object {
-    New-SfosIPHost -Name $_.Name -HostType $_.HostType -IPAddress $_.IPAddress -Session fw2
+Get-SfosIPHost -Session $fw1 -NameLike 'Server1' | ForEach-Object {
+    New-SfosIPHost -Name $_.Name -HostType $_.HostType -IPAddress $_.IPAddress -Session $fw2
 }
 
 Get-SfosSession                  # list registered sessions (IsDefault marks the ambient one)
 Disconnect-SfosFirewall -All     # drop everything
 ```
 
-Cmdlets called without `-Session` keep using the ambient default session, exactly as
-before — existing scripts are unaffected.
+Cmdlets called without `-Session` use the ambient default session set by
+`Connect-SfosFirewall`.
 
-## Available Modules
+## Modules
 
-### Shipped
+| Module | Cmdlets | Purpose |
+|---|---|---|
+| [SophosFirewall.Core](Modules/SophosFirewall.Core/README.md) | 8 | Connection management, API transport, XML escaping |
+| [SophosFirewall.HostsAndServices](Modules/SophosFirewall.HostsAndServices/README.md) | 53 | IP/FQDN/MAC hosts, country groups, services and their groups |
+| [SophosFirewall.Web](Modules/SophosFirewall.Web/README.md) | 52 | URL groups, web categories, file types, filter policies and exceptions, surfing quotas |
+| [SophosFirewall.Firewall](Modules/SophosFirewall.Firewall/README.md) | 21 | Firewall rules and rule groups, NAT rules, SSL/TLS inspection |
+| [SophosFirewall.Network](Modules/SophosFirewall.Network/README.md) | 100 | Interfaces, VLANs, zones, gateways, DNS, DHCP, ARP, tunnels |
+| [SophosFirewall.Authentication](Modules/SophosFirewall.Authentication/README.md) | 97 | Authentication servers, users and groups, guest/clientless users, OTP, admin/VPN/web authentication, captive portal, Azure AD SSO, STAS, live users |
+| [SophosFirewall.Routing](Modules/SophosFirewall.Routing/README.md) | 31 | Gateways and health checks, SD-WAN, static and multicast routes, PIM |
+| [SophosFirewall.VPN](Modules/SophosFirewall.VPN/README.md) | 51 | IPsec connections and profiles, SSL VPN, L2TP, PPTP, failover groups |
+| [SophosFirewall.IntrusionPrevention](Modules/SophosFirewall.IntrusionPrevention/README.md) | 29 | IPS policies and rules, custom signatures, DoS settings, spoof prevention, trusted MACs |
+| [SophosFirewall.ActiveThreatResponse](Modules/SophosFirewall.ActiveThreatResponse/README.md) | 10 | ATP threat feeds, host/threat exceptions, third-party threat feeds |
+| [SophosFirewall.Applications](Modules/SophosFirewall.Applications/README.md) | 20 | Application filter policies and rules, application objects, categories, classification |
+| [SophosFirewall.SystemServices](Modules/SophosFirewall.SystemServices/README.md) | 21 | QoS policies, syslog servers, the system service daemon manager, High Availability, RED |
+| [SophosFirewall.Administration](Modules/SophosFirewall.Administration/README.md) | 29 | Notification, SNMP, appliance access, admin/web-admin settings, time, messages, local service ACL |
 
-| Module | Functions | Purpose |
-|--------|-----------|---------|
-| **SophosFirewall.Core** | 7 | Session management, API, XML security |
-| **SophosFirewall.HostsAndServices** | 53 | Host and service management |
-| **SophosFirewall.Web** | 52 | Web protection: URL groups, categories, file types, filter policies and exceptions, quotas, settings |
-| **SophosFirewall.Firewall** | 21 | Firewall rules and rule groups, NAT rules, SSL/TLS inspection |
-| **SophosFirewall.Network** | 100 | Interfaces, VLANs, zones, gateways, DNS, DHCP, ARP, tunnels |
-| **SophosFirewall.Authentication** | 97 | Authentication servers, users and groups, guest and clientless users, one-time passwords, firewall/admin/VPN/web authentication, captive portal, Azure AD SSO, STAS, live users |
-| **SophosFirewall.Routing** | 31 | Gateways and health checks, SD-WAN profiles and policy routes, static (unicast) and multicast routes, PIM |
-| **SophosFirewall.VPN** | 51 | IPsec connections and profiles, SSL VPN (policies, bookmarks, site-to-site), L2TP, PPTP, failover groups |
-| **SophosFirewall.IntrusionPrevention** | 29 | IPS policies and rules, custom signatures, IPS switch, DoS settings and bypass rules, spoof prevention, trusted MACs |
-| **SophosFirewall.ActiveThreatResponse** | 10 | Sophos X-Ops threat feeds (ATP) with host/threat exceptions, third-party threat feeds |
-| **SophosFirewall.Applications** | 20 | Application filter policies and rules, application objects, categories with QoS assignment, classification assignments |
-| **SophosFirewall.SystemServices** | 21 | QoS (traffic shaping) policies, syslog servers, the system service daemon manager, High Availability, RED configuration |
-| **SophosFirewall.Administration** | 29 | Notification mail server, SNMP (agent, communities, v3 users), appliance access, admin/web-admin settings, time, admin messages, local service ACL |
+522 cmdlets in total. Every module follows the same connection model and shares the
+`SophosFirewall.Core` transport layer.
 
-521 cmdlets in total. Every one of them was called against a live SFOS 22.0 appliance, not
-only against mocks — the firmware behaviour that differs from the vendor documentation is
-recorded in the `.NOTES` of the affected function and summarised in each module README.
-
-**Firmware note:** all measured behaviour — status paths, append-only lists, silent
-no-ops, unsatisfiable operations — was established on SFOS 22.0. A firmware upgrade can
-change any of it; re-verify against a lab appliance before trusting the measured notes on
-a newer release. Cmdlets that can lock you out of the appliance or cause irreversible
-state carry `ConfirmImpact = 'High'` and prompt unless `-Confirm:$false` is passed.
-
-## Documentation
-
-- [SophosFirewall.Core README](Modules/SophosFirewall.Core/README.md) - Foundation module details
-- [SophosFirewall.HostsAndServices README](Modules/SophosFirewall.HostsAndServices/README.md) - Host/service management
-- [SophosFirewall.Web README](Modules/SophosFirewall.Web/README.md) - Web protection, including the firmware limitations found on SFOS 22.0
-- [SophosFirewall.Firewall README](Modules/SophosFirewall.Firewall/README.md) - Firewall, NAT and TLS inspection rules; read the safety notes before using the write cmdlets
-- [SophosFirewall.Network README](Modules/SophosFirewall.Network/README.md) - Interfaces, zones, gateways, DNS and DHCP; a wrong write here can cut off the API path used to fix it
-- [SophosFirewall.Authentication README](Modules/SophosFirewall.Authentication/README.md) - Who may log in and how; read the known limitations before using the write cmdlets
-- [SophosFirewall.Routing README](Modules/SophosFirewall.Routing/README.md) - Gateways, SD-WAN and static routes (the API calls them UnicastRoute); a wrong route can cut off the management path
-- [SophosFirewall.VPN README](Modules/SophosFirewall.VPN/README.md) - IPsec, SSL VPN, L2TP and PPTP; read the known limitations, several add operations are not satisfiable through the XML API
-- [SophosFirewall.IntrusionPrevention README](Modules/SophosFirewall.IntrusionPrevention/README.md) - IPS, DoS and spoof prevention; enabling spoof prevention on the management zone can lock you out, read the warning first
-- [SophosFirewall.ActiveThreatResponse README](Modules/SophosFirewall.ActiveThreatResponse/README.md) - ATP / Sophos X-Ops threat feeds and third-party feeds; note the measured remove/update quirks
-- [SophosFirewall.Applications README](Modules/SophosFirewall.Applications/README.md) - Application control; several rule-list fields are computed server-side, read the known behaviour section first
-- [SophosFirewall.SystemServices README](Modules/SophosFirewall.SystemServices/README.md) - QoS/traffic shaping, syslog, the service daemon manager, HA and RED; the daemon manager only starts/stops/restarts, and HA/RED are documentation-faithful without the hardware
-- [SophosFirewall.Administration README](Modules/SophosFirewall.Administration/README.md) - Notification, SNMP, appliance access, admin/web-admin/time/message settings and the local service ACL; the access-critical writes (appliance access, web-admin port, login security) are documentation-faithful and unconfirmed to avoid a lock-out
-
-## Key Features
-
-- 521 functions covering thirteen of roughly twenty API areas
-- PowerShell 5.1 and 7.x
-- Session management: connect once, use every module
-- Pipeline support between cmdlets
-- WhatIf/Confirm on all write operations
-- Automatic XML escaping of user input
-- Self-signed certificate support for test environments
+Several cmdlets change settings that the current management session itself depends on -
+appliance access, admin authentication, interfaces and zones, spoof prevention, HA. A wrong
+value there can end the session with no way to reconnect. Every write cmdlet in the suite
+supports `-WhatIf`; each module's README names the cmdlets that carry this risk and how to
+use them safely.
 
 ## Requirements
 
-- PowerShell 5.1 or higher
-- HTTPS network access to firewall (port 4444)
-- Valid firewall admin account
-- SFOS 21.5, 22.0+
-
-## Examples
-
-### Host Management
-```powershell
-# List all hosts
-Get-SfosIPHost
-
-# Create host
-New-SfosIPHost -Name "WebServer" -HostType IP -IPAddress "10.0.0.5" -Description "Web server"
-
-# Update host
-Set-SfosIPHost -Name "WebServer" -HostType IP -IPAddress "10.0.0.5" -Description "Updated"
-
-# Delete host
-Remove-SfosIPHost -Name "WebServer" -Confirm
-```
-
-### Service Management
-```powershell
-# Create service
-New-SfosService -Name "CustomHTTPS" -Protocol TCP -DstPort "8443" -SrcPort "1:65535"
-
-# List services
-Get-SfosService | Format-Table -AutoSize
-```
-
-## Module Organization
-
-One module per area of the SFOS web admin, named after that area.
-
-| Web admin menu | Modules |
-|---|---|
-| Configure | Network, Routing, Authentication, SystemServices, VPN |
-| Protect | RulesAndPolicies, IntrusionPrevention, Web, Applications, Wireless, Email, WebServer, ActiveThreatResponse |
-| System | SophosCentral, Profiles, HostsAndServices, Administration, BackupAndFirmware, Certificates |
-| Monitor & analyze | ZeroDayProtection, Diagnostics |
+- PowerShell 5.1 or 7.x
+- HTTPS access to the firewall's management API (default port 4444)
+- A firewall account with API access
 
 ## Architecture
 
-- **CRUD Operations**: Get, New, Set, Remove for all objects
-- **Consistent Parameters**: Reusable connection across modules
-- **Pipeline Support**: Objects flow between cmdlets
-- **Safety**: WhatIf/Confirm on write operations
-- **Error Handling**: Descriptive error messages
+Two layers:
 
-## Troubleshooting
+- **`SophosFirewall.Core`** owns the connection, the HTTP transport, XML escaping and status
+  evaluation. It has no knowledge of any specific object type.
+- **Domain modules** (everything else) build the inner request XML for their own object
+  types, parse the response, and expose the `Get-`/`New-`/`Set-`/`Remove-` cmdlets. They
+  never call the firewall directly; they go through `SophosFirewall.Core`.
 
-| Issue | Solution |
-|-------|----------|
-| Connection fails | Check IP/port, verify network connectivity |
-| SSL error | Use `-SkipCertificateCheck` parameter |
-| Auth fails (502) | Verify admin credentials |
-| "No active connection" | Run `Connect-SfosFirewall` first |
+Every write cmdlet supports `-WhatIf`/`-Confirm`. Every value taken from a caller is
+XML-escaped before being sent. `Get-*` cmdlets accept pipeline output from other `Get-*`
+cmdlets so objects can be copied between firewalls with `Get-* -Session $fw1 | New-* -Session $fw2`.
 
 ## License
 
 MIT License - Copyright (c) 2025 Jan Weis
 
-## Version
+## Links
 
-1.0.0 - Production Release (January 2026)
-
----
-
-For API details, see [Sophos Firewall API Documentation](https://docs.sophos.com/nsg/sophos-firewall/22.0/api/).
+- [Sophos Firewall API Documentation](https://docs.sophos.com/nsg/sophos-firewall/22.0/api/)

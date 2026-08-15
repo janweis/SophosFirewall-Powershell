@@ -1,10 +1,7 @@
 # Building an HA cluster with the SystemServices cmdlets
 
-A step-by-step, reproducible recipe for forming a High Availability cluster between two
-Sophos XGS/SFOS 22.0 appliances using only the cmdlets in this module. Every step below
-was reverse-engineered and applied against two live lab firewalls; the one thing the lab
-could **not** demonstrate is the cluster actually forming, because the two appliances ran
-mismatched firmware — see [Prerequisites](#prerequisites).
+A step-by-step recipe for forming a High Availability cluster between two Sophos XGS/SFOS
+22.0 appliances using only the cmdlets in this module.
 
 The cmdlets involved:
 
@@ -20,23 +17,22 @@ The cmdlets involved:
 ## Prerequisites
 
 These are hard requirements. The API accepts a configuration that violates the last two
-without complaint, and the cluster then silently never forms.
+without complaint, and the cluster then never forms.
 
 1. **Two appliances of the same model.**
 2. **Identical firmware on both.** This is the single most common reason a cluster does
-   not form. The API will apply the HA config on each node and answer success; the peers
-   simply never pair. Verify the firmware version on both before starting.
+   not form. The API applies the HA configuration on each node and answers success; the
+   peers simply never pair. Check the firmware version on both before starting.
 3. **A dedicated HA-link interface on each appliance.** In interactive mode this link must
-   be a **DMZ, LAG, or VLAN** interface carrying a subnet (the peer HA link IP sits in it) —
-   a bound physical port is rejected with `501`. **QuickHA additionally accepts an unbound
-   physical port**, which is the easiest link to arrange in a small lab (see
-   [step 1](#step-1-free-the-ha-link-port-if-it-is-a-physical-port)).
+   be a **DMZ, LAG, or VLAN** interface carrying a subnet, because the peer HA-link IP sits
+   inside it — a bound physical port is rejected. **QuickHA additionally accepts an unbound
+   physical port**, which is the easiest link to arrange when no spare DMZ/LAG/VLAN
+   interface is available (see [step 1](#step-1-free-the-ha-link-port-if-it-is-a-physical-port)).
 4. **Interactive mode: SSH allowed on the HA-link zone, on BOTH appliances.** The HA sync
    runs over SSH on the dedicated link. If the link is a DMZ interface, the DMZ zone must
-   list SSH under **Administration > Appliance Access** on *both* nodes. Measured: a missing
-   SSH-on-DMZ entry on the peer makes the primary write answer **`556` (operation failed)** —
-   the config is valid but the cluster cannot form. QuickHA is not affected (it manages its
-   own link).
+   list SSH under **Administration > Appliance Access** on *both* nodes; without it, the
+   connection cannot be established, and the primary write fails. QuickHA is not affected
+   because it manages its own link.
 5. **The same admin credentials** reachable on both appliances' API port (4444 by default).
 
 Connect to both appliances up front and keep the two sessions side by side:
@@ -62,8 +58,9 @@ QuickHA accepts an unbound physical interface, but the port must have **no zone 
 it. Detaching it is a `Set-SfosZone`/interface operation in the Network module — unbind the
 port you intend to use for the HA link on **both** appliances before configuring HA.
 
-> A dedicated DMZ/LAG/VLAN interface avoids this step entirely and is the production
-> recommendation. Only reach for an unbound physical port in a lab where you have a spare.
+> A dedicated DMZ/LAG/VLAN interface avoids this step entirely and is the recommended
+> choice for a production deployment. Use an unbound physical port only when no such
+> interface is available.
 
 ### Step 2 — Configure the auxiliary appliance
 
@@ -79,7 +76,7 @@ Initialize-SfosHAConfiguration -Session fw2 `
 ```
 
 `-Device` takes exactly one of `Active_Active`, `Active_Passive`, `Auxilliary` — those are
-the literal wire values (`Auxilliary` is Sophos' spelling, kept deliberately). The
+the literal wire values (`Auxilliary` is Sophos' own spelling, kept deliberately). The
 auxiliary node is always `Auxilliary`.
 
 ### Step 3 — Configure the primary appliance
@@ -106,8 +103,8 @@ Get-SfosHAConfiguration -Session fw2
 ```
 
 A formed cluster reports the configured mode and both node roles. If it still shows
-unconfigured after several minutes, the overwhelmingly likely cause is a **firmware
-mismatch** — confirm both appliances are on the same build.
+unconfigured after several minutes, the most likely cause is a **firmware mismatch** —
+confirm both appliances are on the same build.
 
 ---
 
@@ -147,14 +144,15 @@ Initialize-SfosHAConfiguration -Session fw1 `
     -KeepAliveAttempts 16
 ```
 
-Key points, all measured against the firmware:
+Key points:
 
 - **The HA-link zone must allow SSH on both appliances** (see [prerequisite 4](#prerequisites)).
-  A missing SSH-on-DMZ entry on the peer is the measured cause of a `556` on the primary write.
+  A missing SSH entry on the peer's HA-link zone is the most common cause of a failed
+  primary write.
 - **`-Device` is the mode discriminator** (`Active_Passive`/`Active_Active`/`Auxilliary`); there
   is no separate mode parameter.
 - **`-DedicatedLinkIPAddress` is the _peer's_ HA-link IPv4**, not this appliance's, and sits in
-  the DMZ link's subnet.
+  the dedicated link's subnet.
 - `-ClusterID` is `0–63`; both nodes must share the same value.
 - `-KeepAliveInterval` is `250–500` ms, `-KeepAliveAttempts` is `16–24`.
 - `-MonitorPort` and the `-PeerAdministration*` fields are optional; the peer-administration
@@ -176,14 +174,19 @@ Reset-SfosHAConfiguration -Session fw1
 Reset-SfosHAConfiguration -Session fw2
 ```
 
-**A running cluster** — disable HA:
+**A running cluster** — disable HA from the primary appliance:
 
 ```powershell
 Disable-SfosHAConfiguration -Session fw1
 ```
 
-Both support `-WhatIf`/`-Confirm`. `Reset` sends the documented `<HA_Interactive_Reset/>`
-toggle (verified live) and is the correct tool for the "I configured it but it never
+Run `Disable-SfosHAConfiguration` against the primary appliance, as required by Sophos.
+Running it against the auxiliary instead clears only the auxiliary configuration and leaves
+the primary appliance behind without a working peer; if that happens, reconfigure the
+primary with `Initialize-SfosHAConfiguration` or the web admin console.
+
+Both `Reset-SfosHAConfiguration` and `Disable-SfosHAConfiguration` support
+`-WhatIf`/`-Confirm`. `Reset` is the correct tool for the "I configured it but it never
 paired" case that a firmware mismatch produces.
 
 ---
@@ -192,9 +195,9 @@ paired" case that a firmware mismatch produces.
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `556` (operation failed) on the interactive primary write | SSH is not allowed on the HA-link (DMZ) zone on one of the appliances — the HA sync over the link cannot establish | Allow SSH for the DMZ zone under Administration > Appliance Access on **both** nodes, then retry |
-| `501` naming `DedicatedLink` | The HA-link port is a bound physical interface | Unbind it, or use a DMZ/LAG/VLAN interface; QuickHA accepts an unbound physical port |
-| `501` naming `Passphrase`/`DedicatedLink` on an auxiliary | — | The cmdlet already emits the required nested shape for `-Device Auxilliary`; make sure you passed `Auxilliary`, not `Primary`/`Auxiliary` |
-| Config applies (success) but the cluster never forms | Firmware mismatch between the two appliances | Bring both to the same firmware build, then reset both and reconfigure |
+| Operation failed on the interactive primary write | SSH is not allowed on the HA-link (DMZ) zone on one of the appliances — the HA sync over the link cannot establish | Allow SSH for the DMZ zone under Administration > Appliance Access on **both** nodes, then retry |
+| Error naming `DedicatedLink` | The HA-link port is a bound physical interface | Unbind it, or use a DMZ/LAG/VLAN interface; QuickHA accepts an unbound physical port |
+| Error naming `Passphrase`/`DedicatedLink` on an auxiliary | — | The cmdlet already emits the required nested shape for `-Device Auxilliary`; make sure you passed `Auxilliary`, not `Primary`/`Active_Active` |
+| Configuration applies (success) but the cluster never forms | Firmware mismatch between the two appliances | Bring both to the same firmware build, then reset both and reconfigure |
 | Passphrase rejected | No special character | HA passphrases must contain a special character |
 | Node stuck in a half-configured state | — | `Reset-SfosHAConfiguration` on that node |

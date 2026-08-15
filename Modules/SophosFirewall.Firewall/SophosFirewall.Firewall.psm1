@@ -2,81 +2,48 @@
 #requires -Modules @{ ModuleName = 'SophosFirewall.Core'; ModuleVersion = '1.1.0' }
 <#
         .SYNOPSIS
-        Manages firewall rules, rule groups, NAT rules and SSL/TLS inspection on Sophos Firewall.
+        Manages firewall rules, rule groups, NAT rules and SSL/TLS inspection on a Sophos Firewall.
 
         .DESCRIPTION
-        PowerShell module for the PROTECT > Firewall area of the Sophos XGS / SFOS 22.0 XML API.
-        The SFOS web admin presents the same area as "Rules and policies".
+        Provides cmdlets for the PROTECT > Rules and policies area of the Sophos XGS / SFOS 22.0
+        API. The module covers firewall rules (including the network policy subtree), firewall
+        rule groups with member management, NAT rules, SSL/TLS inspection rules, and the SSL/TLS
+        inspection settings, which the API models as a single unnamed object with no create or
+        delete operation.
 
-        This module provides functions to create, read, update, and delete:
-        - Firewall Rules (network policies, with a builder for the policy subtree)
-        - Firewall Rule Groups (with member management)
-        - NAT Rules
-        - SSL/TLS Inspection Rules
+        Every Set-* cmdlet reads the current object first and writes it back complete, so a call
+        that changes one field does not clear the others. Use Connect-SfosFirewall once per
+        session; the cmdlets in this module then use that connection without repeating the
+        connection parameters.
 
-        It also exposes the SSL/TLS inspection settings, which the API models as a singleton
-        without a name and with no create or delete operation.
-
-        All functions support pipeline input, filtering, and connection context management.
-        Use Connect-SfosFirewall once, then call functions without connection parameters.
+        The API element for a firewall rule is FirewallRule, even though the web admin and the
+        documentation call the same object a security policy. Only PolicyType Network is
+        supported; PolicyType User and HTTPBased are documented but not implemented. A rule
+        placed at Position Bottom is stored as After the last existing rule, so a later read
+        shows After, not Bottom.
 
         .EXAMPLE
-        # Connect to the firewall and list the rules in evaluation order
         Connect-SfosFirewall -Firewall "192.168.1.1" -Credential (Get-Credential) -SkipCertificateCheck
         Get-SfosFirewallRule | Format-Table Name, Status, Position, PolicyType
 
+        Connects to the firewall and lists the firewall rules in evaluation order.
+
         .EXAMPLE
-        # Create a disabled rule at the bottom of the list
         $policy = New-SfosFirewallRuleNetworkPolicy -Action Accept -SourceZone LAN -DestinationZone WAN
         New-SfosFirewallRule -Name "Allow-LAN-to-WAN" -Status Disable -Position Bottom -PolicyType Network -NetworkPolicy $policy
 
+        Builds a network policy and creates a disabled firewall rule at the bottom of the list.
+
         .EXAMPLE
-        # Group rules and inspect the members
         New-SfosFirewallRuleGroup -Name "Outbound" -Members "Allow-LAN-to-WAN"
         (Get-SfosFirewallRuleGroup -NameLike "Outbound").SecurityPolicyList
 
+        Creates a firewall rule group and lists its member rules.
+
         .EXAMPLE
-        # Read the SSL/TLS inspection settings
         Get-SfosSSLTLSInspectionSettings
 
-        .NOTES
-        Module Name: SophosFirewall.Firewall
-        Author: Jan Weis
-        Homepage: https://www.it-explorations.de
-        Version: 1.0.0
-        PowerShell Version: 5.1+
-
-        Dependencies:
-        - SophosFirewall.Core module (provides Connect-SfosFirewall, Invoke-SfosApi, etc.)
-
-        API Compatibility:
-        - Sophos SFOS 22.0
-        - Sophos XGS Firewall Series
-
-        Total Functions: 27 (21 exported, 6 internal helpers)
-        - 5 Firewall Rule functions (including the network policy builder)
-        - 6 Firewall Rule Group functions (including Add/Remove members)
-        - 4 NAT Rule functions
-        - 4 SSL/TLS Inspection Rule functions
-        - 2 SSL/TLS Inspection Settings functions (Get/Set)
-
-        These cmdlets change the rule base of a live firewall. A rule in the wrong place, or
-        an update that drops a rule's position, changes which traffic the appliance permits.
-        Every Set-* therefore reads the current object first and writes it back complete.
-
-        Behaviour that differs from the vendor documentation was measured against a live
-        appliance and is recorded in the .NOTES of the affected function. The most important
-        ones:
-        - The documentation folder is called SecurityPolicy, but the XML element is
-          FirewallRule. Several other elements in this area differ from their folder name
-          in the same way.
-        - Position 'Bottom' is normalised by the firewall to 'After' anchored on the last
-          rule, so what a Get returns is not what was sent.
-        - The wire element is spelled TrafficShappingPolicy, with a doubled p. The
-          documentation spells it correctly; the appliance does not.
-        - Only PolicyType 'Network' is supported. 'User' and 'HTTPBased' exist in the
-          documentation but could not be verified, so the cmdlets refuse them rather than
-          guessing at their subtree.
+        Reads the SSL/TLS inspection settings of the current connection.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
@@ -98,29 +65,23 @@
 
 # --- FirewallRule ---
 #
-# The doc folder is called SecurityPolicy, but the wire element is <FirewallRule> - a
-# <SecurityPolicy> root answers 529 'Input request module is Invalid' [live]. Position and
-# rule order are the single most dangerous property of this entity: SFOS replaces the whole
-# object on <Set operation="update">, so an update that omits Position/After/Before moves the
-# rule and silently reorders the entire rulebase. Every write cmdlet below therefore funnels
-# through ConvertTo-SfosFirewallRuleXml with a fully resolved rule object, and Set-* always
-# reads the current object first and preserves Position/After/Before unless the caller
-# explicitly overrides them.
+# The web admin and the documentation call this object a security policy; the wire element
+# is FirewallRule. A root element of SecurityPolicy is rejected by the firewall.
 #
-# <Status> here is a data field ("is this rule active"), not an API status - Core's
-# Get-SfosApiStatus already tells the two apart (a real status node either carries a 'code'
-# attribute or its parent has no <Name>; six <FirewallRule><Status>Enable</Status> siblings
-# have neither), so no extra handling is needed in this module.
+# Position and rule order are the most sensitive property of this entity: the firewall
+# replaces the whole object on an update, so a request that omits Position/After/Before moves
+# the rule and reorders the rulebase. Every write cmdlet below therefore funnels through
+# ConvertTo-SfosFirewallRuleXml with a fully resolved rule object, and every Set-* reads the
+# current object first and preserves Position/After/Before unless the caller overrides them.
 #
-# PolicyType [doc] has three documented values: User, Network, HTTPBased - each with its own
-# subtree (UserPolicy, NetworkPolicy, HTTPBasedPolicy). All six rules on the lab firewall are
-# PolicyType=Network, and only NetworkPolicy's ~30 fields have been read and written against a
-# live firewall. UserPolicy and HTTPBasedPolicy are documented but NOT implemented here - see
-# the .NOTES on Get-/New-/Set-SfosFirewallRule. Get-SfosFirewallRule still returns the common
-# top-level fields for any PolicyType; New-/Set-SfosFirewallRule refuse to write anything but
-# PolicyType=Network, which also means they can never touch the five other-typed... (in this
-# lab, all six existing rules happen to be Network, so this restriction does not block them,
-# it only blocks types nobody has verified).
+# <Status> here is a data field (whether the rule is active), not an API status. A status
+# node is recognised by a code attribute, or by its parent having no <Name>; the six
+# <FirewallRule><Status>Enable</Status> siblings have neither, so they are read as data.
+#
+# PolicyType has three documented values: User, Network, HTTPBased, each with its own subtree
+# (UserPolicy, NetworkPolicy, HTTPBasedPolicy). Only the NetworkPolicy subtree is implemented.
+# Get-SfosFirewallRule returns the common top-level fields for any PolicyType; New- and
+# Set-SfosFirewallRule accept only PolicyType Network and reject the other two.
 
 <#
 .SYNOPSIS
@@ -128,17 +89,11 @@
 
 .DESCRIPTION
     Converts a NetworkPolicy object (as produced by New-SfosFirewallRuleNetworkPolicy or
-    returned by Get-SfosFirewallRule) into the <NetworkPolicy>...</NetworkPolicy> fragment
-    SFOS expects inside a FirewallRule. Every value is escaped here. List wrappers
-    (SourceZones, SourceNetworks, DestinationZones, DestinationNetworks, Services) are only
-    emitted when the list is non-empty - a live rule with no SourceZones/DestinationZones
-    (the MTA auto rule) omits the wrapper entirely rather than sending it empty [live], and an
-    empty <SourceZones/> was not tested, so this helper mirrors what was actually observed.
-
-    Element order follows the live GET response where a field was observed
-    (fw-live-FirewallRule.xml), and the vendor sample XML where it was not (SourceNetworks).
-    SFOS is expected to parse child elements by name, not by position, so this is a
-    readability choice, not a correctness requirement.
+    returned by Get-SfosFirewallRule) into the NetworkPolicy fragment the firewall expects
+    inside a FirewallRule entity. Every value is escaped here. The list wrappers (SourceZones,
+    SourceNetworks, DestinationZones, DestinationNetworks, Services) are only emitted when the
+    list is non-empty; a rule with no source or destination zones omits the wrapper entirely
+    rather than sending it empty.
 
 .PARAMETER NetworkPolicy
     NetworkPolicy object with Action, LogTraffic, SkipLocalDestined, SourceZoneList,
@@ -259,21 +214,21 @@ function ConvertTo-SfosFirewallRuleNetworkPolicyXml {
     Builds the <Set> inner XML for a FirewallRule entity. Internal helper, not exported.
 
 .DESCRIPTION
-    Centralizes the FirewallRule XML shape so New- and Set-SfosFirewallRule send an
-    identical, complete entity body. Takes a fully resolved rule object - same property
-    shape Get-SfosFirewallRule returns - and escapes every value.
+    Builds the complete Set request body for a FirewallRule entity, so New-SfosFirewallRule
+    and Set-SfosFirewallRule send an identical, complete entity body. Takes a fully resolved
+    rule object with the same property shape Get-SfosFirewallRule returns, and escapes every
+    value.
 
-    SFOS replaces the whole entity on <Set operation="update">: any element this function
-    does not emit is cleared on the firewall, Position and After/Before included. The caller
-    is responsible for merging in every field it wants preserved (in particular Position,
-    After, Before) before calling this function; nothing is read back here.
+    The firewall replaces the whole entity on an update: any element this function does not
+    emit is cleared, Position and After/Before included. The caller merges in every field it
+    wants preserved, in particular Position, After and Before, before calling this function;
+    nothing is read back here.
 
-    Only PolicyType=Network is supported - see the module-level comment at the top of this
-    region. Any other PolicyType throws rather than silently sending an incomplete or empty
-    subtree.
+    Only PolicyType Network is supported. Any other PolicyType throws rather than sending an
+    incomplete or empty subtree.
 
 .PARAMETER Operation
-    'add' or 'update', passed straight to <Set operation="...">.
+    add or update, passed straight to the Set operation attribute.
 
 .PARAMETER Rule
     Fully resolved rule object with Name, Description, IPFamily, Status, Position, Section,
@@ -292,7 +247,7 @@ function ConvertTo-SfosFirewallRuleXml {
     )
 
     if ($Rule.PolicyType -ne 'Network') {
-        throw "PolicyType '$($Rule.PolicyType)' is not supported by this module - only 'Network' rules can be written. UserPolicy and HTTPBasedPolicy are documented by Sophos but have not been implemented or verified against a live firewall."
+        throw "PolicyType '$($Rule.PolicyType)' is not supported by this module - only 'Network' rules can be written. UserPolicy and HTTPBasedPolicy are documented by Sophos but not implemented here."
     }
 
     $nameEsc = ConvertTo-SfosXmlEscaped -Text ([string]$Rule.Name)
@@ -339,91 +294,99 @@ function ConvertTo-SfosFirewallRuleXml {
     Retrieves FirewallRule objects from the Sophos Firewall.
 
 .DESCRIPTION
-    Queries the Sophos Firewall XML API for FirewallRule (security policy) objects. By
-    default the cmdlet returns PowerShell-friendly objects. Use -AsXml to return the raw XML
-    nodes.
+    Returns the firewall rules that are defined on the firewall. A firewall rule controls
+    which traffic the appliance permits or denies between zones and networks, and in which
+    order the rules are evaluated. Use this cmdlet to review the existing rules or to feed
+    them into another cmdlet through the pipeline. The cmdlet only reads; nothing on the
+    firewall is changed. It needs an open connection from Connect-SfosFirewall, or the
+    connection parameters supplied directly.
 
     Only the top-level fields (Name, Description, IPFamily, Status, Position, Section, After,
-    Before, PolicyType) are guaranteed for every rule. The NetworkPolicy property is populated
-    only when PolicyType is 'Network' - the only subtree this module has read and written
-    against a live firewall. For any other PolicyType (User, HTTPBased), NetworkPolicy is
-    $null and the rule's type-specific fields are not exposed; use -AsXml to inspect them.
+    Before, PolicyType) are returned for every rule. The NetworkPolicy property, which carries
+    the actual match and action fields, is populated only when PolicyType is Network; for
+    PolicyType User or HTTPBased, NetworkPolicy is $null and the rule's own fields are only
+    visible with -AsXml. The Status property is the rule's own Enable/Disable flag, not an
+    indicator of API success or failure.
 
-    Note: Sophos GET responses can be inconsistent regarding status elements. This cmdlet is
-    designed to return an empty result when no records are found. <Status> inside a
-    FirewallRule node is the rule's own Enable/Disable flag, not an API status - Core tells
-    the two apart before this cmdlet ever sees a status.
-
-.PARAMETER Session
-A session object returned by Connect-SfosFirewall, or the name of a session
-registered with Connect-SfosFirewall -Name. Overrides the stored default
-connection context; any of -Firewall/-Port/-Username/-Password/
--SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
-
-.PARAMETER Firewall
-    Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored
-    connection context.
-
-.PARAMETER Port
-    Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the
-    stored connection context.
-
-.PARAMETER Username
-    Username for API authentication. If omitted, the cmdlet attempts to use the stored
-    connection context.
-
-.PARAMETER Password
-    Password for API authentication. If omitted, the cmdlet attempts to use the stored
-    connection context.
+    You can combine several filters. The firewall itself evaluates at most one of them, so
+    every filter you supply is applied again on the client. The result always matches all
+    filters you gave.
 
 .PARAMETER NameLike
-    Optional name filter. In Sophos SFOS, 'like' behaves as a substring match. Sent to the
-    firewall as the server-side filter, then re-applied client-side: only the first key of
-    the first filter is evaluated server-side, and this module never relies on that alone.
+    Optional. Returns only rules whose name contains the given text anywhere. This is a
+    substring match, not a wildcard pattern. If omitted, the name is not used to filter.
 
 .PARAMETER PolicyTypeLike
-    Optional PolicyType filter, matched as a substring (for example 'Network'). The firewall
-    does not support filtering on PolicyType, so this filter is always applied client-side.
+    Optional. Returns only rules whose PolicyType contains the given text anywhere, for
+    example 'Network'. Applied on the client. If omitted, the PolicyType is not used to
+    filter.
+
+.PARAMETER Firewall
+    Optional. Host name or IP address of the firewall. If omitted, the value from the current
+    connection is used.
+
+.PARAMETER Port
+    Optional. TCP port of the management API, usually 4444. If omitted, the value from the
+    current connection is used.
+
+.PARAMETER Username
+    Optional. User name for the API login. The account needs read permission for firewall
+    rules. If omitted, the value from the current connection is used.
+
+.PARAMETER Password
+    Optional. Password for the API login, as a SecureString. If omitted, the value from the
+    current connection is used.
 
 .PARAMETER SkipCertificateCheck
-    Skips SSL certificate validation for the API call.
+    Optional. Accepts the firewall certificate without validating it. Use this only for
+    appliances that still present a self-signed certificate. If omitted, the certificate is
+    validated.
+
+.PARAMETER Session
+    Optional. A session object from Connect-SfosFirewall, or the name of a session that was
+    registered with Connect-SfosFirewall -Name. Use it to address a specific firewall when
+    you work with more than one at a time. Any connection parameter you pass explicitly still
+    takes precedence. If omitted, the stored default connection is used.
 
 .PARAMETER AsXml
-    Returns raw XML nodes instead of PowerShell-friendly objects.
+    Optional. Returns the raw XML elements sent by the firewall instead of PowerShell
+    objects. Useful to inspect the fields of a User or HTTPBased rule, which are not exposed
+    on the standard output.
+
+.INPUTS
+    None. This cmdlet does not accept pipeline input.
 
 .OUTPUTS
-    PSCustomObject with properties: Name, Description, IPFamily, Status, Position, Section,
-    After, Before, PolicyType, NetworkPolicy (object with Action, LogTraffic,
-    SkipLocalDestined, SourceZoneList, SourceNetworkList, DestinationZoneList, Schedule,
-    ServiceList, DestinationNetworkList, DSCPMarking, WebFilter, WebCategoryBaseQoSPolicy,
-    BlockQuickQuic, ScanVirus, ZeroDayProtection, ProxyMode, DecryptHTTPS, ApplicationControl,
-    ApplicationBaseQoSPolicy, IntrusionPrevention, NDRActiveThreatIntelligence,
-    TrafficShappingPolicy, ScanSMTP, ScanSMTPS, ScanIMAP, ScanIMAPS, ScanPOP3, ScanPOP3S,
-    ScanFTP, SourceSecurityHeartbeat, MinimumSourceHBPermitted, DestSecurityHeartbeat,
-    MinimumDestinationHBPermitted properties, or $null when PolicyType is not 'Network').
-    System.Xml.XmlElement when -AsXml is specified.
+    System.Management.Automation.PSCustomObject. One object per firewall rule, with the
+    properties Name, Description, IPFamily, Status, Position, Section, After, Before,
+    PolicyType and NetworkPolicy. NetworkPolicy is $null unless PolicyType is Network.
+    Returns System.Xml.XmlElement when -AsXml is used, and an empty array when no rule
+    matches.
 
 .EXAMPLE
-    # Retrieve all firewall rules
     Get-SfosFirewallRule
 
+    Lists every firewall rule on the firewall of the current connection.
+
 .EXAMPLE
-    # Filter by name (substring match)
     Get-SfosFirewallRule -NameLike "Allow-LAN-to-WAN"
 
+    Lists the rules whose name contains 'Allow-LAN-to-WAN'.
+
 .EXAMPLE
-    # Only Network-type rules, raw XML for troubleshooting
     Get-SfosFirewallRule -PolicyTypeLike "Network" -AsXml
 
-.NOTES
-    Minimum supported PowerShell version: 5.1
-    This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
-    UserPolicy and HTTPBasedPolicy rules are returned with NetworkPolicy = $null; their
-    type-specific fields are not parsed by this cmdlet.
+    Returns the raw XML of the Network-type rules, for example to check a field the standard
+    output does not contain.
 
 .LINK
-    https://docs.sophos.com/nsg/sophos-firewall/22.0/api/PROTECT/Firewall/SecurityPolicy/SecurityPolicy.html
+    https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+.LINK
+    New-SfosFirewallRule
+
+.LINK
+    Set-SfosFirewallRule
 #>
 function Get-SfosFirewallRule {
     [CmdletBinding()]
@@ -575,17 +538,10 @@ function Get-SfosFirewallRule {
     Resolves one NetworkPolicy field value. Internal helper, not exported.
 
 .DESCRIPTION
-    Shared precedence rule for New-SfosFirewallRuleNetworkPolicy's -InputObject and for
-    Set-SfosFirewallRule's per-field NetworkPolicy parameters (which forward through
-    New-SfosFirewallRuleNetworkPolicy - see Set-SfosFirewallRule): an explicitly bound
-    parameter always wins; otherwise, when a base object is available (an -InputObject, or the
-    NetworkPolicy Set-SfosFirewallRule is merging into), that base's value is kept; otherwise
-    the parameter's own value is used unchanged - for New-SfosFirewallRuleNetworkPolicy without
-    -InputObject that is already the parameter's documented default, because PowerShell assigns
-    parameter defaults before the function body runs regardless of whether the caller supplied
-    the parameter. Centralised here so the precedence cannot drift between the ~30 NetworkPolicy
-    fields: use $PSBoundParameters.ContainsKey, not a truthiness test, so an explicit empty
-    value can still clear a field.
+    Resolves the value of one NetworkPolicy field for New-SfosFirewallRuleNetworkPolicy and
+    Set-SfosFirewallRule. An explicitly bound parameter always wins. Otherwise, when a base
+    object is available, the base value is kept. Otherwise the parameter's own value is used
+    unchanged.
 
 .PARAMETER IsBound
     Whether the caller explicitly passed the parameter, from $PSBoundParameters.ContainsKey.
@@ -617,169 +573,160 @@ function Resolve-SfosNetworkPolicyFieldValue {
 
 <#
 .SYNOPSIS
-    Builds a NetworkPolicy sub-object for use with New-/Set-SfosFirewallRule.
+    Builds a NetworkPolicy object for use with New-SfosFirewallRule or Set-SfosFirewallRule.
 
 .DESCRIPTION
-    Creates the object New-SfosFirewallRule -NetworkPolicy and Set-SfosFirewallRule
-    -NetworkPolicy expect. Performs no API call. A raw hashtable would need every one of the
-    ~30 NetworkPolicy fields spelled and ordered correctly, including the misspelled wire
-    element TrafficShappingPolicy - this builder exists so callers work from named parameters
-    with defaults instead, the same reasoning as New-SfosWebFilterPolicyRule in
-    SophosFirewall.Web.
+    Creates the object that New-SfosFirewallRule -NetworkPolicy and Set-SfosFirewallRule
+    -NetworkPolicy expect. The cmdlet performs no API call; it only builds an in-memory
+    object from named parameters, one per NetworkPolicy field, each with a documented
+    default.
 
-    Accepts an existing NetworkPolicy via -InputObject (for example the NetworkPolicy property
-    Get-SfosFirewallRule returns) as a base. Without -InputObject every field falls back to its
-    documented default, exactly as before this parameter was added. With -InputObject, only the
-    parameters the caller actually passed override the base - every other field is copied from
-    -InputObject unchanged, so a single field can be changed without resetting the other ~29.
+    Pass an existing NetworkPolicy through -InputObject, for example the NetworkPolicy
+    property returned by Get-SfosFirewallRule, to use it as a base. Without -InputObject
+    every field falls back to its default. With -InputObject, only the parameters you pass
+    explicitly override the base; every other field is copied from -InputObject unchanged,
+    so you can change one field without resetting the rest of the policy.
 
 .PARAMETER InputObject
-    Existing NetworkPolicy object to use as a base, for example the NetworkPolicy property
-    returned by Get-SfosFirewallRule. Only parameters explicitly passed alongside -InputObject
-    override the corresponding field; every other field is copied from -InputObject unchanged.
-    Accepts pipeline input, so
-    (Get-SfosFirewallRule -NameLike 'Allow-LAN-to-WAN').NetworkPolicy | New-SfosFirewallRuleNetworkPolicy -ScanVirus Enable
-    changes only ScanVirus and leaves every other field as read from the firewall.
+    Optional. An existing NetworkPolicy object to use as a base, for example the
+    NetworkPolicy property returned by Get-SfosFirewallRule. Only parameters explicitly
+    passed alongside -InputObject override the corresponding field; every other field is
+    copied from -InputObject unchanged. Accepts pipeline input.
 
 .PARAMETER Action
-    Traffic handling action: 'Accept', 'Reject' or 'Drop'. Default: 'Accept'.
+    Optional. Traffic handling action: Accept, Reject or Drop. Default: Accept.
 
 .PARAMETER LogTraffic
-    Whether to log traffic matching this rule: 'Enable' or 'Disable'. Default: 'Disable'.
+    Optional. Whether to log traffic matching this rule: Enable or Disable. Default: Disable.
 
 .PARAMETER SkipLocalDestined
-    Skip this rule when the firewall itself is the destination: 'Enable' or 'Disable'.
-    Default: 'Disable'.
+    Optional. Skip this rule when the firewall itself is the destination: Enable or Disable.
+    Default: Disable.
 
 .PARAMETER SourceZone
-    Source zone names, for example 'LAN', 'WAN', 'DMZ', 'VPN', 'Any'. Zone names are
-    firewall-defined, not a fixed set, so no validation is applied beyond non-empty strings.
-    Omit to leave SourceZones unset, as the live 'Auto added firewall policy for MTA' rule
-    does.
+    Optional. Source zone names, for example LAN, WAN, DMZ, VPN, Any. Zone names are
+    firewall-defined, so no fixed list is enforced. If omitted, no source zone is set.
 
 .PARAMETER SourceNetwork
-    Source network/host object names. Not observed populated on the lab firewall; documented
-    by Sophos only.
+    Optional. Source network or host object names. If omitted, no source network is set.
 
 .PARAMETER DestinationZone
-    Destination zone names, for example 'LAN', 'WAN', 'LOCAL', 'VPN', 'Any'.
+    Optional. Destination zone names, for example LAN, WAN, LOCAL, VPN, Any.
 
 .PARAMETER Schedule
-    Name of the Schedule object this rule is active during. Default: 'All The Time' (a Sophos
-    factory-default schedule).
+    Optional. Name of the schedule object this rule is active during. Default: All The Time.
 
 .PARAMETER Service
-    Service object names this rule matches, for example 'PING', 'SMTP'. Omit to match all
-    services, as most of the six lab rules do.
+    Optional. Service object names this rule matches, for example PING, SMTP. If omitted,
+    the rule matches all services.
 
 .PARAMETER DestinationNetwork
-    Destination network/host object names.
+    Optional. Destination network or host object names.
 
 .PARAMETER DSCPMarking
-    QoS packet classification, -1 to 63. Sophos documents 0-63 with named classes; -1 was
-    observed live on rules that do not use DSCP marking. Default: -1.
+    Optional. QoS packet classification, -1 to 63. -1 means no DSCP marking. Default: -1.
 
 .PARAMETER WebFilter
-    Name of the web filter policy applied by this rule, or 'None'. Default: 'None'.
+    Optional. Name of the web filter policy applied by this rule, or None. Default: None.
 
 .PARAMETER WebCategoryBaseQoSPolicy
-    Bandwidth limit toggle for web categories. The vendor doc lists 'Apply'/'Revoke'; the six
-    live rules instead show '0' or an empty string, so this parameter is not constrained by a
-    ValidateSet - the discrepancy is unresolved. Default: '' (empty, matching most live rules).
+    Optional. Bandwidth limit toggle for web categories. Default: '' (empty).
 
 .PARAMETER BlockQuickQuic
-    Block the QUIC protocol: 'Enable' or 'Disable'. Default: 'Disable'.
+    Optional. Block the QUIC protocol: Enable or Disable. Default: Disable.
 
 .PARAMETER ScanVirus
-    Scan matching traffic for viruses: 'Enable' or 'Disable'. Default: 'Disable'.
+    Optional. Scan matching traffic for viruses: Enable or Disable. Default: Disable.
 
 .PARAMETER ZeroDayProtection
-    Enable zero-day threat protection: 'Enable' or 'Disable'. Default: 'Disable'.
+    Optional. Enable zero-day threat protection: Enable or Disable. Default: Disable.
 
 .PARAMETER ProxyMode
-    Use the transparent web proxy: 'Enable' or 'Disable'. Default: 'Disable'.
+    Optional. Use the transparent web proxy: Enable or Disable. Default: Disable.
 
 .PARAMETER DecryptHTTPS
-    Decrypt HTTPS traffic for inspection: 'Enable' or 'Disable'. Default: 'Disable'.
+    Optional. Decrypt HTTPS traffic for inspection: Enable or Disable. Default: Disable.
 
 .PARAMETER ApplicationControl
-    Name of the application control policy applied by this rule, or 'None'. Default: 'None'.
+    Optional. Name of the application control policy applied by this rule, or None.
+    Default: None.
 
 .PARAMETER ApplicationBaseQoSPolicy
-    Bandwidth limit toggle for application categories. Same doc/live discrepancy as
-    -WebCategoryBaseQoSPolicy; not constrained by a ValidateSet. Default: ''.
+    Optional. Bandwidth limit toggle for application categories. Default: '' (empty).
 
 .PARAMETER IntrusionPrevention
-    Name of the IPS policy applied by this rule, or 'None'. Default: 'None'.
+    Optional. Name of the IPS policy applied by this rule, or None. Default: None.
 
 .PARAMETER NDRActiveThreatIntelligence
-    Enable active threat intelligence: 'Enable' or 'Disable'. The vendor's shared attribute
-    table lists this as a top-level true/false field, but it is observed live inside
-    NetworkPolicy with Enable/Disable values - the live shape is what this builder uses.
-    Default: 'Disable'.
+    Optional. Enable active threat intelligence: Enable or Disable. Default: Disable.
 
 .PARAMETER TrafficShappingPolicy
-    Name of the traffic shaping policy applied by this rule, or 'None'. Spelled exactly as
-    the live wire element - see the module-level comment on ConvertTo-SfosFirewallRuleNetworkPolicyXml.
-    Default: 'None'.
+    Optional. Name of the traffic shaping policy applied by this rule, or None. The
+    parameter name matches the wire element spelling used by the firewall. Default: None.
 
 .PARAMETER ScanSMTP
-    Scan SMTP traffic: 'Enable' or 'Disable'. Default: 'Disable'.
+    Optional. Scan SMTP traffic: Enable or Disable. Default: Disable.
 
 .PARAMETER ScanSMTPS
-    Scan SMTPS traffic: 'Enable' or 'Disable'. Default: 'Disable'.
+    Optional. Scan SMTPS traffic: Enable or Disable. Default: Disable.
 
 .PARAMETER ScanIMAP
-    Scan IMAP traffic: 'Enable' or 'Disable'. Default: 'Disable'.
+    Optional. Scan IMAP traffic: Enable or Disable. Default: Disable.
 
 .PARAMETER ScanIMAPS
-    Scan IMAPS traffic: 'Enable' or 'Disable'. Default: 'Disable'.
+    Optional. Scan IMAPS traffic: Enable or Disable. Default: Disable.
 
 .PARAMETER ScanPOP3
-    Scan POP3 traffic: 'Enable' or 'Disable'. Default: 'Disable'.
+    Optional. Scan POP3 traffic: Enable or Disable. Default: Disable.
 
 .PARAMETER ScanPOP3S
-    Scan POP3S traffic: 'Enable' or 'Disable'. Default: 'Disable'.
+    Optional. Scan POP3S traffic: Enable or Disable. Default: Disable.
 
 .PARAMETER ScanFTP
-    Scan FTP traffic: 'Enable' or 'Disable'. Default: 'Disable'.
+    Optional. Scan FTP traffic: Enable or Disable. Default: Disable.
 
 .PARAMETER SourceSecurityHeartbeat
-    Require a source Security Heartbeat: 'Enable' or 'Disable'. Default: 'Disable'.
+    Optional. Require a source Security Heartbeat: Enable or Disable. Default: Disable.
 
 .PARAMETER MinimumSourceHBPermitted
-    Minimum source health status permitted: 'No Restriction', 'GREEN' or 'YELLOW'.
-    Default: 'No Restriction'.
+    Optional. Minimum source health status permitted: No Restriction, GREEN or YELLOW.
+    Default: No Restriction.
 
 .PARAMETER DestSecurityHeartbeat
-    Require a destination Security Heartbeat: 'Enable' or 'Disable'. Default: 'Disable'.
+    Optional. Require a destination Security Heartbeat: Enable or Disable. Default: Disable.
 
 .PARAMETER MinimumDestinationHBPermitted
-    Minimum destination health status permitted: 'No Restriction', 'GREEN' or 'YELLOW'.
-    Default: 'No Restriction'.
+    Optional. Minimum destination health status permitted: No Restriction, GREEN or YELLOW.
+    Default: No Restriction.
+
+.INPUTS
+    System.Management.Automation.PSCustomObject. A NetworkPolicy object, for example the
+    NetworkPolicy property returned by Get-SfosFirewallRule, can be piped in as -InputObject.
 
 .OUTPUTS
-    PSCustomObject with the same property shape Get-SfosFirewallRule returns for
-    NetworkPolicy.
+    System.Management.Automation.PSCustomObject. A NetworkPolicy object with the same
+    property shape Get-SfosFirewallRule returns.
 
 .EXAMPLE
-    # Accept LAN-to-WAN traffic, disabled by default, no scanning
     New-SfosFirewallRuleNetworkPolicy -SourceZone "LAN" -DestinationZone "WAN"
 
+    Builds an Accept policy between LAN and WAN, with logging and scanning left at their
+    defaults.
+
 .EXAMPLE
-    # Accept and log a specific service between two zones
     New-SfosFirewallRuleNetworkPolicy -SourceZone "LAN" -DestinationZone "DMZ" -Service "HTTPS" -LogTraffic Enable
 
+    Builds an Accept policy for HTTPS traffic between LAN and DMZ, with traffic logging
+    enabled.
+
 .EXAMPLE
-    # Change one field on an existing rule's policy, everything else copied unchanged
     (Get-SfosFirewallRule -NameLike "Allow-LAN-to-WAN").NetworkPolicy | New-SfosFirewallRuleNetworkPolicy -ScanVirus Enable
 
-.NOTES
-    Minimum supported PowerShell version: 5.1
-    This cmdlet performs no API call; it only builds an in-memory object.
+    Reads the policy of an existing rule and changes only ScanVirus, leaving every other
+    field as read from the firewall.
 
 .LINK
-    https://docs.sophos.com/nsg/sophos-firewall/22.0/api/PROTECT/Firewall/SecurityPolicy/operations/Addfirewallrule%26Editfirewallrule.html
+    https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
 
 .LINK
     New-SfosFirewallRule
@@ -965,96 +912,105 @@ function New-SfosFirewallRuleNetworkPolicy {
 
 <#
 .SYNOPSIS
-    Creates a new firewall rule (security policy) on the Sophos Firewall.
+    Creates a new firewall rule on a Sophos Firewall.
 
 .DESCRIPTION
-    Creates a FirewallRule object using the Sophos Firewall XML API. Only PolicyType=Network
-    is supported - see the module-level comment at the top of this region for why. Build the
-    NetworkPolicy subtree with New-SfosFirewallRuleNetworkPolicy.
+    Creates a firewall rule using the Sophos Firewall API. A firewall rule controls which
+    traffic the appliance permits or denies between zones and networks, and in which order
+    the rules are evaluated. Only PolicyType Network is supported; build the NetworkPolicy
+    subtree with New-SfosFirewallRuleNetworkPolicy first. It needs an open connection from
+    Connect-SfosFirewall, or the connection parameters supplied directly, and an account with
+    permission to change firewall rules.
 
-    -Status and -Position are mandatory on purpose: this is the most security-critical entity
-    in the whole project, and neither "is this rule active" nor "where does it sit in the
-    evaluation order" should default silently.
+    -Status and -Position are mandatory, so neither whether the rule is active nor where it
+    sits in the evaluation order is left to a default. Inserting a rule at Position Top moves
+    every existing rule down by one position and changes the evaluation order of the whole
+    rule base.
 
 .PARAMETER Name
-    Name of the firewall rule (1-60 characters, no commas - the vendor doc gives a 60
-    character limit for this entity specifically, unlike the 50-character limit used
-    elsewhere in this project).
+    Required. Name of the firewall rule. 1 to 60 characters, no commas.
 
 .PARAMETER Description
-    Optional description. No length limit is documented for this field; 255 characters is
-    used here to match the convention of every other entity in this project, not a measured
-    or documented limit.
+    Optional. Free-text description of the rule.
 
 .PARAMETER IPFamily
-    Internet Protocol version: 'IPv4' or 'IPv6'. Default: 'IPv4'.
+    Optional. Internet Protocol version: IPv4 or IPv6. Default: IPv4.
 
 .PARAMETER Status
-    Whether the rule is active: 'Enable' or 'Disable'. Mandatory - see .DESCRIPTION.
+    Required. Whether the rule is active: Enable or Disable.
 
 .PARAMETER Position
-    Where to insert the rule: 'Top', 'Bottom', 'After' or 'Before'. Mandatory - see
-    .DESCRIPTION. 'Top' inserts above every existing rule and moves all of them down one
-    position, changing the evaluation order of the whole rulebase; use with care.
+    Required. Where to insert the rule: Top, Bottom, After or Before. Top inserts above every
+    existing rule and moves all of them down one position, changing the evaluation order of
+    the whole rule base.
 
 .PARAMETER After
-    Name of the existing rule this one is inserted after. Required when -Position is 'After'.
+    Optional. Name of the existing rule this one is inserted after. Required when -Position
+    is After.
 
 .PARAMETER Before
-    Name of the existing rule this one is inserted before. Required when -Position is
-    'Before'.
+    Optional. Name of the existing rule this one is inserted before. Required when -Position
+    is Before.
 
 .PARAMETER Section
-    Policy section: 'Central_TOP', 'Local' or 'Central_Bottom'. Documented by Sophos; not
-    observed on any of the six live rules used to verify this module, which all omit it.
+    Optional. Policy section: Central_TOP, Local or Central_Bottom.
 
 .PARAMETER PolicyType
-    Type of policy: 'User', 'Network' or 'HTTPBased'. Only 'Network' is implemented - any
-    other value throws. Kept as a parameter (rather than hard-coding 'Network') so the
-    limitation is explicit at the call site instead of silently assumed.
+    Required. Type of policy: User, Network or HTTPBased. Only Network is implemented; the
+    other two values are rejected.
 
 .PARAMETER NetworkPolicy
-    NetworkPolicy subtree, built with New-SfosFirewallRuleNetworkPolicy. Mandatory when
-    -PolicyType is 'Network'.
-
-.PARAMETER Session
-A session object returned by Connect-SfosFirewall, or the name of a session
-registered with Connect-SfosFirewall -Name. Overrides the stored default
-connection context; any of -Firewall/-Port/-Username/-Password/
--SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+    Optional. NetworkPolicy object, built with New-SfosFirewallRuleNetworkPolicy. Required
+    when -PolicyType is Network.
 
 .PARAMETER Firewall
-    Sophos Firewall hostname or IP address. If omitted, uses stored connection context.
+    Optional. Host name or IP address of the firewall. If omitted, the value from the current
+    connection is used.
 
 .PARAMETER Port
-    Management/API port number. If omitted, uses stored connection context.
+    Optional. TCP port of the management API, usually 4444. If omitted, the value from the
+    current connection is used.
 
 .PARAMETER Username
-    Username for API authentication. If omitted, uses stored connection context.
+    Optional. User name for the API login. The account needs permission to change firewall
+    rules. If omitted, the value from the current connection is used.
 
 .PARAMETER Password
-    Password for API authentication. If omitted, uses stored connection context.
+    Optional. Password for the API login, as a SecureString. If omitted, the value from the
+    current connection is used.
 
 .PARAMETER SkipCertificateCheck
-    Skips SSL certificate validation.
+    Optional. Accepts the firewall certificate without validating it. Use this only for
+    appliances that still present a self-signed certificate. If omitted, the certificate is
+    validated.
+
+.PARAMETER Session
+    Optional. A session object from Connect-SfosFirewall, or the name of a session that was
+    registered with Connect-SfosFirewall -Name. Use it to address a specific firewall when
+    you work with more than one at a time. Any connection parameter you pass explicitly still
+    takes precedence. If omitted, the stored default connection is used.
+
+.INPUTS
+    None. This cmdlet does not accept pipeline input.
 
 .OUTPUTS
-    None. Throws an exception if creation fails.
+    None. The cmdlet writes no output and raises an error if the firewall rejects the create.
 
 .EXAMPLE
-    # Create a disabled rule at the bottom of the rulebase
+    $np = New-SfosFirewallRuleNetworkPolicy -SourceZone "LAN" -DestinationZone "WAN"
+    New-SfosFirewallRule -Name "Allow-LAN-to-WAN" -Status Disable -Position Bottom -PolicyType Network -NetworkPolicy $np -WhatIf
+
+    Shows what the call would create without sending it to the firewall.
+
+.EXAMPLE
     $np = New-SfosFirewallRuleNetworkPolicy -SourceZone "LAN" -DestinationZone "WAN"
     New-SfosFirewallRule -Name "Allow-LAN-to-WAN" -Status Disable -Position Bottom -PolicyType Network -NetworkPolicy $np
 
-.NOTES
-    Minimum supported PowerShell version: 5.1
-    This cmdlet changes the rule base of a production firewall. -Position Top reorders every
-    existing rule; verify -Position/-After/-Before before running this against a
-    shared/production firewall.
+    Creates a disabled firewall rule at the bottom of the rule base. The cmdlet asks for
+    confirmation before it writes.
 
 .LINK
-    https://docs.sophos.com/nsg/sophos-firewall/22.0/api/PROTECT/Firewall/SecurityPolicy/operations/Addfirewallrule%26Editfirewallrule.html
+    https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
 
 .LINK
     Get-SfosFirewallRule
@@ -1155,233 +1111,234 @@ function New-SfosFirewallRule {
 
 <#
 .SYNOPSIS
-    Updates an existing FirewallRule object on the Sophos Firewall.
+    Updates an existing firewall rule on a Sophos Firewall.
 
 .DESCRIPTION
-    Updates a FirewallRule object using the Sophos Firewall XML API. You can supply the
-    target rule name directly or via the pipeline.
+    Updates a firewall rule using the Sophos Firewall API. You can supply the target rule
+    name directly or through the pipeline. It needs an open connection from
+    Connect-SfosFirewall, or the connection parameters supplied directly, and an account with
+    permission to change firewall rules.
 
-    SFOS replaces the whole entity on update - any element not sent in the request is cleared
-    on the firewall. This is especially dangerous for Position/After/Before: an update that
-    forgot to resend them would move the rule and reorder the whole rulebase. This cmdlet
-    always reads the current rule first and, unless the caller explicitly passes -Position (in
-    which case -After/-Before must match it as required by -Position's value), resends the
-    existing Position/After/Before completely unchanged, together with every other field the
-    caller did not pass.
+    The firewall replaces the whole rule on update; any field not sent in the request is
+    cleared. This is especially sensitive for Position, After and Before: an update that does
+    not resend them would move the rule and reorder the whole rule base. The cmdlet reads the
+    current rule first and, unless you pass -Position explicitly, resends the existing
+    Position, After and Before unchanged, together with every other field you did not pass.
 
-    Only rules with PolicyType='Network' can be updated - see the module-level comment at the
-    top of this region. Any other PolicyType throws before any request is sent.
+    Only rules with PolicyType Network can be updated; any other PolicyType throws before a
+    request is sent.
 
 .PARAMETER Name
-    Name of the target rule.
+    Required. Name of the target rule. Accepts pipeline input.
 
 .PARAMETER Description
-    Optional description text. If omitted, the existing description is kept.
+    Optional. New description text. If omitted, the existing description is kept.
 
 .PARAMETER IPFamily
-    Internet Protocol version: 'IPv4' or 'IPv6'. If omitted, the existing value is kept.
-
-.PARAMETER Status
-    Whether the rule is active: 'Enable' or 'Disable'. If omitted, the existing value is
+    Optional. Internet Protocol version: IPv4 or IPv6. If omitted, the existing value is
     kept.
 
-.PARAMETER Position
-    Where to move the rule: 'Top', 'Bottom', 'After' or 'Before'. If omitted, the existing
-    Position (and After/Before) is kept untouched - this is the default and the safe choice.
-    If supplied, changes the evaluation order of the rulebase; 'Top' additionally moves every
-    other rule down one position.
-
-.PARAMETER After
-    Name of the existing rule to move this one after. Required when -Position is 'After'.
-    Ignored (and not resent) when -Position is omitted.
-
-.PARAMETER Before
-    Name of the existing rule to move this one before. Required when -Position is 'Before'.
-    Ignored (and not resent) when -Position is omitted.
-
-.PARAMETER Section
-    Policy section: 'Central_TOP', 'Local' or 'Central_Bottom'. If omitted, the existing value
+.PARAMETER Status
+    Optional. Whether the rule is active: Enable or Disable. If omitted, the existing value
     is kept.
 
-.PARAMETER NetworkPolicy
-    Complete replacement NetworkPolicy subtree, built with New-SfosFirewallRuleNetworkPolicy
-    or taken from Get-SfosFirewallRule. This REPLACES the existing subtree wholesale, exactly
-    as the API does - it does not merge individual fields on its own. Omit this parameter to
-    keep the existing NetworkPolicy unchanged.
+.PARAMETER Position
+    Optional. Where to move the rule: Top, Bottom, After or Before. If omitted, the existing
+    Position, After and Before are kept unchanged. If supplied, changes the evaluation order
+    of the rule base; Top additionally moves every other rule down one position.
 
-    Combine it with the per-field NetworkPolicy parameters below (-ScanVirus, -SourceZone, ...)
-    to change only some fields: when -NetworkPolicy is also supplied, it - not the rule's current
-    state - becomes the base the per-field parameters are applied on top of. This lets a caller
-    start from a hand-built policy and still tweak one field without a second round trip.
+.PARAMETER After
+    Optional. Name of the existing rule to move this one after. Required when -Position is
+    After.
+
+.PARAMETER Before
+    Optional. Name of the existing rule to move this one before. Required when -Position is
+    Before.
+
+.PARAMETER Section
+    Optional. Policy section: Central_TOP, Local or Central_Bottom. If omitted, the existing
+    value is kept.
+
+.PARAMETER NetworkPolicy
+    Optional. Complete replacement NetworkPolicy object, built with
+    New-SfosFirewallRuleNetworkPolicy or taken from Get-SfosFirewallRule. Replaces the
+    existing NetworkPolicy as a whole. If omitted, the existing NetworkPolicy is kept, and
+    only the per-field NetworkPolicy parameters below, if passed, change individual fields on
+    top of it.
 
 .PARAMETER Action
-    NetworkPolicy field: traffic handling action. Changes only this field; every other
-    NetworkPolicy field is preserved from the rule's current state (or from -NetworkPolicy, if
-    also supplied). See -NetworkPolicy. Values and default: see
-    New-SfosFirewallRuleNetworkPolicy's -Action.
+    Optional. NetworkPolicy field: traffic handling action. Changes only this field; every
+    other NetworkPolicy field is preserved.
 
 .PARAMETER LogTraffic
-    NetworkPolicy field: whether to log traffic matching this rule. See -Action for how single
-    NetworkPolicy fields are changed without touching the rest.
+    Optional. NetworkPolicy field: whether to log traffic matching this rule.
 
 .PARAMETER SkipLocalDestined
-    NetworkPolicy field: skip this rule when the firewall itself is the destination. See
-    -Action.
+    Optional. NetworkPolicy field: skip this rule when the firewall itself is the
+    destination.
 
 .PARAMETER SourceZone
-    NetworkPolicy field: source zone names. Replaces the whole SourceZoneList with the values
-    given here; every other NetworkPolicy field is preserved. See -Action.
+    Optional. NetworkPolicy field: source zone names. Replaces the whole source zone list.
 
 .PARAMETER SourceNetwork
-    NetworkPolicy field: source network/host object names. Replaces the whole
-    SourceNetworkList. See -Action.
+    Optional. NetworkPolicy field: source network or host object names. Replaces the whole
+    source network list.
 
 .PARAMETER DestinationZone
-    NetworkPolicy field: destination zone names. Replaces the whole DestinationZoneList. See
-    -Action.
+    Optional. NetworkPolicy field: destination zone names. Replaces the whole destination
+    zone list.
 
 .PARAMETER Schedule
-    NetworkPolicy field: name of the Schedule object this rule is active during. See -Action.
+    Optional. NetworkPolicy field: name of the schedule object this rule is active during.
 
 .PARAMETER Service
-    NetworkPolicy field: service object names this rule matches. Replaces the whole
-    ServiceList. See -Action.
+    Optional. NetworkPolicy field: service object names this rule matches. Replaces the whole
+    service list.
 
 .PARAMETER DestinationNetwork
-    NetworkPolicy field: destination network/host object names. Replaces the whole
-    DestinationNetworkList. See -Action.
+    Optional. NetworkPolicy field: destination network or host object names. Replaces the
+    whole destination network list.
 
 .PARAMETER DSCPMarking
-    NetworkPolicy field: QoS packet classification, -1 to 63. See -Action.
+    Optional. NetworkPolicy field: QoS packet classification, -1 to 63.
 
 .PARAMETER WebFilter
-    NetworkPolicy field: name of the web filter policy applied by this rule, or 'None'. See
-    -Action.
+    Optional. NetworkPolicy field: name of the web filter policy applied by this rule, or
+    None.
 
 .PARAMETER WebCategoryBaseQoSPolicy
-    NetworkPolicy field: bandwidth limit toggle for web categories. See -Action and
-    New-SfosFirewallRuleNetworkPolicy's -WebCategoryBaseQoSPolicy for the doc/live discrepancy.
+    Optional. NetworkPolicy field: bandwidth limit toggle for web categories.
 
 .PARAMETER BlockQuickQuic
-    NetworkPolicy field: block the QUIC protocol. See -Action.
+    Optional. NetworkPolicy field: block the QUIC protocol.
 
 .PARAMETER ScanVirus
-    NetworkPolicy field: scan matching traffic for viruses. See -Action.
+    Optional. NetworkPolicy field: scan matching traffic for viruses.
 
 .PARAMETER ZeroDayProtection
-    NetworkPolicy field: enable zero-day threat protection. See -Action.
+    Optional. NetworkPolicy field: enable zero-day threat protection.
 
 .PARAMETER ProxyMode
-    NetworkPolicy field: use the transparent web proxy. See -Action.
+    Optional. NetworkPolicy field: use the transparent web proxy.
 
 .PARAMETER DecryptHTTPS
-    NetworkPolicy field: decrypt HTTPS traffic for inspection. See -Action.
+    Optional. NetworkPolicy field: decrypt HTTPS traffic for inspection.
 
 .PARAMETER ApplicationControl
-    NetworkPolicy field: name of the application control policy applied by this rule, or
-    'None'. See -Action.
+    Optional. NetworkPolicy field: name of the application control policy applied by this
+    rule, or None.
 
 .PARAMETER ApplicationBaseQoSPolicy
-    NetworkPolicy field: bandwidth limit toggle for application categories. See -Action and
-    New-SfosFirewallRuleNetworkPolicy's -ApplicationBaseQoSPolicy for the doc/live discrepancy.
+    Optional. NetworkPolicy field: bandwidth limit toggle for application categories.
 
 .PARAMETER IntrusionPrevention
-    NetworkPolicy field: name of the IPS policy applied by this rule, or 'None'. See -Action.
+    Optional. NetworkPolicy field: name of the IPS policy applied by this rule, or None.
 
 .PARAMETER NDRActiveThreatIntelligence
-    NetworkPolicy field: enable active threat intelligence. See -Action.
+    Optional. NetworkPolicy field: enable active threat intelligence.
 
 .PARAMETER TrafficShappingPolicy
-    NetworkPolicy field: name of the traffic shaping policy applied by this rule, or 'None'.
-    Spelled exactly as the live wire element - see the module-level comment on
-    ConvertTo-SfosFirewallRuleNetworkPolicyXml. See -Action.
+    Optional. NetworkPolicy field: name of the traffic shaping policy applied by this rule,
+    or None. The parameter name matches the wire element spelling used by the firewall.
 
 .PARAMETER ScanSMTP
-    NetworkPolicy field: scan SMTP traffic. See -Action.
+    Optional. NetworkPolicy field: scan SMTP traffic.
 
 .PARAMETER ScanSMTPS
-    NetworkPolicy field: scan SMTPS traffic. See -Action.
+    Optional. NetworkPolicy field: scan SMTPS traffic.
 
 .PARAMETER ScanIMAP
-    NetworkPolicy field: scan IMAP traffic. See -Action.
+    Optional. NetworkPolicy field: scan IMAP traffic.
 
 .PARAMETER ScanIMAPS
-    NetworkPolicy field: scan IMAPS traffic. See -Action.
+    Optional. NetworkPolicy field: scan IMAPS traffic.
 
 .PARAMETER ScanPOP3
-    NetworkPolicy field: scan POP3 traffic. See -Action.
+    Optional. NetworkPolicy field: scan POP3 traffic.
 
 .PARAMETER ScanPOP3S
-    NetworkPolicy field: scan POP3S traffic. See -Action.
+    Optional. NetworkPolicy field: scan POP3S traffic.
 
 .PARAMETER ScanFTP
-    NetworkPolicy field: scan FTP traffic. See -Action.
+    Optional. NetworkPolicy field: scan FTP traffic.
 
 .PARAMETER SourceSecurityHeartbeat
-    NetworkPolicy field: require a source Security Heartbeat. See -Action.
+    Optional. NetworkPolicy field: require a source Security Heartbeat.
 
 .PARAMETER MinimumSourceHBPermitted
-    NetworkPolicy field: minimum source health status permitted ('No Restriction', 'GREEN' or
-    'YELLOW'). See -Action.
+    Optional. NetworkPolicy field: minimum source health status permitted: No Restriction,
+    GREEN or YELLOW.
 
 .PARAMETER DestSecurityHeartbeat
-    NetworkPolicy field: require a destination Security Heartbeat. See -Action.
+    Optional. NetworkPolicy field: require a destination Security Heartbeat.
 
 .PARAMETER MinimumDestinationHBPermitted
-    NetworkPolicy field: minimum destination health status permitted ('No Restriction',
-    'GREEN' or 'YELLOW'). See -Action.
-
-.PARAMETER Session
-A session object returned by Connect-SfosFirewall, or the name of a session
-registered with Connect-SfosFirewall -Name. Overrides the stored default
-connection context; any of -Firewall/-Port/-Username/-Password/
--SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+    Optional. NetworkPolicy field: minimum destination health status permitted: No
+    Restriction, GREEN or YELLOW.
 
 .PARAMETER Firewall
-    Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored
-    connection context.
+    Optional. Host name or IP address of the firewall. If omitted, the value from the current
+    connection is used.
 
 .PARAMETER Port
-    Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the
-    stored connection context.
+    Optional. TCP port of the management API, usually 4444. If omitted, the value from the
+    current connection is used.
 
 .PARAMETER Username
-    Username for API authentication. If omitted, the cmdlet attempts to use the stored
-    connection context.
+    Optional. User name for the API login. The account needs permission to change firewall
+    rules. If omitted, the value from the current connection is used.
 
 .PARAMETER Password
-    Password for API authentication. If omitted, the cmdlet attempts to use the stored
-    connection context.
+    Optional. Password for the API login, as a SecureString. If omitted, the value from the
+    current connection is used.
 
 .PARAMETER SkipCertificateCheck
-    Skips SSL certificate validation for the API call.
+    Optional. Accepts the firewall certificate without validating it. Use this only for
+    appliances that still present a self-signed certificate. If omitted, the certificate is
+    validated.
+
+.PARAMETER Session
+    Optional. A session object from Connect-SfosFirewall, or the name of a session that was
+    registered with Connect-SfosFirewall -Name. Use it to address a specific firewall when
+    you work with more than one at a time. Any connection parameter you pass explicitly still
+    takes precedence. If omitted, the stored default connection is used.
+
+.INPUTS
+    System.Management.Automation.PSCustomObject. Objects with a Name property, such as the
+    output of Get-SfosFirewallRule, can be piped in.
 
 .OUTPUTS
-    None. Throws an exception if the update fails.
+    None. The cmdlet writes no output and raises an error if the firewall rejects the update.
 
 .EXAMPLE
-    # Change only the description; Position, After/Before and NetworkPolicy are preserved
+    Set-SfosFirewallRule -Name "Allow-LAN-to-WAN" -Description "Updated" -WhatIf
+
+    Shows what the call would change without sending it to the firewall.
+
+.EXAMPLE
     Set-SfosFirewallRule -Name "Allow-LAN-to-WAN" -Description "Updated"
 
+    Changes only the description; Position, After, Before and NetworkPolicy are preserved.
+    The cmdlet asks for confirmation before it writes.
+
 .EXAMPLE
-    # Enable a previously disabled rule via pipeline input, position untouched
     Get-SfosFirewallRule -NameLike "Allow-LAN-to-WAN" | Set-SfosFirewallRule -Status Enable
 
+    Enables a previously disabled rule; the rule's position is untouched.
+
 .EXAMPLE
-    # Turn on virus scanning without touching any other NetworkPolicy field (IntrusionPrevention,
-    # ApplicationControl, Schedule, source zones, ... are all preserved from the current rule)
     Set-SfosFirewallRule -Name "Allow-LAN-to-WAN" -ScanVirus Enable
 
-.NOTES
-    Minimum supported PowerShell version: 5.1
-    This cmdlet changes the rule base of a production firewall. Passing -Position reorders the
-    rulebase; verify -Name and -Position/-After/-Before before running this against a
-    shared/production firewall.
-    This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+    Turns on virus scanning without changing any other NetworkPolicy field.
 
 .LINK
-    https://docs.sophos.com/nsg/sophos-firewall/22.0/api/PROTECT/Firewall/SecurityPolicy/operations/Addfirewallrule%26Editfirewallrule.html
+    https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+.LINK
+    Get-SfosFirewallRule
+
+.LINK
+    New-SfosFirewallRule
 #>
 function Set-SfosFirewallRule {
     [CmdletBinding(SupportsShouldProcess)]
@@ -1650,63 +1607,70 @@ function Set-SfosFirewallRule {
 
 <#
 .SYNOPSIS
-    Removes a FirewallRule object from the Sophos Firewall.
+    Removes a firewall rule from a Sophos Firewall.
 
 .DESCRIPTION
-    Removes a FirewallRule object using the Sophos Firewall XML API. This cmdlet supports
-    ShouldProcess; use -WhatIf to preview the change. Works for any PolicyType - removal only
-    needs the rule's Name, so the Network-only restriction on Set-SfosFirewallRule does not
-    apply here.
+    Deletes a firewall rule by name. Works for any PolicyType, since removal only needs the
+    rule's name. It needs an open connection from Connect-SfosFirewall, or the connection
+    parameters supplied directly, and an account with permission to change firewall rules.
+    The change removes the rule from the rule base immediately and cannot be undone from
+    within this module; recreate the rule with New-SfosFirewallRule if it was removed by
+    mistake.
 
 .PARAMETER Name
-    Name of the target rule.
-
-.PARAMETER Session
-A session object returned by Connect-SfosFirewall, or the name of a session
-registered with Connect-SfosFirewall -Name. Overrides the stored default
-connection context; any of -Firewall/-Port/-Username/-Password/
--SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+    Required. Name of the target rule. Accepts pipeline input.
 
 .PARAMETER Firewall
-    Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored
-    connection context.
+    Optional. Host name or IP address of the firewall. If omitted, the value from the current
+    connection is used.
 
 .PARAMETER Port
-    Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the
-    stored connection context.
+    Optional. TCP port of the management API, usually 4444. If omitted, the value from the
+    current connection is used.
 
 .PARAMETER Username
-    Username for API authentication. If omitted, the cmdlet attempts to use the stored
-    connection context.
+    Optional. User name for the API login. The account needs permission to change firewall
+    rules. If omitted, the value from the current connection is used.
 
 .PARAMETER Password
-    Password for API authentication. If omitted, the cmdlet attempts to use the stored
-    connection context.
+    Optional. Password for the API login, as a SecureString. If omitted, the value from the
+    current connection is used.
 
 .PARAMETER SkipCertificateCheck
-    Skips SSL certificate validation for the API call.
+    Optional. Accepts the firewall certificate without validating it. Use this only for
+    appliances that still present a self-signed certificate. If omitted, the certificate is
+    validated.
+
+.PARAMETER Session
+    Optional. A session object from Connect-SfosFirewall, or the name of a session that was
+    registered with Connect-SfosFirewall -Name. Use it to address a specific firewall when
+    you work with more than one at a time. Any connection parameter you pass explicitly still
+    takes precedence. If omitted, the stored default connection is used.
+
+.INPUTS
+    System.Management.Automation.PSCustomObject. Objects with a Name property, such as the
+    output of Get-SfosFirewallRule, can be piped in.
 
 .OUTPUTS
-    None. Throws an exception if removal fails.
+    None. The cmdlet writes no output and raises an error if the firewall rejects the
+    removal.
 
 .EXAMPLE
-    # Preview removal
     Remove-SfosFirewallRule -Name "Allow-LAN-to-WAN" -WhatIf
 
+    Shows what the call would remove without sending it to the firewall.
+
 .EXAMPLE
-    # Pipeline removal
     Get-SfosFirewallRule -NameLike "Allow-LAN-to-WAN" | Remove-SfosFirewallRule
 
-.NOTES
-    Minimum supported PowerShell version: 5.1
-    This cmdlet changes the rule base of a production firewall and removes a rule outright.
-    There is no confirmation beyond ShouldProcess/-WhatIf and no dependency check - verify
-    -Name before running this against a shared/production firewall.
-    This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+    Removes the rules whose name contains 'Allow-LAN-to-WAN'. The cmdlet asks for
+    confirmation before it writes.
 
 .LINK
-    https://docs.sophos.com/nsg/sophos-firewall/22.0/api/PROTECT/Firewall/SecurityPolicy/operations/Delete%20firewall%20rule.html
+    https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+.LINK
+    Get-SfosFirewallRule
 #>
 function Remove-SfosFirewallRule {
     [CmdletBinding(SupportsShouldProcess)]
@@ -1770,65 +1734,92 @@ function Remove-SfosFirewallRule {
 
 <#
         .SYNOPSIS
-        Retrieves FirewallRuleGroup objects from the Sophos Firewall.
+        Retrieves firewall rule group objects from a Sophos Firewall.
 
         .DESCRIPTION
-        Queries the Sophos Firewall XML API for FirewallRuleGroup objects. By default the cmdlet returns PowerShell-friendly objects. Use -AsXml to return the raw XML nodes.
+        Returns the firewall rule groups that are defined on the firewall. A firewall rule
+        group collects several firewall rules under one name, for easier review and
+        management. Use this cmdlet to review the existing groups or to feed them into
+        another cmdlet through the pipeline. The cmdlet only reads; nothing on the firewall is
+        changed. It needs an open connection from Connect-SfosFirewall, or the connection
+        parameters supplied directly.
 
-        Note: Sophos GET responses can be inconsistent regarding status elements. This cmdlet is designed to return an empty result when no records are found.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
-
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        You can combine several filters. The firewall itself evaluates at most one of them,
+        so every filter you supply is applied again on the client. The result always matches
+        all filters you gave.
 
         .PARAMETER NameLike
-        Optional name filter. In Sophos SFOS, 'like' behaves as a substring match (the supplied value may match anywhere in the object name). Sent to the firewall as the server-side filter.
+        Optional. Returns only groups whose name contains the given text anywhere. This is a
+        substring match, not a wildcard pattern. If omitted, the name is not used to filter.
 
         .PARAMETER DescriptionLike
-        Optional description filter, matched as a substring anywhere in the value. The firewall does not support filtering on Description, so this filter is always applied client-side.
+        Optional. Returns only groups whose description contains the given text anywhere.
+        Applied on the client. If omitted, the description is not used to filter.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs read permission for firewall
+        rule groups. If omitted, the value from the current connection is used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific firewall
+        when you work with more than one at a time. Any connection parameter you pass
+        explicitly still takes precedence. If omitted, the stored default connection is used.
 
         .PARAMETER AsXml
-        Returns raw XML nodes instead of PowerShell-friendly objects.
+        Optional. Returns the raw XML elements sent by the firewall instead of PowerShell
+        objects.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        PSCustomObject (default). System.Xml.XmlElement when -AsXml is specified.
+        System.Management.Automation.PSCustomObject. One object per firewall rule group, with
+        the properties Name, Description, SecurityPolicyList, Policytype, SourceZones and
+        DestinationZones. Returns System.Xml.XmlElement when -AsXml is used, and an empty
+        array when no group matches.
 
         .EXAMPLE
-        # Retrieve all firewall rule groups
         Get-SfosFirewallRuleGroup
 
+        Lists every firewall rule group on the firewall of the current connection.
+
         .EXAMPLE
-        # Filter by name (substring match)
         Get-SfosFirewallRuleGroup -NameLike "Internal"
 
+        Lists the groups whose name contains 'Internal'.
+
         .EXAMPLE
-        # Return raw XML for troubleshooting
         Get-SfosFirewallRuleGroup -NameLike "Internal" -AsXml
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+        Returns the raw XML of the matching groups, for example to check a field the
+        standard output does not contain.
 
         .LINK
-        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/PROTECT/Firewall/FirewallGroup/FirewallGroup.html
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        New-SfosFirewallRuleGroup
+
+        .LINK
+        Set-SfosFirewallRuleGroup
 #>
 function Get-SfosFirewallRuleGroup {
     [CmdletBinding()]
@@ -1878,10 +1869,10 @@ function Get-SfosFirewallRuleGroup {
 
     $XmlResponse = [xml]$response.Content
 
-    # Ohne diese Pruefung wird ein Firewall-Fehler - fehlende Berechtigung, ungueltiger
-    # Filter, Serverfehler - als leeres Ergebnis gelesen. Das trifft auch die Set-
-    # und Member-Funktionen, die intern hierher zurueckgreifen, um den Ist-Zustand zu
-    # ermitteln: sie wuerden 'Objekt nicht gefunden' melden statt des echten Fehlers.
+    # Without this check, a firewall error - missing permission, invalid filter, server
+    # error - would be read as an empty result. This also affects the Set and member
+    # cmdlets, which call back into this function to read the current state: they would
+    # report "object not found" instead of the real error.
     Assert-SfosApiReturnSuccess -Xml $XmlResponse -ObjectName 'FirewallRuleGroup' -Action 'get'
 
     $nodes = Select-Xml -Xml $XmlResponse -XPath '/Response/FirewallRuleGroup[Name]' | ForEach-Object -Process {
@@ -1923,70 +1914,86 @@ function Get-SfosFirewallRuleGroup {
 
 <#
         .SYNOPSIS
-        Creates a new firewall rule group on the Sophos Firewall.
+        Creates a new firewall rule group on a Sophos Firewall.
 
         .DESCRIPTION
-        Creates a firewall rule group that can contain multiple firewall rule names.
-        Use this to logically group related firewall rules for easier management.
-        After creation, use Add-SfosFirewallRuleGroupMember to add additional members.
+        Creates a firewall rule group that collects one or more firewall rules under one
+        name, for easier review and management. It needs an open connection from
+        Connect-SfosFirewall, or the connection parameters supplied directly, and an account
+        with permission to change firewall rule groups. After creation, use
+        Add-SfosFirewallRuleGroupMember to add further members.
 
         .PARAMETER Name
-        Name of the firewall rule group (1-150 characters, no commas).
+        Required. Name of the firewall rule group. 1 to 150 characters, no commas.
 
         .PARAMETER Description
-        Optional description (max 255 characters).
+        Optional. Free-text description of the group. Up to 255 characters.
 
         .PARAMETER Members
-        Array of firewall rule names to include in the group as SecurityPolicy entries.
+        Optional. Names of the firewall rules to include in the group.
 
         .PARAMETER Policytype
-        Optional policy type classification: 'User/network rule', 'Network rule', 'User rule', 'WAF rule' or 'Any'.
+        Optional. Policy type classification: User/network rule, Network rule, User rule, WAF
+        rule or Any.
 
         .PARAMETER SourceZones
-        Optional array of source zone names allowed for the group.
+        Optional. Source zone names allowed for the group.
 
         .PARAMETER DestinationZones
-        Optional array of destination zone names for the group.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. Destination zone names for the group.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, uses stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number. If omitted, uses stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, uses stored connection context.
+        Optional. User name for the API login. The account needs permission to change
+        firewall rule groups. If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, uses stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific firewall
+        when you work with more than one at a time. Any connection parameter you pass
+        explicitly still takes precedence. If omitted, the stored default connection is used.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        None. Throws an exception if creation fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        create.
 
         .EXAMPLE
-        # Create an empty rule group
+        New-SfosFirewallRuleGroup -Name "Branch-Office-Rules" -Description "Rules for branch office traffic" -WhatIf
+
+        Shows what the call would create without sending it to the firewall.
+
+        .EXAMPLE
         New-SfosFirewallRuleGroup -Name "Branch-Office-Rules" -Description "Rules for branch office traffic"
 
+        Creates an empty rule group. The cmdlet asks for confirmation before it writes.
+
         .EXAMPLE
-        # Create group and add members separately
         New-SfosFirewallRuleGroup -Name "Branch-Office-Rules"
         Add-SfosFirewallRuleGroupMember -Name "Branch-Office-Rules" -Members "Allow-Branch-VPN"
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
+        Creates a group and then adds a member rule to it.
 
         .LINK
-        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/PROTECT/Firewall/FirewallGroup/FirewallGroup.html
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
 
         .LINK
         Get-SfosFirewallRuleGroup
@@ -2108,73 +2115,95 @@ function New-SfosFirewallRuleGroup {
 
 <#
         .SYNOPSIS
-        Updates an existing FirewallRuleGroup object on the Sophos Firewall.
+        Updates an existing firewall rule group on a Sophos Firewall.
 
         .DESCRIPTION
-        Updates a FirewallRuleGroup object using the Sophos Firewall XML API. You can supply the target object name directly or via the pipeline.
+        Updates a firewall rule group. You can supply the target group name directly or
+        through the pipeline. It needs an open connection from Connect-SfosFirewall, or the
+        connection parameters supplied directly, and an account with permission to change
+        firewall rule groups.
 
-        SFOS replaces the whole entity on update - any element not sent in the request is
-        cleared on the firewall. This cmdlet reads the current group first and keeps whatever
-        the caller does not explicitly pass (Description, Members, Policytype, SourceZones,
-        DestinationZones). To clear a field, pass it explicitly with an empty value.
+        The firewall replaces the whole group on update; any field not sent in the request is
+        cleared. The cmdlet reads the current group first and keeps whatever you do not
+        explicitly pass. To clear a field, pass it explicitly with an empty value.
 
         .PARAMETER Name
-        Name of the target object.
+        Required. Name of the target group. Accepts pipeline input.
 
         .PARAMETER Description
-        Optional description text. If omitted, the existing description is kept.
+        Optional. New description text. If omitted, the existing description is kept.
 
         .PARAMETER Members
-        One or more firewall rule names to set as SecurityPolicy entries. If omitted, the existing members are kept.
+        Optional. Firewall rule names to set as the group's members, replacing the whole
+        list. If omitted, the existing members are kept.
 
         .PARAMETER Policytype
-        Optional policy type classification. If omitted, the existing value is kept.
+        Optional. Policy type classification. If omitted, the existing value is kept.
 
         .PARAMETER SourceZones
-        Optional array of source zone names. If omitted, the existing value is kept.
+        Optional. Source zone names, replacing the whole list. If omitted, the existing value
+        is kept.
 
         .PARAMETER DestinationZones
-        Optional array of destination zone names. If omitted, the existing value is kept.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. Destination zone names, replacing the whole list. If omitted, the existing
+        value is kept.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. User name for the API login. The account needs permission to change
+        firewall rule groups. If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific firewall
+        when you work with more than one at a time. Any connection parameter you pass
+        explicitly still takes precedence. If omitted, the stored default connection is used.
+
+        .INPUTS
+        System.Management.Automation.PSCustomObject. Objects with a Name property, such as
+        the output of Get-SfosFirewallRuleGroup, can be piped in.
 
         .OUTPUTS
-        None. Throws an exception if the update fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        update.
 
         .EXAMPLE
-        # Update the description only, members are preserved
+        Set-SfosFirewallRuleGroup -Name "Branch-Office-Rules" -Description "Updated description" -WhatIf
+
+        Shows what the call would change without sending it to the firewall.
+
+        .EXAMPLE
         Set-SfosFirewallRuleGroup -Name "Branch-Office-Rules" -Description "Updated description"
 
+        Changes only the description; the members are preserved. The cmdlet asks for
+        confirmation before it writes.
+
         .EXAMPLE
-        # Update using pipeline input
         Get-SfosFirewallRuleGroup -NameLike "Branch-Office-Rules" | Set-SfosFirewallRuleGroup -Policytype "Any"
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+        Changes the policy type classification of the matching groups.
 
         .LINK
-        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/PROTECT/Firewall/FirewallGroup/FirewallGroup.html
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosFirewallRuleGroup
 #>
 function Set-SfosFirewallRuleGroup {
     [CmdletBinding(SupportsShouldProcess)]
@@ -2354,53 +2383,68 @@ function Set-SfosFirewallRuleGroup {
 
 <#
         .SYNOPSIS
-        Removes a FirewallRuleGroup object from the Sophos Firewall.
+        Removes a firewall rule group from a Sophos Firewall.
 
         .DESCRIPTION
-        Removes a FirewallRuleGroup object using the Sophos Firewall XML API. This cmdlet supports ShouldProcess; use -WhatIf to preview the change.
+        Deletes a firewall rule group by name. The member firewall rules themselves are not
+        deleted. It needs an open connection from Connect-SfosFirewall, or the connection
+        parameters supplied directly, and an account with permission to change firewall rule
+        groups.
 
         .PARAMETER Name
-        Name of the target object.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Required. Name of the target group. Accepts pipeline input.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. User name for the API login. The account needs permission to change
+        firewall rule groups. If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific firewall
+        when you work with more than one at a time. Any connection parameter you pass
+        explicitly still takes precedence. If omitted, the stored default connection is used.
+
+        .INPUTS
+        System.Management.Automation.PSCustomObject. Objects with a Name property, such as
+        the output of Get-SfosFirewallRuleGroup, can be piped in.
 
         .OUTPUTS
-        None. Throws an exception if removal fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        removal.
 
         .EXAMPLE
-        # Preview removal
         Remove-SfosFirewallRuleGroup -Name "Branch-Office-Rules" -WhatIf
 
+        Shows what the call would remove without sending it to the firewall.
+
         .EXAMPLE
-        # Pipeline removal
         Get-SfosFirewallRuleGroup -NameLike "Branch-Office-Rules" | Remove-SfosFirewallRuleGroup
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+        Removes the groups whose name contains 'Branch-Office-Rules'. The cmdlet asks for
+        confirmation before it writes.
 
         .LINK
-        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/PROTECT/Firewall/FirewallGroup/FirewallGroup.html
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosFirewallRuleGroup
 #>
 function Remove-SfosFirewallRuleGroup {
     [CmdletBinding(SupportsShouldProcess)]
@@ -2459,52 +2503,74 @@ function Remove-SfosFirewallRuleGroup {
 
 <#
         .SYNOPSIS
-        Adds members to an existing FirewallRuleGroup object on the Sophos Firewall.
+        Adds member rules to an existing firewall rule group on a Sophos Firewall.
 
         .DESCRIPTION
-        Adds firewall rule names as SecurityPolicy entries to a FirewallRuleGroup object using the Sophos Firewall XML API. The cmdlet validates input where possible and escapes user input for XML safety. Adding a firewall rule to a group removes it from any group it currently belongs to.
+        Adds firewall rules to a firewall rule group. A firewall rule belongs to at most one
+        group; adding it to this group removes it from any group it currently belongs to. It
+        needs an open connection from Connect-SfosFirewall, or the connection parameters
+        supplied directly, and an account with permission to change firewall rule groups.
 
         .PARAMETER Name
-        Name of the target object.
+        Required. Name of the target group. Accepts pipeline input.
 
         .PARAMETER Members
-        One or more firewall rule names to add.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Required. Firewall rule names to add.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. User name for the API login. The account needs permission to change
+        firewall rule groups. If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific firewall
+        when you work with more than one at a time. Any connection parameter you pass
+        explicitly still takes precedence. If omitted, the stored default connection is used.
+
+        .INPUTS
+        System.Management.Automation.PSCustomObject. Objects with a Name property, such as
+        the output of Get-SfosFirewallRuleGroup, can be piped in.
 
         .OUTPUTS
-        None. Throws an exception if the operation fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        update.
 
         .EXAMPLE
-        # Add members to an existing group
+        Add-SfosFirewallRuleGroupMember -Name "Branch-Office-Rules" -Members "Allow-Branch-VPN","Allow-Branch-DNS" -WhatIf
+
+        Shows what the call would change without sending it to the firewall.
+
+        .EXAMPLE
         Add-SfosFirewallRuleGroupMember -Name "Branch-Office-Rules" -Members "Allow-Branch-VPN","Allow-Branch-DNS"
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+        Adds two firewall rules to the group. The cmdlet asks for confirmation before it
+        writes.
 
         .LINK
-        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/PROTECT/Firewall/FirewallGroup/FirewallGroup.html
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosFirewallRuleGroup
+
+        .LINK
+        Remove-SfosFirewallRuleGroupMember
 #>
 function Add-SfosFirewallRuleGroupMember {
     [CmdletBinding(SupportsShouldProcess)]
@@ -2648,64 +2714,80 @@ function Add-SfosFirewallRuleGroupMember {
 
 <#
         .SYNOPSIS
-        Removes members from an existing FirewallRuleGroup object on the Sophos Firewall.
+        Removes member rules from an existing firewall rule group on a Sophos Firewall.
 
         .DESCRIPTION
-        Removes firewall rule names from the SecurityPolicy list of a FirewallRuleGroup object using the Sophos Firewall XML API. The cmdlet validates input where possible and escapes user input for XML safety.
+        Removes firewall rules from the member list of a firewall rule group. It needs an
+        open connection from Connect-SfosFirewall, or the connection parameters supplied
+        directly, and an account with permission to change firewall rule groups.
 
-        Known firmware limitation (SFOS 22.0, measured): the member list of a rule group is
-        append-only on update. Sending a shorter list, an empty <SecurityPolicyList/> or no
-        wrapper at all is answered with status 200, but every member stays in place - only
-        their order changes. This cmdlet therefore reads the group back afterwards and throws
-        if the members it was asked to remove are still there, rather than reporting a success
-        the firewall did not perform.
-
-        A rule does leave its group when the rule itself is deleted, and a group cannot be
-        deleted while it still has members.
+        The member list update on the firewall only adds members; sending a shorter list does
+        not remove anything, it only reorders the list. This cmdlet reads the group back
+        after the update and raises an error if the members it was asked to remove are still
+        present, instead of reporting a success that did not happen. A rule leaves its group
+        automatically when the rule itself is deleted, and a group cannot be deleted while it
+        still has members.
 
         .PARAMETER Name
-        Name of the target object.
+        Required. Name of the target group. Accepts pipeline input.
 
         .PARAMETER Members
-        One or more firewall rule names to remove. See DESCRIPTION: on this firmware the
-        firewall ignores the removal, so this cmdlet reports an error instead of a false
-        success.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Required. Firewall rule names to remove from the group.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. User name for the API login. The account needs permission to change
+        firewall rule groups. If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific firewall
+        when you work with more than one at a time. Any connection parameter you pass
+        explicitly still takes precedence. If omitted, the stored default connection is used.
+
+        .INPUTS
+        System.Management.Automation.PSCustomObject. Objects with a Name property, such as
+        the output of Get-SfosFirewallRuleGroup, can be piped in.
 
         .OUTPUTS
-        None. Throws an exception if the operation fails.
+        None. The cmdlet writes no output and raises an error if the members are not actually
+        removed.
 
         .EXAMPLE
-        # Remove members from an existing group
+        Remove-SfosFirewallRuleGroupMember -Name "Branch-Office-Rules" -Members "Allow-Branch-DNS" -WhatIf
+
+        Shows what the call would change without sending it to the firewall.
+
+        .EXAMPLE
         Remove-SfosFirewallRuleGroupMember -Name "Branch-Office-Rules" -Members "Allow-Branch-DNS"
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+        Removes one firewall rule from the group. The cmdlet asks for confirmation before it
+        writes.
 
         .LINK
-        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/PROTECT/Firewall/FirewallGroup/FirewallGroup.html
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosFirewallRuleGroup
+
+        .LINK
+        Add-SfosFirewallRuleGroupMember
 #>
 function Remove-SfosFirewallRuleGroupMember {
     [CmdletBinding(SupportsShouldProcess)]
@@ -2881,68 +2963,94 @@ function Remove-SfosFirewallRuleGroupMember {
 
 <#
         .SYNOPSIS
-        Retrieves NATRule objects from the Sophos Firewall.
+        Retrieves NAT rules from a Sophos Firewall.
 
         .DESCRIPTION
-        Queries the Sophos Firewall XML API for NATRule objects. By default the cmdlet returns PowerShell-friendly objects. Use -AsXml to return the raw XML nodes.
+        Returns the NAT rules that are defined on the firewall. A NAT rule translates the
+        source or destination address of matching traffic. Use this cmdlet to review the
+        existing rules or to feed them into another cmdlet through the pipeline. The cmdlet
+        only reads; nothing on the firewall is changed. It needs an open connection from
+        Connect-SfosFirewall, or the connection parameters supplied directly. The Status
+        property is the rule's own Enable/Disable flag, not an indicator of API success or
+        failure.
 
-        Note: the <Status> element on a NATRule is a data field (Enable/Disable), not an API
-        status - Core distinguishes the two and this cmdlet does not build any status
-        evaluation of its own. Sophos GET responses can also be inconsistent regarding actual
-        API status elements; this cmdlet returns an empty result when no records are found.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
-
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        You can combine several filters. The firewall itself evaluates at most one of them, so
+        every filter you supply is applied again on the client. The result always matches all
+        filters you gave.
 
         .PARAMETER NameLike
-        Optional name filter. In Sophos SFOS, 'like' behaves as a substring match (the supplied value may match anywhere in the object name). Sent to the firewall as the server-side filter.
+        Optional. Returns only rules whose name contains the given text anywhere. This is a
+        substring match, not a wildcard pattern. If omitted, the name is not used to filter.
 
         .PARAMETER DescriptionLike
-        Optional description filter, matched as a substring anywhere in the value. The firewall does not support filtering on Description, so this filter is always applied client-side.
+        Optional. Returns only rules whose description contains the given text anywhere.
+        Applied on the client. If omitted, the description is not used to filter.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs read permission for NAT
+        rules. If omitted, the value from the current connection is used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific firewall
+        when you work with more than one at a time. Any connection parameter you pass
+        explicitly still takes precedence. If omitted, the stored default connection is used.
 
         .PARAMETER AsXml
-        Returns raw XML nodes instead of PowerShell-friendly objects.
+        Optional. Returns the raw XML elements sent by the firewall instead of PowerShell
+        objects.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        PSCustomObject (default). System.Xml.XmlElement when -AsXml is specified.
+        System.Management.Automation.PSCustomObject. One object per NAT rule, with the
+        properties Name, Description, IPFamily, Status, Position, After, Before,
+        LinkedFirewallrule, TranslatedSource, TranslatedDestination, TranslatedService,
+        OverrideInterfaceNATPolicy, InboundInterfaces and OutboundInterfaces. Returns
+        System.Xml.XmlElement when -AsXml is used, and an empty array when no rule matches.
 
         .EXAMPLE
-        # Retrieve all NAT rules
         Get-SfosNATRule
 
+        Lists every NAT rule on the firewall of the current connection.
+
         .EXAMPLE
-        # Filter by name (substring match)
         Get-SfosNATRule -NameLike "SNAT"
 
+        Lists the rules whose name contains 'SNAT'.
+
         .EXAMPLE
-        # Return raw XML for troubleshooting
         Get-SfosNATRule -NameLike "SNAT" -AsXml
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+        Returns the raw XML of the matching rules, for example to check a field the standard
+        output does not contain.
 
         .LINK
-        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/PROTECT/Firewall/NATRule/NATRule.html
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        New-SfosNATRule
+
+        .LINK
+        Set-SfosNATRule
 #>
 function Get-SfosNATRule {
     [CmdletBinding()]
@@ -3048,87 +3156,109 @@ function Get-SfosNATRule {
 
 <#
         .SYNOPSIS
-        Creates a new NAT rule on the Sophos Firewall.
+        Creates a new NAT rule on a Sophos Firewall.
 
         .DESCRIPTION
-        Creates a NAT rule (source or destination NAT policy) on the Sophos Firewall.
+        Creates a NAT rule that translates the source or destination address of matching
+        traffic. It needs an open connection from Connect-SfosFirewall, or the connection
+        parameters supplied directly, and an account with permission to change NAT rules.
 
         .PARAMETER Name
-        Name of the NAT rule (1-60 characters, no commas).
+        Required. Name of the NAT rule. 1 to 60 characters, no commas.
 
         .PARAMETER Description
-        Optional description (max 255 characters).
+        Optional. Free-text description of the rule. Up to 255 characters.
 
         .PARAMETER IPFamily
-        IP address family: 'IPv4' or 'IPv6'. Default: 'IPv4'.
+        Optional. IP address family: IPv4 or IPv6. Default: IPv4.
 
         .PARAMETER Status
-        Whether the rule is enabled: 'Enable' or 'Disable'. Default: 'Enable'.
+        Optional. Whether the rule is enabled: Enable or Disable. Default: Enable.
 
         .PARAMETER Position
-        Where to insert the rule relative to the existing rule list: 'Top', 'Bottom', 'After' or 'Before'. Default: 'Bottom'. 'After' and 'Before' require the -After or -Before parameter to name the reference rule.
+        Optional. Where to insert the rule relative to the existing rule list: Top, Bottom,
+        After or Before. Default: Bottom. After and Before require -After or -Before to name
+        the reference rule.
 
         .PARAMETER After
-        Name of the existing NAT rule after which this rule is inserted. Required when -Position is 'After'.
+        Optional. Name of the existing NAT rule after which this rule is inserted. Required
+        when -Position is After.
 
         .PARAMETER Before
-        Name of the existing NAT rule before which this rule is inserted. Required when -Position is 'Before'.
+        Optional. Name of the existing NAT rule before which this rule is inserted. Required
+        when -Position is Before.
 
         .PARAMETER LinkedFirewallrule
-        Optional name of the firewall rule this NAT rule is linked to.
+        Optional. Name of the firewall rule this NAT rule is linked to.
 
         .PARAMETER TranslatedSource
-        Translated source: 'Original', 'MASQ', 'IPAddress' or 'IPRange'. Default: 'Original'.
+        Optional. Translated source: Original, MASQ, IPAddress or IPRange. Default: Original.
 
         .PARAMETER TranslatedDestination
-        Translated destination: 'Original', 'IPAddress', 'IPRange', 'IPList' or 'FQDN'. Default: 'Original'.
+        Optional. Translated destination: Original, IPAddress, IPRange, IPList or FQDN.
+        Default: Original.
 
         .PARAMETER TranslatedService
-        Translated service: 'Original' or the name of a service object. Default: 'Original'.
+        Optional. Translated service: Original or the name of a service object.
+        Default: Original.
 
         .PARAMETER OverrideInterfaceNATPolicy
-        Whether to override the interface-level NAT policy: 'Enable' or 'Disable'. Default: 'Disable'.
+        Optional. Whether to override the interface-level NAT policy: Enable or Disable.
+        Default: Disable.
 
         .PARAMETER InboundInterfaces
-        Optional array of inbound interface names.
+        Optional. Inbound interface names.
 
         .PARAMETER OutboundInterfaces
-        Optional array of outbound interface names.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. Outbound interface names.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, uses stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number. If omitted, uses stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, uses stored connection context.
+        Optional. User name for the API login. The account needs permission to change NAT
+        rules. If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, uses stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific firewall
+        when you work with more than one at a time. Any connection parameter you pass
+        explicitly still takes precedence. If omitted, the stored default connection is used.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        None. Throws an exception if creation fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        create.
 
         .EXAMPLE
-        # Create a disabled masquerade rule at the bottom of the rule list
+        New-SfosNATRule -Name "SNAT-LAN-to-WAN" -TranslatedSource "MASQ" -Status Disable -Position Bottom -WhatIf
+
+        Shows what the call would create without sending it to the firewall.
+
+        .EXAMPLE
         New-SfosNATRule -Name "SNAT-LAN-to-WAN" -TranslatedSource "MASQ" -Status Disable -Position Bottom
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
+        Creates a disabled masquerade rule at the bottom of the rule list. The cmdlet asks
+        for confirmation before it writes.
 
         .LINK
-        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/PROTECT/Firewall/NATRule/NATRule.html
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
 
         .LINK
         Get-SfosNATRule
@@ -3279,98 +3409,128 @@ function New-SfosNATRule {
 
 <#
         .SYNOPSIS
-        Updates an existing NATRule object on the Sophos Firewall.
+        Updates an existing NAT rule on a Sophos Firewall.
 
         .DESCRIPTION
-        Updates a NATRule object using the Sophos Firewall XML API. You can supply the target object name directly or via the pipeline.
+        Updates a NAT rule. You can supply the target rule name directly or through the
+        pipeline. It needs an open connection from Connect-SfosFirewall, or the connection
+        parameters supplied directly, and an account with permission to change NAT rules.
 
-        SFOS replaces the whole entity on update - any element not sent in the request is
-        cleared on the firewall. This cmdlet reads the current rule first and keeps whatever
-        the caller does not explicitly pass, including Position (and After/Before), so a
-        one-field change never moves the rule in the evaluation order. To clear a field,
-        pass it explicitly with an empty value.
+        The firewall replaces the whole rule on update; any field not sent in the request is
+        cleared. The cmdlet reads the current rule first and keeps whatever you do not
+        explicitly pass, Position, After and Before included, so a one-field change never
+        moves the rule in the evaluation order. To clear a field, pass it explicitly with an
+        empty value.
 
         .PARAMETER Name
-        Name of the target object.
+        Required. Name of the target rule. Accepts pipeline input.
 
         .PARAMETER Description
-        Optional description text. If omitted, the existing description is kept.
+        Optional. New description text. If omitted, the existing description is kept.
 
         .PARAMETER IPFamily
-        IP address family: 'IPv4' or 'IPv6'. If omitted, the existing value is kept.
+        Optional. IP address family: IPv4 or IPv6. If omitted, the existing value is kept.
 
         .PARAMETER Status
-        Whether the rule is enabled: 'Enable' or 'Disable'. If omitted, the existing value is kept.
+        Optional. Whether the rule is enabled: Enable or Disable. If omitted, the existing
+        value is kept.
 
         .PARAMETER Position
-        Where the rule sits relative to the rule list: 'Top', 'Bottom', 'After' or 'Before'. If omitted, the existing position is kept.
+        Optional. Where the rule sits relative to the rule list: Top, Bottom, After or
+        Before. If omitted, the existing position is kept.
 
         .PARAMETER After
-        Name of the existing NAT rule after which this rule is inserted. Required when the effective -Position is 'After'. If omitted, the existing value is kept.
+        Optional. Name of the existing NAT rule after which this rule is inserted. Required
+        when the effective -Position is After. If omitted, the existing value is kept.
 
         .PARAMETER Before
-        Name of the existing NAT rule before which this rule is inserted. Required when the effective -Position is 'Before'. If omitted, the existing value is kept.
+        Optional. Name of the existing NAT rule before which this rule is inserted. Required
+        when the effective -Position is Before. If omitted, the existing value is kept.
 
         .PARAMETER LinkedFirewallrule
-        Optional name of the firewall rule this NAT rule is linked to. If omitted, the existing value is kept.
+        Optional. Name of the firewall rule this NAT rule is linked to. If omitted, the
+        existing value is kept.
 
         .PARAMETER TranslatedSource
-        Translated source: 'Original', 'MASQ', 'IPAddress' or 'IPRange'. If omitted, the existing value is kept.
+        Optional. Translated source: Original, MASQ, IPAddress or IPRange. If omitted, the
+        existing value is kept.
 
         .PARAMETER TranslatedDestination
-        Translated destination: 'Original', 'IPAddress', 'IPRange', 'IPList' or 'FQDN'. If omitted, the existing value is kept.
+        Optional. Translated destination: Original, IPAddress, IPRange, IPList or FQDN. If
+        omitted, the existing value is kept.
 
         .PARAMETER TranslatedService
-        Translated service: 'Original' or the name of a service object. If omitted, the existing value is kept.
+        Optional. Translated service: Original or the name of a service object. If omitted,
+        the existing value is kept.
 
         .PARAMETER OverrideInterfaceNATPolicy
-        Whether to override the interface-level NAT policy: 'Enable' or 'Disable'. If omitted, the existing value is kept.
+        Optional. Whether to override the interface-level NAT policy: Enable or Disable. If
+        omitted, the existing value is kept.
 
         .PARAMETER InboundInterfaces
-        Optional array of inbound interface names. If omitted, the existing value is kept.
+        Optional. Inbound interface names, replacing the whole list. If omitted, the existing
+        value is kept.
 
         .PARAMETER OutboundInterfaces
-        Optional array of outbound interface names. If omitted, the existing value is kept.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. Outbound interface names, replacing the whole list. If omitted, the
+        existing value is kept.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. User name for the API login. The account needs permission to change NAT
+        rules. If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific firewall
+        when you work with more than one at a time. Any connection parameter you pass
+        explicitly still takes precedence. If omitted, the stored default connection is used.
+
+        .INPUTS
+        System.Management.Automation.PSCustomObject. Objects with a Name property, such as
+        the output of Get-SfosNATRule, can be piped in.
 
         .OUTPUTS
-        None. Throws an exception if the update fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        update.
 
         .EXAMPLE
-        # Update only the description; position and every other field are preserved
+        Set-SfosNATRule -Name "SNAT-LAN-to-WAN" -Description "Updated description" -WhatIf
+
+        Shows what the call would change without sending it to the firewall.
+
+        .EXAMPLE
         Set-SfosNATRule -Name "SNAT-LAN-to-WAN" -Description "Updated description"
 
+        Changes only the description; the position and every other field are preserved. The
+        cmdlet asks for confirmation before it writes.
+
         .EXAMPLE
-        # Update using pipeline input
         Get-SfosNATRule -NameLike "SNAT-LAN-to-WAN" | Set-SfosNATRule -Status Disable
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+        Disables the matching rules.
 
         .LINK
-        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/PROTECT/Firewall/NATRule/NATRule.html
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosNATRule
 #>
 function Set-SfosNATRule {
     [CmdletBinding(SupportsShouldProcess)]
@@ -3571,53 +3731,67 @@ function Set-SfosNATRule {
 
 <#
         .SYNOPSIS
-        Removes a NATRule object from the Sophos Firewall.
+        Removes a NAT rule from a Sophos Firewall.
 
         .DESCRIPTION
-        Removes a NATRule object using the Sophos Firewall XML API. This cmdlet supports ShouldProcess; use -WhatIf to preview the change.
+        Deletes a NAT rule by name. It needs an open connection from Connect-SfosFirewall, or
+        the connection parameters supplied directly, and an account with permission to change
+        NAT rules.
 
         .PARAMETER Name
-        Name of the target object.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Required. Name of the target rule. Accepts pipeline input.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. User name for the API login. The account needs permission to change NAT
+        rules. If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific firewall
+        when you work with more than one at a time. Any connection parameter you pass
+        explicitly still takes precedence. If omitted, the stored default connection is used.
+
+        .INPUTS
+        System.Management.Automation.PSCustomObject. Objects with a Name property, such as
+        the output of Get-SfosNATRule, can be piped in.
 
         .OUTPUTS
-        None. Throws an exception if removal fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        removal.
 
         .EXAMPLE
-        # Preview removal
         Remove-SfosNATRule -Name "SNAT-LAN-to-WAN" -WhatIf
 
+        Shows what the call would remove without sending it to the firewall.
+
         .EXAMPLE
-        # Pipeline removal
         Get-SfosNATRule -NameLike "SNAT-LAN-to-WAN" | Remove-SfosNATRule
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+        Removes the rules whose name contains 'SNAT-LAN-to-WAN'. The cmdlet asks for
+        confirmation before it writes.
 
         .LINK
-        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/PROTECT/Firewall/NATRule/NATRule.html
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosNATRule
 #>
 function Remove-SfosNATRule {
     [CmdletBinding(SupportsShouldProcess)]
@@ -3685,13 +3859,12 @@ function Remove-SfosNATRule {
     SSLTLSInspectionRule entity. Internal helper, not exported.
 
 .DESCRIPTION
-    Centralizes the shape shared by SourceZones/Zone, SourceNetworks/Network,
-    Identity/Members, DestinationZones/Zone, DestinationNetworks/Network and
-    Services/Service - all repeatable single-value lists wrapped in one outer
-    element [doc, sample XML on the Add/Update operations page]. Every value is
-    escaped here. An empty or absent -Value still returns the (empty) wrapper
-    element, because SFOS replaces the whole entity on update, and an absent wrapper is
-    how a field gets cleared, not how it is left unchanged.
+    Builds one repeatable list field of a SSLTLSInspectionRule entity: SourceZones/Zone,
+    SourceNetworks/Network, Identity/Members, DestinationZones/Zone,
+    DestinationNetworks/Network and Services/Service all share this wrapper-and-item shape.
+    Every value is escaped here. An empty or absent -Value still returns the empty wrapper
+    element, because the firewall replaces the whole entity on update, and an absent wrapper
+    is how a field gets cleared, not how it is left unchanged.
 
 .PARAMETER WrapperTag
     Name of the outer element, e.g. 'SourceZones'.
@@ -3732,9 +3905,9 @@ function ConvertTo-SfosSSLTLSInspectionRuleXmlList {
     Builds the <Websites> XML for a SSLTLSInspectionRule entity. Internal helper, not exported.
 
 .DESCRIPTION
-    <Websites> wraps zero or more <Activity> elements, each an object reference with
-    <Name> and <Type> (Type is 'Web Category' or 'URL Group') [doc, live]. Every value
-    is escaped here.
+    Builds the Websites field of a SSLTLSInspectionRule entity. Websites wraps zero or more
+    Activity elements, each an object reference with Name and Type, where Type is Web
+    Category or URL Group. Every value is escaped here.
 
 .PARAMETER Website
     Zero or more objects with Name and Type properties, as returned by
@@ -3765,22 +3938,21 @@ function ConvertTo-SfosSSLTLSInspectionRuleWebsitesXml {
     Builds the <Set> inner XML for a SSLTLSInspectionRule entity. Internal helper, not exported.
 
 .DESCRIPTION
-    Centralizes the SSLTLSInspectionRule XML shape so New- and Set-SfosSSLTLSInspectionRule
-    send an identical, complete entity body. Takes a fully resolved rule object - same
-    property shape Get-SfosSSLTLSInspectionRule returns - and escapes every value.
+    Builds the complete Set request body for a SSLTLSInspectionRule entity, so New- and
+    Set-SfosSSLTLSInspectionRule send an identical, complete entity body. Takes a fully
+    resolved rule object with the same property shape Get-SfosSSLTLSInspectionRule returns,
+    and escapes every value.
 
-    SFOS replaces the whole entity on <Set operation="update">: any element this function
-    does not emit is cleared on the firewall [doc]. The caller is responsible
-    for merging in every field it wants preserved before calling this function; nothing is
-    read back here.
+    The firewall replaces the whole entity on an update: any element this function does not
+    emit is cleared. The caller merges in every field it wants preserved before calling this
+    function; nothing is read back here.
 
-    IsDefault is deliberately never emitted: the vendor doc marks it read-only, and the
-    firewall's default rule ('Exclusions by website or category') must never be
-    reconstructed or altered through this path - New-/Set-SfosSSLTLSInspectionRule guard
-    against touching it separately.
+    IsDefault is never emitted. It is read-only, and the firewall's built-in default rule
+    must never be reconstructed or altered through this path; New-SfosSSLTLSInspectionRule
+    and Set-SfosSSLTLSInspectionRule guard against touching it separately.
 
 .PARAMETER Operation
-    'add' or 'update', passed straight to <Set operation="...">.
+    add or update, passed straight to the Set operation attribute.
 
 .PARAMETER Rule
     Fully resolved rule object with Name, Description, Enable, LogConnections, SourceZones,
@@ -3788,10 +3960,8 @@ function ConvertTo-SfosSSLTLSInspectionRuleWebsitesXml {
     DecryptAction and DecryptionProfile properties.
 
 .PARAMETER Position
-    'Top' or 'Bottom'. Only meaningful on 'add' - the operations page notes it is "not
-    required in UPDATE" [doc] - so Set-SfosSSLTLSInspectionRule never supplies it. Omitted
-    entirely (no <Position> element sent) when not given, so the firewall's own default
-    (Bottom) [doc] applies.
+    Top or Bottom. Only meaningful on add; Set-SfosSSLTLSInspectionRule never supplies it.
+    Omitted entirely when not given, so the firewall's own default position applies.
 #>
 function ConvertTo-SfosSSLTLSInspectionRuleEntityXml {
     [CmdletBinding()]
@@ -3852,70 +4022,91 @@ function ConvertTo-SfosSSLTLSInspectionRuleEntityXml {
 
 <#
         .SYNOPSIS
-        Retrieves SSLTLSInspectionRule objects from the Sophos Firewall.
+        Retrieves SSL/TLS inspection rules from a Sophos Firewall.
 
         .DESCRIPTION
-        Queries the Sophos Firewall XML API for SSLTLSInspectionRule objects. By default the
-        cmdlet returns PowerShell-friendly objects. Use -AsXml to return the raw XML nodes.
+        Returns the SSL/TLS inspection rules that are defined on the firewall. Use this
+        cmdlet to review the existing rules or to feed them into another cmdlet through the
+        pipeline. The cmdlet only reads; nothing on the firewall is changed. It needs an open
+        connection from Connect-SfosFirewall, or the connection parameters supplied directly.
 
-        The firewall's built-in rule 'Exclusions by website or category' is returned like any
-        other object, flagged IsDefault='Yes' [live]. Check IsDefault before scripting bulk
-        changes; New-/Set-/Remove-SfosSSLTLSInspectionRule refuse to modify or remove it.
+        The firewall's built-in rule ('Exclusions by website or category') is returned like
+        any other rule, with IsDefault set to Yes. Check IsDefault before scripting bulk
+        changes; New-, Set- and Remove-SfosSSLTLSInspectionRule refuse to modify or remove it.
 
-        Every returned rule also carries the shape Set-SfosSSLTLSInspectionRule expects for
-        its list parameters (Website is an array of objects with Name/Type), so a rule read
-        back from this cmdlet can be fed straight into Set-SfosSSLTLSInspectionRule -Website.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
-
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Every returned rule carries the shape Set-SfosSSLTLSInspectionRule expects for its
+        list parameters, so a rule read back from this cmdlet can be piped straight into
+        Set-SfosSSLTLSInspectionRule.
 
         .PARAMETER NameLike
-        Optional name filter. In Sophos SFOS, 'like' behaves as a substring match (the supplied value may match anywhere in the object name). Sent to the firewall as the server-side filter and re-applied client-side, since SFOS only evaluates the first <key> of the first <Filter> and silently ignores unsupported keys.
+        Optional. Returns only rules whose name contains the given text anywhere. This is a
+        substring match, not a wildcard pattern. If omitted, the name is not used to filter.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs read permission for SSL/TLS
+        inspection rules. If omitted, the value from the current connection is used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific firewall
+        when you work with more than one at a time. Any connection parameter you pass
+        explicitly still takes precedence. If omitted, the stored default connection is used.
 
         .PARAMETER AsXml
-        Returns raw XML nodes instead of PowerShell-friendly objects.
+        Optional. Returns the raw XML elements sent by the firewall instead of PowerShell
+        objects.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        PSCustomObject with properties: Name, IsDefault, Description, Enable, LogConnections, SourceZones, SourceNetworks, Identity, DestinationZones, DestinationNetworks, Services, Website (array of objects with Name/Type), DecryptAction, DecryptionProfile. System.Xml.XmlElement when -AsXml is specified.
+        System.Management.Automation.PSCustomObject. One object per rule, with the properties
+        Name, IsDefault, Description, Enable, LogConnections, SourceZones, SourceNetworks,
+        Identity, DestinationZones, DestinationNetworks, Services, Website (an array of
+        objects with Name and Type), DecryptAction and DecryptionProfile. Returns
+        System.Xml.XmlElement when -AsXml is used, and an empty array when no rule matches.
 
         .EXAMPLE
-        # Retrieve all SSL/TLS inspection rules
         Get-SfosSSLTLSInspectionRule
 
+        Lists every SSL/TLS inspection rule on the firewall of the current connection.
+
         .EXAMPLE
-        # Filter by name (substring match)
         Get-SfosSSLTLSInspectionRule -NameLike "Bypass"
 
+        Lists the rules whose name contains 'Bypass'.
+
         .EXAMPLE
-        # Return raw XML for troubleshooting
         Get-SfosSSLTLSInspectionRule -NameLike "Bypass-Banking" -AsXml
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
-        The raw XML also contains a <MoveTo> element (empty <Name/>, <OrderBy>After</OrderBy> observed on the default rule) [live] - a write-only positioning directive the sample Add/Update XML documents, apparently echoed back on Get with no meaning of its own. This cmdlet does not expose it; Set-SfosSSLTLSInspectionRule never repositions a rule.
+        Returns the raw XML of the matching rules, for example to check a field the standard
+        output does not contain.
 
         .LINK
-        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/PROTECT/Firewall/TLSRule/TLSRule.html
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        New-SfosSSLTLSInspectionRule
+
+        .LINK
+        Set-SfosSSLTLSInspectionRule
 #>
 function Get-SfosSSLTLSInspectionRule {
     [CmdletBinding()]
@@ -4022,110 +4213,122 @@ function Get-SfosSSLTLSInspectionRule {
 
 <#
         .SYNOPSIS
-        Creates a new SSLTLSInspectionRule on the Sophos Firewall.
+        Creates a new SSL/TLS inspection rule on a Sophos Firewall.
 
         .DESCRIPTION
         Creates a rule that controls whether matching HTTPS traffic is decrypted, exempted or
-        denied by the SSL/TLS inspection engine.
+        denied by the SSL/TLS inspection engine. It needs an open connection from
+        Connect-SfosFirewall, or the connection parameters supplied directly, and an account
+        with permission to change SSL/TLS inspection rules.
 
-        -Enable has no default and must be supplied explicitly on every call: this field
-        controls whether the rule is live on the firewall, so this cmdlet refuses to guess at
-        it the way an optional parameter with a fixed default would.
+        -Enable has no default and must be supplied explicitly on every call, because it
+        controls whether the rule is live on the firewall.
+
+        Creating a rule through this cmdlet is currently rejected by the firewall for every
+        combination of fields tried. Use the web admin console to create SSL/TLS inspection
+        rules; once a rule exists, Get-, Set- and Remove-SfosSSLTLSInspectionRule work against
+        it normally.
 
         .PARAMETER Name
-        Name of the rule (1-60 characters, no commas, UTF-8 allowed) [doc].
+        Required. Name of the rule. 1 to 60 characters, no commas.
 
         .PARAMETER Enable
-        Whether the rule is active: 'Yes', 'No', 't' or 'f' [doc]. Mandatory - no default is applied by this cmdlet.
+        Required. Whether the rule is active: Yes, No, t or f.
 
         .PARAMETER Description
-        Optional rule description (max 255 characters) [doc].
+        Optional. Free-text description of the rule. Up to 255 characters.
 
         .PARAMETER LogConnections
-        Whether to log matching connections to the SSL log: 'Enable', 'Disable', 't' or 'f' [doc]. If omitted, the firewall applies its own default.
+        Optional. Whether to log matching connections to the SSL log: Enable, Disable, t or
+        f. If omitted, the firewall applies its own default.
 
         .PARAMETER Position
-        'Top' or 'Bottom' - where to place the new rule in the rule list [doc]. If omitted, the firewall defaults to 'Bottom' [doc]. There is no way to request placement above an existing rule through this parameter; use -Position 'Bottom' (or omit it) to avoid ever inserting a new rule above the existing rule set.
+        Optional. Where to place the new rule in the rule list: Top or Bottom. If omitted,
+        the firewall defaults to Bottom.
 
         .PARAMETER DecryptAction
-        Action for traffic matching the rule: 'Decrypt', 'Do not decrypt' or 'Deny' [doc]. If omitted, the firewall applies its own default.
+        Optional. Action for traffic matching the rule: Decrypt, Do not decrypt or Deny. If
+        omitted, the firewall applies its own default.
 
         .PARAMETER DecryptionProfile
-        Name of the associated decryption profile [doc]. If omitted, the firewall applies its own default (or none, for a 'Do not decrypt'/'Deny' rule).
+        Optional. Name of the associated decryption profile. If omitted, the firewall applies
+        its own default, or none for a Do not decrypt or Deny rule.
 
         .PARAMETER SourceZones
-        One or more source zone names [doc]. If omitted, the firewall applies its own default.
+        Optional. Source zone names. If omitted, the firewall applies its own default.
 
         .PARAMETER SourceNetworks
-        One or more source network/host/group names [doc]. If omitted, the firewall applies its own default.
+        Optional. Source network, host or group names. If omitted, the firewall applies its
+        own default.
 
         .PARAMETER Identity
-        One or more source users/groups the rule applies to [doc]. If omitted, the firewall applies its own default.
+        Optional. Source users or groups the rule applies to. If omitted, the firewall
+        applies its own default.
 
         .PARAMETER DestinationZones
-        One or more destination zone names [doc]. If omitted, the firewall applies its own default.
+        Optional. Destination zone names. If omitted, the firewall applies its own default.
 
         .PARAMETER DestinationNetworks
-        One or more destination network/host/group names [doc]. If omitted, the firewall applies its own default.
+        Optional. Destination network, host or group names. If omitted, the firewall applies
+        its own default.
 
         .PARAMETER Services
-        One or more service names [doc]. If omitted, the firewall applies its own default.
+        Optional. Service names. If omitted, the firewall applies its own default.
 
         .PARAMETER Website
-        Zero or more website/category references the rule applies to, each an object with Name and Type properties, Type being 'Web Category' or 'URL Group' [doc, live] - e.g. [PSCustomObject]@{ Name = 'Banking'; Type = 'Web Category' }. If omitted, the firewall applies its own default.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. Website or category references the rule applies to, each an object with
+        Name and Type properties, Type being Web Category or URL Group. If omitted, the
+        firewall applies its own default.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, uses stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number. If omitted, uses stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, uses stored connection context.
+        Optional. User name for the API login. The account needs permission to change
+        SSL/TLS inspection rules. If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, uses stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific firewall
+        when you work with more than one at a time. Any connection parameter you pass
+        explicitly still takes precedence. If omitted, the stored default connection is used.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        None. Throws an exception if creation fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        create.
 
         .EXAMPLE
-        # Create a disabled rule that exempts a web category from decryption
+        $website = [PSCustomObject]@{ Name = 'Banking'; Type = 'Web Category' }
+        New-SfosSSLTLSInspectionRule -Name "Bypass-Banking" -Enable No -DecryptAction "Do not decrypt" -Website $website -WhatIf
+
+        Shows what the call would create without sending it to the firewall.
+
+        .EXAMPLE
         $website = [PSCustomObject]@{ Name = 'Banking'; Type = 'Web Category' }
         New-SfosSSLTLSInspectionRule -Name "Bypass-Banking" -Enable No -DecryptAction "Do not decrypt" -Website $website
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        IsDefault is not a parameter - it is a read-only field per the vendor doc, never sent by this cmdlet.
-
-        Known firmware limitation (SFOS 22.0, measured): creating an SSL/TLS inspection rule
-        does not work on this firmware. Every attempt is answered with status 501. More than
-        30 variants were tried, including a byte-for-byte copy of the rule the appliance
-        itself returns from a Get, and both the field order of the documented sample and that
-        of the live object.
-
-        The blocker is IsDefault. Omit it and the firewall names it in <InvalidParams>; send
-        it and it is rejected for every value tried - no, No, NO, false, f, 0, yes, and even
-        Yes, which is the value the live rule carries. The documentation marks the field
-        read-only, so there is no documented way to satisfy the validator. Adding any other
-        field changes nothing, except that DecryptAction suppresses the diagnosis and leaves
-        <InvalidParams/> empty.
-
-        This cmdlet is therefore implemented faithfully to the documentation but is
-        unconfirmed against a real appliance. Get, Set and Remove on existing rules do work.
+        Creates a disabled rule that exempts a web category from decryption. The cmdlet asks
+        for confirmation before it writes.
 
         .LINK
-        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/PROTECT/Firewall/TLSRule/operations/AddSSLTLSinspectionrule%26UpdateSSLTLSinspectionrule.html
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
 
         .LINK
         Get-SfosSSLTLSInspectionRule
@@ -4226,104 +4429,130 @@ function New-SfosSSLTLSInspectionRule {
 
 <#
         .SYNOPSIS
-        Updates an existing SSLTLSInspectionRule on the Sophos Firewall.
+        Updates an existing SSL/TLS inspection rule on a Sophos Firewall.
 
         .DESCRIPTION
-        Updates a SSLTLSInspectionRule object using the Sophos Firewall XML API. You can
-        supply the target rule name directly or via the pipeline.
+        Updates a SSL/TLS inspection rule. You can supply the target rule name directly or
+        through the pipeline. It needs an open connection from Connect-SfosFirewall, or the
+        connection parameters supplied directly, and an account with permission to change
+        SSL/TLS inspection rules. This cmdlet does not reposition rules.
 
-        SFOS replaces the whole entity on update - any element not sent in the request is
-        cleared on the firewall [doc]. This cmdlet reads the current rule first
-        and keeps whatever the caller does not explicitly pass. List parameters
-        (SourceZones/SourceNetworks/Identity/DestinationZones/DestinationNetworks/Services/
-        Website) are wholesale replacements when supplied, not merges - to add one zone to an
-        existing list, pass the full desired list.
+        The firewall replaces the whole rule on update; any field not sent in the request is
+        cleared. The cmdlet reads the current rule first and keeps whatever you do not
+        explicitly pass. The list parameters (SourceZones, SourceNetworks, Identity,
+        DestinationZones, DestinationNetworks, Services, Website) are wholesale replacements
+        when supplied, not merges; to add one zone to an existing list, pass the full desired
+        list.
 
-        The firewall's built-in rule 'Exclusions by website or category' (IsDefault='Yes')
-        is refused by this cmdlet: it is the firewall's only built-in TLS bypass rule, and an
-        accidental edit here is not recoverable through this module. Unlike the softer,
-        documentation-only IsDefault warning used elsewhere in this codebase (e.g.
-        WebFilterException), this is an enforced block, because breaking the sole default rule
-        here can change what HTTPS traffic gets decrypted or blocked device-wide.
+        The firewall's built-in rule ('Exclusions by website or category', IsDefault Yes) is
+        refused by this cmdlet, because it is the only built-in TLS bypass rule and an
+        accidental change to it is not recoverable through this module.
 
         .PARAMETER Name
-        Name of the target rule.
+        Required. Name of the target rule. Accepts pipeline input.
 
         .PARAMETER Description
-        New description (max 255 characters). If omitted, the current value is kept.
+        Optional. New description text. Up to 255 characters. If omitted, the current value
+        is kept.
 
         .PARAMETER Enable
-        Whether the rule is active: 'Yes', 'No', 't' or 'f' [doc]. Security-relevant: never defaulted by this cmdlet - only sent when explicitly bound, otherwise the value read from the firewall is resent unchanged.
+        Optional. Whether the rule is active: Yes, No, t or f. If omitted, the current value
+        is kept.
 
         .PARAMETER LogConnections
-        Whether to log matching connections: 'Enable', 'Disable', 't' or 'f' [doc]. If omitted, the current value is kept.
+        Optional. Whether to log matching connections: Enable, Disable, t or f. If omitted,
+        the current value is kept.
 
         .PARAMETER DecryptAction
-        Action for matching traffic: 'Decrypt', 'Do not decrypt' or 'Deny' [doc]. Security-relevant: never defaulted by this cmdlet. If omitted, the current value is kept.
+        Optional. Action for matching traffic: Decrypt, Do not decrypt or Deny. If omitted,
+        the current value is kept.
 
         .PARAMETER DecryptionProfile
-        Name of the associated decryption profile [doc]. If omitted, the current value is kept.
+        Optional. Name of the associated decryption profile. If omitted, the current value is
+        kept.
 
         .PARAMETER SourceZones
-        Full replacement list of source zone names. If omitted, the current list is kept.
+        Optional. Source zone names, replacing the whole list. If omitted, the current list
+        is kept.
 
         .PARAMETER SourceNetworks
-        Full replacement list of source network/host/group names. If omitted, the current list is kept.
+        Optional. Source network, host or group names, replacing the whole list. If omitted,
+        the current list is kept.
 
         .PARAMETER Identity
-        Full replacement list of source users/groups. If omitted, the current list is kept.
+        Optional. Source users or groups, replacing the whole list. If omitted, the current
+        list is kept.
 
         .PARAMETER DestinationZones
-        Full replacement list of destination zone names. If omitted, the current list is kept.
+        Optional. Destination zone names, replacing the whole list. If omitted, the current
+        list is kept.
 
         .PARAMETER DestinationNetworks
-        Full replacement list of destination network/host/group names. If omitted, the current list is kept.
+        Optional. Destination network, host or group names, replacing the whole list. If
+        omitted, the current list is kept.
 
         .PARAMETER Services
-        Full replacement list of service names. If omitted, the current list is kept.
+        Optional. Service names, replacing the whole list. If omitted, the current list is
+        kept.
 
         .PARAMETER Website
-        Full replacement list of website/category references, each an object with Name and Type properties, Type being 'Web Category' or 'URL Group' [doc, live]. If omitted, the current list is kept.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. Website or category references, replacing the whole list, each an object
+        with Name and Type properties, Type being Web Category or URL Group. If omitted, the
+        current list is kept.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. User name for the API login. The account needs permission to change
+        SSL/TLS inspection rules. If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific firewall
+        when you work with more than one at a time. Any connection parameter you pass
+        explicitly still takes precedence. If omitted, the stored default connection is used.
+
+        .INPUTS
+        System.Management.Automation.PSCustomObject. Objects with a Name property, such as
+        the output of Get-SfosSSLTLSInspectionRule, can be piped in.
 
         .OUTPUTS
-        None. Throws an exception if the update fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        update.
 
         .EXAMPLE
-        # Change only the decryption profile, leaving every other field untouched
+        Set-SfosSSLTLSInspectionRule -Name "Bypass-Banking" -DecryptionProfile "Maximum compatibility" -WhatIf
+
+        Shows what the call would change without sending it to the firewall.
+
+        .EXAMPLE
         Set-SfosSSLTLSInspectionRule -Name "Bypass-Banking" -DecryptionProfile "Maximum compatibility"
 
+        Changes only the decryption profile, leaving every other field untouched. The cmdlet
+        asks for confirmation before it writes.
+
         .EXAMPLE
-        # Pipeline update
         Get-SfosSSLTLSInspectionRule -NameLike "Bypass-Banking" | Set-SfosSSLTLSInspectionRule -Enable No
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This cmdlet does not reposition rules: it never sends <Position> or <MoveTo>, matching the operations page note that Position is "not required in UPDATE".
+        Disables the matching rules.
 
         .LINK
-        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/PROTECT/Firewall/TLSRule/operations/AddSSLTLSinspectionrule%26UpdateSSLTLSinspectionrule.html
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
 
         .LINK
         Get-SfosSSLTLSInspectionRule
@@ -4463,63 +4692,70 @@ function Set-SfosSSLTLSInspectionRule {
 
 <#
         .SYNOPSIS
-        Removes a SSLTLSInspectionRule from the Sophos Firewall.
+        Removes an SSL/TLS inspection rule from a Sophos Firewall.
 
         .DESCRIPTION
-        Removes a SSLTLSInspectionRule using the Sophos Firewall XML API. This cmdlet
-        supports ShouldProcess; use -WhatIf to preview the change.
+        Deletes an SSL/TLS inspection rule by name. It needs an open connection from
+        Connect-SfosFirewall, or the connection parameters supplied directly, and an account
+        with permission to change SSL/TLS inspection rules.
 
-        Unlike the general Remove-Sfos* pattern in this codebase, which passes the raw firewall
-        error through for a non-existent object rather than reading first, this cmdlet reads
-        the object before deleting it, at the cost of one
-        extra round trip per call. The reason is specific to this entity: the firewall's only
-        built-in TLS bypass rule ('Exclusions by website or category', IsDefault='Yes') has no
-        undo if removed, so the extra read buys a hard stop - a named, unambiguous refusal -
-        before that can happen, and also turns a delete of a non-existent rule into a clear
-        "was not found" instead of a misleading firewall error code.
+        The cmdlet reads the rule before deleting it and refuses to remove the firewall's
+        built-in rule ('Exclusions by website or category', IsDefault Yes), because it is the
+        only built-in TLS bypass rule and cannot be restored if removed by mistake. The read
+        also turns an attempt to remove a rule that does not exist into a clear "was not
+        found" instead of a firewall error code.
 
         .PARAMETER Name
-        Name of the target rule.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Required. Name of the target rule. Accepts pipeline input.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. User name for the API login. The account needs permission to change
+        SSL/TLS inspection rules. If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific firewall
+        when you work with more than one at a time. Any connection parameter you pass
+        explicitly still takes precedence. If omitted, the stored default connection is used.
+
+        .INPUTS
+        System.Management.Automation.PSCustomObject. Objects with a Name property, such as
+        the output of Get-SfosSSLTLSInspectionRule, can be piped in.
 
         .OUTPUTS
-        None. Throws an exception if removal fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        removal.
 
         .EXAMPLE
-        # Preview removal
         Remove-SfosSSLTLSInspectionRule -Name "Bypass-Banking" -WhatIf
 
+        Shows what the call would remove without sending it to the firewall.
+
         .EXAMPLE
-        # Pipeline removal
         Get-SfosSSLTLSInspectionRule -NameLike "Bypass-Banking" | Remove-SfosSSLTLSInspectionRule
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        Refuses to remove any rule with IsDefault='Yes' - see .DESCRIPTION.
+        Removes the rules whose name contains 'Bypass-Banking'. The cmdlet asks for
+        confirmation before it writes.
 
         .LINK
-        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/PROTECT/Firewall/TLSRule/operations/Delete%20SSL%20TLS%20inspection%20rule.html
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
 
         .LINK
         Get-SfosSSLTLSInspectionRule
@@ -4601,56 +4837,67 @@ function Remove-SfosSSLTLSInspectionRule {
 
 <#
         .SYNOPSIS
-        Retrieves the SSLTLSInspectionSettings from the Sophos Firewall.
+        Retrieves the SSL/TLS inspection settings from a Sophos Firewall.
 
         .DESCRIPTION
-        Queries the Sophos Firewall XML API for the SSLTLSInspectionSettings singleton. There
-        is exactly one instance of this element per firewall - it holds the device-wide
-        SSL/TLS inspection engine configuration (CA certificates for re-signing, the fallback
-        actions for SSL 2.0/3.0, SSL compression and exceeded-connection cases, TLS 1.3
-        handling, and the on/off switches for the TLS engine and TLS inspection itself). By
-        default the cmdlet returns a PowerShell-friendly object. Use -AsXml to return the raw
-        XML node.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Returns the device-wide SSL/TLS inspection settings: the CA certificates used for
+        re-signing during decryption, the fallback actions for SSL 2.0/3.0, SSL compression
+        and exceeded-connection cases, TLS 1.3 handling, and the on/off switches for the TLS
+        engine and TLS inspection itself. There is exactly one instance of this object per
+        firewall. The cmdlet only reads; nothing on the firewall is changed. It needs an open
+        connection from Connect-SfosFirewall, or the connection parameters supplied directly.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. User name for the API login. The account needs read permission for the
+        SSL/TLS inspection settings. If omitted, the value from the current connection is
+        used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific firewall
+        when you work with more than one at a time. Any connection parameter you pass
+        explicitly still takes precedence. If omitted, the stored default connection is used.
 
         .PARAMETER AsXml
-        Returns the raw XML node instead of a PowerShell-friendly object.
+        Optional. Returns the raw XML element sent by the firewall instead of a PowerShell
+        object.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        PSCustomObject (default). System.Xml.XmlElement when -AsXml is specified.
+        System.Management.Automation.PSCustomObject. One object with the properties RSACA,
+        ECCA, SSLv2SSLv3, SSLCompression, SSLConnectionsExceeded, TLS13Decryption,
+        SSLTLSEngine and SSLTLSInspection. Returns System.Xml.XmlElement when -AsXml is used.
 
         .EXAMPLE
-        # Retrieve the current SSL/TLS inspection settings
         Get-SfosSSLTLSInspectionSettings
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>) and XML escaping for user input.
-        This entity has no <Name>; Get returns exactly one record [live].
+        Returns the current SSL/TLS inspection settings of the firewall of the current
+        connection.
 
         .LINK
-        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/PROTECT/Firewall/TLSSettings/TLSSettings.html
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Set-SfosSSLTLSInspectionSettings
 #>
 function Get-SfosSSLTLSInspectionSettings {
     # PSUseSingularNouns is suppressed on purpose. 'Settings' is not a plural container here
@@ -4712,79 +4959,103 @@ function Get-SfosSSLTLSInspectionSettings {
 
 <#
         .SYNOPSIS
-        Updates the SSLTLSInspectionSettings on the Sophos Firewall.
+        Updates the SSL/TLS inspection settings on a Sophos Firewall.
 
         .DESCRIPTION
-        Updates the SSLTLSInspectionSettings singleton using the Sophos Firewall XML API.
-        This cmdlet reads the current settings first and resends every field, overriding only
-        what the caller explicitly passes (read-modify-write - see the fragment/module header
-        for why this is required even though the entity is a singleton: an update replaces the
-        whole entity, and every field this cmdlet does not send would be reset to whatever the
-        firewall treats as its default). This cmdlet supports ShouldProcess; use -WhatIf to
-        preview the change.
+        Updates the device-wide SSL/TLS inspection settings. It needs an open connection from
+        Connect-SfosFirewall, or the connection parameters supplied directly, and an account
+        with permission to change the SSL/TLS inspection settings. The cmdlet reads the
+        current settings first and resends every field, overriding only what you explicitly
+        pass, so fields you do not pass keep their current value.
+
+        Every field of this entity applies device-wide and takes effect immediately for every
+        HTTPS connection through the firewall; there is no per-rule scope. Disabling
+        SSLTLSEngine or SSLTLSInspection turns SSL/TLS inspection off for the whole appliance.
+        Review the current settings with Get-SfosSSLTLSInspectionSettings and use -WhatIf
+        before applying a change.
 
         .PARAMETER RSACA
-        Name of the RSA CA certificate used for re-signing during decryption [doc]. If omitted, the current value is kept.
+        Optional. Name of the RSA CA certificate used for re-signing during decryption. If
+        omitted, the current value is kept.
 
         .PARAMETER ECCA
-        Name of the EC CA certificate used for re-signing during decryption [doc]. If omitted, the current value is kept.
+        Optional. Name of the EC CA certificate used for re-signing during decryption. If
+        omitted, the current value is kept.
 
         .PARAMETER SSLv2SSLv3
-        Action for SSL 2.0/3.0 connections: 'Allow without decryption', 'Drop' or 'Reject' [doc]. If omitted, the current value is kept.
+        Optional. Action for SSL 2.0/3.0 connections: Allow without decryption, Drop or
+        Reject. If omitted, the current value is kept.
 
         .PARAMETER SSLCompression
-        Action for connections using SSL compression: 'Allow without decryption', 'Drop' or 'Reject' [doc]. If omitted, the current value is kept.
+        Optional. Action for connections using SSL compression: Allow without decryption,
+        Drop or Reject. If omitted, the current value is kept.
 
         .PARAMETER SSLConnectionsExceeded
-        Action applied once the maximum number of concurrent SSL connections is exceeded: 'Allow without decryption', 'Drop' or 'Reject' [doc]. If omitted, the current value is kept.
+        Optional. Action applied once the maximum number of concurrent SSL connections is
+        exceeded: Allow without decryption, Drop or Reject. If omitted, the current value is
+        kept.
 
         .PARAMETER TLS13Decryption
-        Action for TLS 1.3 connections: 'Decrypt as 1.3' or 'Downgrade to TLS 1.2 and decrypt' [doc]. If omitted, the current value is kept.
+        Optional. Action for TLS 1.3 connections: Decrypt as 1.3 or Downgrade to TLS 1.2 and
+        decrypt. If omitted, the current value is kept.
 
         .PARAMETER SSLTLSEngine
-        Whether the SSL/TLS inspection engine itself is on: 'Enabled' or 'Disabled' [doc]. If omitted, the current value is kept.
+        Optional. Whether the SSL/TLS inspection engine itself is on: Enabled or Disabled. If
+        omitted, the current value is kept.
 
         .PARAMETER SSLTLSInspection
-        Whether SSL/TLS traffic is inspected: 'Enabled' or 'Disabled' [doc]. If omitted, the current value is kept.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. Whether SSL/TLS traffic is inspected: Enabled or Disabled. If omitted, the
+        current value is kept.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. User name for the API login. The account needs permission to change the
+        SSL/TLS inspection settings. If omitted, the value from the current connection is
+        used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific firewall
+        when you work with more than one at a time. Any connection parameter you pass
+        explicitly still takes precedence. If omitted, the stored default connection is used.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        None. Throws an exception if the update fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        update.
 
         .EXAMPLE
-        # Change only the RSA re-signing CA, leaving every other device-wide field untouched
         Set-SfosSSLTLSInspectionSettings -RSACA "MyIssuingCA" -WhatIf
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        Every field of this entity acts device-wide, immediately, for every HTTPS connection through the firewall - there is no per-object or per-rule scope to fall back on. SSLTLSEngine='Disabled' or SSLTLSInspection='Disabled' turns SSL/TLS inspection off firewall-wide; a wrong SSLv2SSLv3/SSLCompression/SSLConnectionsExceeded/TLS13Decryption value can drop or reject HTTPS connections that were previously allowed. No parameter carries a default value in this cmdlet on purpose - only what the caller explicitly passes (or what read-modify-write carries forward unchanged from the current state) is ever sent. Verified against the live firewall via its Get path only; the write path was verified by inspecting the generated XML (e.g. with -WhatIf), never executed, because every field here is on this task's do-not-touch list.
+        Shows what the call would change without sending it to the firewall.
 
-        ConfirmImpact is High: device-wide TLS inspection engine; a wrong value switches off
-        TLS inspection firewall-wide. Automation must pass -Confirm:$false.
+        .EXAMPLE
+        Set-SfosSSLTLSInspectionSettings -RSACA "MyIssuingCA" -Confirm:$false
+
+        Changes only the RSA re-signing CA, leaving every other field untouched, without
+        asking for confirmation. Use this form only in scripts where the value has already
+        been reviewed.
 
         .LINK
-        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/PROTECT/Firewall/TLSSettings/operations/UpdateSSLTLSinspectionsettings.html
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
 
         .LINK
         Get-SfosSSLTLSInspectionSettings

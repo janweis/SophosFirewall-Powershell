@@ -1,461 +1,214 @@
-# SophosFirewall.Network Module
+# SophosFirewall.Network
 
-> **Security warning.** These cmdlets change the network configuration of a live appliance:
-> interfaces, VLANs, zones, gateways, DNS, DHCP, ARP and tunnels. A wrong IP address, a zone
-> assigned to the wrong interface, or a gateway change that severs the path back to the
-> management interface can make the appliance unreachable - and once that happens, the API you
-> would use to undo it is unreachable too. There is no confirmation beyond `ShouldProcess`.
-> Every write cmdlet in this module supports `-WhatIf`; use it before running an unfamiliar
-> call against a production firewall, and keep a second, independent path to the device
-> (console, out-of-band management) available before touching `Interface`, `Zone`,
-> `GatewayConfiguration` or anything that carries the session's own management traffic.
+`SophosFirewall.Network` manages the Network area of a Sophos Firewall: interfaces, VLANs,
+link aggregation groups, bridge pairs and aliases, zones, the gateway configuration, DNS
+(resolver settings, host entries, request routes, dynamic DNS), DHCP (servers, relays, IPv6,
+the server on/off switch), static ARP and router advertisements, and tunnels (IP tunnels,
+GRE tunnels and routes, TAP interfaces, RED devices, WiFi 6 interfaces and the cellular
+WAN). It is for administrators who script network configuration instead of using the web
+admin.
 
-## Overview
+These cmdlets change the network configuration of a live appliance. A wrong IP address, a
+zone assigned to the wrong interface, or a gateway change that severs the path back to the
+management interface can make the appliance unreachable - and once that happens, the API you
+would use to undo it is unreachable too. Every write cmdlet supports `-WhatIf`; use it before
+running an unfamiliar call against a production firewall, and keep a second, independent
+path to the device available before touching `Interface`, `Zone`, `GatewayConfiguration` or
+anything that carries the session's own management traffic.
 
-The **Network** module provides PowerShell cmdlets for the **CONFIGURE > Network** area of
-the Sophos XGS / SFOS 22.0 API documentation; the SFOS web admin presents the same area as
-**Network**. With 100 functions, it manages interfaces, VLANs, link aggregation groups, bridge
-pairs and aliases, zones, the gateway configuration, DNS (resolver settings, host entries,
-request routes, dynamic DNS), DHCP (servers, relays, IPv6, the server on/off switch), static
-ARP and router advertisements, and tunnels (IP tunnels, GRE tunnels and routes, TAP interfaces,
-RED devices, WiFi 6 interfaces and the cellular WAN). Requires `SophosFirewall.Core`.
+## Requirements
 
-## Features
-
-- **Interfaces, VLANs, LAG, BridgePair, Alias**: Physical and logical Layer 2/3 building
-  blocks, including IPv4/IPv6/MSS configuration builders
-- **Zones**: Named security zones with the ApplianceAccess service groups
-- **Gateway Configuration**: The device-wide gateway list and failover timeout (singleton)
-- **DNS**: Resolver settings, static host entries with multiple addresses, request routes,
-  dynamic DNS
-- **DHCP**: IPv4/IPv6 DHCP servers, relays, and the server on/off switch
-- **ARP and Router Advertisement**: The ARP cache configuration, static ARP entries, IPv6
-  router advertisement
-- **Tunnels**: IP tunnels, GRE tunnels and routes, TAP interfaces, RED devices, WiFi 6
-  interfaces, cellular WAN
-- **API Integration**: Full integration with the Sophos XGS/SFOS firewall XML API
+- `SophosFirewall.Core` (installed automatically as a dependency)
+- PowerShell 5.1 or 7.x
+- HTTPS access to the firewall's management API
+- A firewall account with permission to read and write this area
 
 ## Installation
 
 ```powershell
-Import-Module -Name SophosFirewall.Network
+Install-Module SophosFirewall.Network -Repository PSGallery -Scope CurrentUser
 ```
-
-Or with explicit path:
-
-```powershell
-Import-Module -Name "C:\Path\To\SophosFirewall.Network.psd1"
-```
-
-## Requirements
-
-- PowerShell 5.1 or higher (Windows PowerShell)
-- PowerShell 7.0+ (PowerShell Core) recommended
-- SophosFirewall.Core module (automatically loaded as dependency)
-- Network access to Sophos XGS / SFOS firewall (version 22.0)
-- API credentials with appropriate permissions
 
 ## Quick Start
 
-### Establish Connection
-
 ```powershell
-Connect-SfosFirewall -Firewall "192.168.1.1" -Port 4444 -Credential (Get-Credential) -SkipCertificateCheck
-```
+Connect-SfosFirewall -Firewall '192.0.2.10' -Port 4444 -Credential (Get-Credential) -SkipCertificateCheck
 
-### Multi-Session Usage
-
-```powershell
-# Register two connections without disturbing the default session
-Connect-SfosFirewall -Firewall "fw1.example.test" -Credential (Get-Credential) -Name "fw1"
-Connect-SfosFirewall -Firewall "fw2.example.test" -Credential (Get-Credential) -Name "fw2" -NoDefault
-
-# Read a DNS host entry from fw1 and recreate it on fw2, without touching the ambient
-# default session - HostName binds from the pipeline, Address is passed explicitly
-# because it is not a pipeline-bound parameter
-$entry = Get-SfosDNSHostEntry -Session "fw1" -HostNameLike "server.example.com"
-$entry | New-SfosDNSHostEntry -Session "fw2" -Address $entry.AddressList -WhatIf
-```
-
-### Interfaces
-
-Physical ports cannot be created or removed through this API - only `Get-` and `Set-` exist.
-`Set-SfosInterface` reads the current interface first and resends every field it was not
-explicitly given, IPv4/IPv6/MSS configuration included as complete objects.
-
-```powershell
-# List interfaces with their current IPv4 assignment
 Get-SfosInterface | Format-Table Name, Hardware, NetworkZone, InterfaceStatus
-
-# Preview an MTU change - IP assignment, zone and MSS are resent unchanged
-Set-SfosInterface -Hardware "Port1" -MTU 9000 -WhatIf
+Set-SfosInterface -Hardware 'Port1' -MTU 9000 -WhatIf
 ```
 
-### VLAN Management
+### VLANs and zones
 
 ```powershell
-# Create a VLAN sub-interface, disabled review with -WhatIf first
-New-SfosVLAN -Name "DMZ-VLAN" -Interface "Port1" -VLANID 100 -Zone "DMZ" -IPv4Assignment Static -IPAddress "10.10.10.1" -Netmask "255.255.255.0" -WhatIf
+New-SfosVLAN -Name 'DMZ-VLAN' -Interface 'Port1' -VLANID 100 -Zone 'DMZ' -IPv4Assignment Static -IPAddress '198.51.100.1' -Netmask '255.255.255.0' -WhatIf
+Set-SfosVLAN -Interface 'Port1' -VLANID 100 -Zone 'DMZ'
+Remove-SfosVLAN -Interface 'Port1' -VLANID 100 -WhatIf
 
-# Update only the zone - Interface and VLANID identify the object, everything else is preserved
-Set-SfosVLAN -Interface "Port1" -VLANID 100 -Zone "DMZ"
-
-# Remove it - see Known Firmware Limitations: removal is keyed on the firewall-computed
-# Hardware value, not Name, so this resolves Hardware first and verifies deletion afterwards
-Remove-SfosVLAN -Interface "Port1" -VLANID 100 -WhatIf
+New-SfosZone -Name 'Extranet' -Type DMZ -Description 'Partner extranet' -WhatIf
+(Get-SfosZone -NameLike 'LAN').ApplianceAccess
 ```
 
-### Alias
-
-An interface alias has no caller-chosen name - the firewall derives one as
-`<Interface>:<Index>`, so `New-SfosAlias` has no `-Name` parameter at all; use `Get-SfosAlias`
-to find the generated name for a later `Set-`/`Remove-`.
+### DNS host entries and request routes
 
 ```powershell
-New-SfosAlias -Interface "Port1" -IPFamily IPv4 -IPAddress "10.0.1.1" -Netmask "255.255.255.0" -WhatIf
+$address = New-SfosDNSHostEntryAddress -EntryType Manual -IPFamily IPv4 -IPAddress '198.51.100.10'
+New-SfosDNSHostEntry -HostName 'server.example.com' -Address $address -WhatIf
 
-# The generated Name, e.g. "Port1:0", is what Set-/Remove- key on
-Get-SfosAlias -NameLike "Port1" | Set-SfosAlias -Netmask "255.255.0.0" -WhatIf
+New-SfosDNSRequestRoute -DomainName 'internal.example.com' -TargetServer 'Internal-DNS-Server' -WhatIf
 ```
 
-### Zones
+## Cmdlets
+
+| Cmdlet | Purpose |
+|---|---|
+| `Get-SfosInterface` | Retrieves interface objects. |
+| `Set-SfosInterface` | Updates a physical interface. |
+| `New-SfosInterfaceIPv4Configuration` | Builds an IPv4 configuration for `Set-SfosInterface`. |
+| `New-SfosInterfaceIPv6Configuration` | Builds an IPv6 configuration for `Set-SfosInterface`. |
+| `New-SfosInterfaceMSSConfiguration` | Builds an MSS configuration for `Set-SfosInterface`. |
+| `Get-SfosVLAN` | Retrieves VLAN objects. |
+| `New-SfosVLAN` | Creates a VLAN sub-interface. |
+| `Set-SfosVLAN` | Updates a VLAN. |
+| `Remove-SfosVLAN` | Removes a VLAN. |
+| `Get-SfosLAG` | Retrieves link aggregation group objects. |
+| `New-SfosLAG` | Creates a link aggregation group. |
+| `Set-SfosLAG` | Updates a link aggregation group. |
+| `Remove-SfosLAG` | Removes a link aggregation group. |
+| `New-SfosLAGMSSConfiguration` | Builds an MSS configuration for LAG cmdlets. |
+| `Get-SfosBridgePair` | Retrieves bridge pair objects. |
+| `New-SfosBridgePair` | Creates a bridge pair. |
+| `Set-SfosBridgePair` | Updates a bridge pair. |
+| `Remove-SfosBridgePair` | Removes a bridge pair. |
+| `New-SfosBridgePairMSSConfiguration` | Builds an MSS configuration for bridge pair cmdlets. |
+| `Get-SfosAlias` | Retrieves interface alias objects. |
+| `New-SfosAlias` | Creates an interface alias. |
+| `Set-SfosAlias` | Updates an interface alias. |
+| `Remove-SfosAlias` | Removes an interface alias. |
+| `Get-SfosCellularWAN` | Reads the cellular WAN modem state. |
+| `Set-SfosCellularWAN` | Updates the cellular WAN modem state. |
+| `Get-SfosIPTunnel` | Retrieves IP tunnel objects. |
+| `New-SfosIPTunnel` | Creates an IP tunnel. |
+| `Set-SfosIPTunnel` | Updates an IP tunnel. |
+| `Remove-SfosIPTunnel` | Removes an IP tunnel. |
+| `Get-SfosGreTunnel` | Retrieves GRE tunnel objects. |
+| `New-SfosGreTunnel` | Creates a GRE tunnel. |
+| `Set-SfosGreTunnel` | Updates a GRE tunnel. |
+| `Remove-SfosGreTunnel` | Removes a GRE tunnel. |
+| `Get-SfosGreRoute` | Retrieves GRE route objects. |
+| `New-SfosGreRoute` | Creates a GRE route. |
+| `Set-SfosGreRoute` | Updates a GRE route. |
+| `Remove-SfosGreRoute` | Removes a GRE route. |
+| `Get-SfosTAP` | Retrieves TAP interface objects. |
+| `New-SfosTAP` | Configures a TAP interface. |
+| `Set-SfosTAP` | Updates a TAP interface. |
+| `Remove-SfosTAP` | Removes a TAP interface configuration. |
+| `Get-SfosREDDevice` | Retrieves RED device objects. |
+| `New-SfosREDDevice` | Creates a RED device. |
+| `Set-SfosREDDevice` | Updates a RED device. |
+| `Remove-SfosREDDevice` | Removes a RED device. |
+| `Get-SfosWiFi6Interface` | Retrieves WiFi 6 interface objects. |
+| `New-SfosWiFi6Interface` | Creates a WiFi 6 interface. |
+| `Set-SfosWiFi6Interface` | Updates a WiFi 6 interface. |
+| `Remove-SfosWiFi6Interface` | Removes a WiFi 6 interface. |
+| `Get-SfosZone` | Retrieves zone objects. |
+| `New-SfosZone` | Creates a zone. |
+| `Set-SfosZone` | Updates a zone. |
+| `Remove-SfosZone` | Removes a zone. |
+| `Get-SfosGatewayConfiguration` | Reads the device-wide gateway configuration. |
+| `Set-SfosGatewayConfiguration` | Updates the device-wide gateway configuration. |
+| `New-SfosGatewayConfigurationGateway` | Builds a gateway entry for `Set-SfosGatewayConfiguration`. |
+| `Get-SfosARPConfiguration` | Reads the ARP cache configuration. |
+| `Set-SfosARPConfiguration` | Updates the ARP cache configuration. |
+| `Get-SfosStaticARP` | Retrieves static ARP entries. |
+| `New-SfosStaticARP` | Creates a static ARP entry. |
+| `Set-SfosStaticARP` | Updates a static ARP entry. |
+| `Remove-SfosStaticARP` | Removes a static ARP entry. |
+| `Get-SfosRouterAdvertisement` | Retrieves router advertisement configurations. |
+| `New-SfosRouterAdvertisement` | Creates a router advertisement configuration. |
+| `Set-SfosRouterAdvertisement` | Updates a router advertisement configuration. |
+| `Remove-SfosRouterAdvertisement` | Removes a router advertisement configuration. |
+| `Get-SfosDNS` | Reads the DNS resolver settings. |
+| `Set-SfosDNS` | Updates the DNS resolver settings. |
+| `New-SfosDNSIPv4Settings` | Builds the IPv4 settings object for `Set-SfosDNS`. |
+| `New-SfosDNSIPv6Settings` | Builds the IPv6 settings object for `Set-SfosDNS`. |
+| `Get-SfosDNSHostEntry` | Retrieves DNS host entries. |
+| `New-SfosDNSHostEntry` | Creates a DNS host entry. |
+| `Set-SfosDNSHostEntry` | Updates a DNS host entry. |
+| `Remove-SfosDNSHostEntry` | Removes a DNS host entry. |
+| `New-SfosDNSHostEntryAddress` | Builds an address entry for DNS host entry cmdlets. |
+| `Add-SfosDNSHostEntryMember` | Adds an address to a DNS host entry. |
+| `Remove-SfosDNSHostEntryMember` | Removes an address from a DNS host entry. |
+| `Get-SfosDNSRequestRoute` | Retrieves DNS request routes. |
+| `New-SfosDNSRequestRoute` | Creates a DNS request route. |
+| `Set-SfosDNSRequestRoute` | Updates a DNS request route. |
+| `Remove-SfosDNSRequestRoute` | Removes a DNS request route. |
+| `Add-SfosDNSRequestRouteMember` | Adds a target server to a DNS request route. |
+| `Remove-SfosDNSRequestRouteMember` | Removes a target server from a DNS request route. |
+| `Get-SfosDynamicDNS` | Retrieves dynamic DNS configurations. |
+| `New-SfosDynamicDNS` | Creates a dynamic DNS configuration. |
+| `Set-SfosDynamicDNS` | Updates a dynamic DNS configuration. |
+| `Remove-SfosDynamicDNS` | Removes a dynamic DNS configuration. |
+| `Get-SfosDHCPServer` | Retrieves DHCP server objects. |
+| `New-SfosDHCPServer` | Creates a DHCP server. |
+| `Set-SfosDHCPServer` | Updates a DHCP server. |
+| `Remove-SfosDHCPServer` | Removes a DHCP server. |
+| `Set-SfosDHCPServerStatus` | Switches an existing DHCP server on or off. |
+| `Get-SfosDHCPServerIpv6` | Retrieves IPv6 DHCP server objects. |
+| `New-SfosDHCPServerIpv6` | Creates an IPv6 DHCP server. |
+| `Set-SfosDHCPServerIpv6` | Updates an IPv6 DHCP server. |
+| `Remove-SfosDHCPServerIpv6` | Removes an IPv6 DHCP server. |
+| `Get-SfosDHCPRelay` | Retrieves DHCP relay objects. |
+| `New-SfosDHCPRelay` | Creates a DHCP relay. |
+| `Set-SfosDHCPRelay` | Updates a DHCP relay. |
+| `Remove-SfosDHCPRelay` | Removes a DHCP relay. |
 
-```powershell
-New-SfosZone -Name "Extranet" -Type DMZ -Description "Partner extranet" -WhatIf
+## Limitations
 
-# Inspect the ApplianceAccess sub-object before changing anything else on the zone
-(Get-SfosZone -NameLike "LAN").ApplianceAccess
+Physical ports cannot be created or removed through this API; only `Get-SfosInterface` and
+`Set-SfosInterface` exist.
 
-# Only Description changes - ApplianceAccess and every other field is read back and resent
-Set-SfosZone -Name "Extranet" -Description "Updated partner extranet" -WhatIf
-```
+`Remove-SfosVLAN` by `Name` alone does not remove anything; a VLAN is identified for removal
+by the firewall-computed `Hardware` value, so the cmdlet resolves `Interface`/`VLANID` to
+`Hardware` first and confirms the object is gone afterwards.
 
-### Static ARP
+An interface alias has no caller-supplied name - the firewall derives one as
+`Interface:Index`. `New-SfosAlias` has no `-Name` parameter; use `Get-SfosAlias` to find the
+generated name for a later `Set-`/`Remove-` call.
 
-```powershell
-New-SfosStaticARP -IPAddress "192.0.2.10" -MACAddress "00:11:22:33:44:55" -Interface "Port1" -WhatIf
+`DNSRequestRoute` target servers must name an existing IP host object of type `IP`, not a
+raw IP address.
 
-# See Known Firmware Limitations: there is no update for this entity - this cmdlet removes
-# and recreates the entry, with a brief gap between the two calls
-Set-SfosStaticARP -IPAddress "192.0.2.10" -MACAddress "00:11:22:33:44:66" -WhatIf
+`New-SfosTAP` with an unrecognised `-Hardware` value does not create anything and does not
+report an error; check with `Get-SfosTAP` afterwards.
 
-Remove-SfosStaticARP -IPAddress "192.0.2.10" -WhatIf
-```
+`StaticARP` has no in-place update; `Set-SfosStaticARP` removes the existing entry and
+recreates it, with a brief gap in which the mapping does not exist.
 
-### DNS Host Entries
+`New-SfosIPTunnel` requires `-Hardware`. `Remove-SfosIPTunnel` needs both `Name` and
+`Hardware`; when `-Hardware` is not supplied, the cmdlet resolves it through
+`Get-SfosIPTunnel` first.
 
-```powershell
-# Build one or more addresses, then create the entry
-$address = New-SfosDNSHostEntryAddress -EntryType Manual -IPFamily IPv4 -IPAddress "10.0.0.10"
-New-SfosDNSHostEntry -HostName "server.example.com" -Address $address -WhatIf
+`BridgePair`'s MSS override parameter is `-Override`, not `-OverrideMSS` as on `Interface`,
+`VLAN` and `LAG`.
 
-# Add a second address without disturbing the first (member cmdlets read-merge-write)
-$second = New-SfosDNSHostEntryAddress -EntryType Manual -IPFamily IPv4 -IPAddress "10.0.0.11"
-Add-SfosDNSHostEntryMember -HostName "server.example.com" -Address $second -WhatIf
-```
+`GatewayConfiguration` is a singleton with only `Get-`/`Set-` cmdlets; there is no `New-` or
+`Remove-`.
 
-### DNS Request Routes
+`Get-SfosZone -TypeLike` filters client-side; the firewall's own filter on `Type` returns no
+matches at all rather than the full set.
 
-See Known Firmware Limitations: despite the documentation, `-TargetServer` does not accept a
-raw IP address - it must name an existing `IPHost` object of type `IP` (from
-`SophosFirewall.HostsAndServices`).
+`New-`/`Set-SfosGreRoute` use `-HostAddress` (alias `-Host`) instead of `-Host`, because
+`$Host` is an automatic PowerShell variable and a parameter of that name would shadow it.
 
-```powershell
-New-SfosDNSRequestRoute -DomainName "internal.example" -TargetServer "Internal-DNS-Server" -WhatIf
-
-Set-SfosDNSRequestRoute -DomainName "internal.example" -TargetServer "Internal-DNS-Server", "Internal-DNS-Server-2" -WhatIf
-```
-
-### Gateway Configuration
-
-A singleton: only `Get-`/`Set-` exist, no `New-`/`Remove-` (see Known Firmware Limitations).
-`Set-SfosGatewayConfiguration` reads the current gateway list first, so a field left unset is
-preserved rather than cleared.
-
-```powershell
-Get-SfosGatewayConfiguration
-
-# Change only the failover timeout - the existing gateway list is resent unchanged
-Set-SfosGatewayConfiguration -GatewayFailoverTimeout 30 -WhatIf
-```
-
-### Tunnels
-
-`New-SfosIPTunnel` requires `-Hardware`; removal is keyed on `-Name` and (if not supplied,
-resolved automatically via a lookup) `-Hardware`.
-
-```powershell
-New-SfosIPTunnel -Name "IPv6-Tunnel" -Hardware "Port2" -TunnelType 6in4 -Zone "WAN" `
-    -LocalEndPoint "203.0.113.1" -RemoteEndPoint "203.0.113.2" -WhatIf
-
-Remove-SfosIPTunnel -Name "IPv6-Tunnel" -WhatIf
-```
-
-`GreTunnel`, `GreRoute` and `TAP` are documentation-faithful but unverified against hardware
-(see below); `-HostAddress` (alias `-Host`) is deliberately not `-Host`, which would shadow
-PowerShell's automatic `$Host` variable.
-
-```powershell
-New-SfosGreRoute -HostAddress "198.51.100.0" -Netmask "255.255.255.0" -TunnelName "GRE1" -WhatIf
-
-New-SfosTAP -Hardware "Port3" -WhatIf
-```
-
-## Available Cmdlets (100 total)
-
-### Interface (5 functions)
-- `Get-SfosInterface` - Retrieve Interface objects
-- `Set-SfosInterface` - Update a physical interface (no New-/Remove-, ports are fixed hardware)
-- `New-SfosInterfaceIPv4Configuration` - Build an IPv4Configuration object for Set-SfosInterface (no API call)
-- `New-SfosInterfaceIPv6Configuration` - Build an IPv6Configuration object for Set-SfosInterface (no API call)
-- `New-SfosInterfaceMSSConfiguration` - Build an MSS object for Set-SfosInterface (no API call)
-
-### VLAN (4 functions)
-- `Get-SfosVLAN` - Retrieve VLAN objects
-- `New-SfosVLAN` - Create a new VLAN sub-interface
-- `Set-SfosVLAN` - Update an existing VLAN
-- `Remove-SfosVLAN` - Delete a VLAN (resolves the Hardware value first, see below)
-
-### LAG (5 functions, not verified against hardware)
-- `Get-SfosLAG` - Retrieve LAG objects
-- `New-SfosLAG` - Create a new link aggregation group
-- `Set-SfosLAG` - Update an existing LAG
-- `Remove-SfosLAG` - Delete a LAG
-- `New-SfosLAGMSSConfiguration` - Build an MSS object for LAG cmdlets (no API call)
-
-### BridgePair (5 functions, not verified against hardware)
-- `Get-SfosBridgePair` - Retrieve BridgePair objects
-- `New-SfosBridgePair` - Create a new bridge pair
-- `Set-SfosBridgePair` - Update an existing bridge pair
-- `Remove-SfosBridgePair` - Delete a bridge pair
-- `New-SfosBridgePairMSSConfiguration` - Build an MSS object for BridgePair cmdlets (no API call, `-Override` not `-OverrideMSS`, see below)
-
-### Alias (4 functions)
-- `Get-SfosAlias` - Retrieve Alias objects
-- `New-SfosAlias` - Create a new interface alias (no `-Name`, see below)
-- `Set-SfosAlias` - Update an existing alias
-- `Remove-SfosAlias` - Delete an alias
-
-### CellularWAN (2 functions, 1 Get/Set pair)
-- `Get-SfosCellularWAN` / `Set-SfosCellularWAN` - Cellular WAN modem action state (singleton)
-
-### IPTunnel (4 functions)
-- `Get-SfosIPTunnel` - Retrieve IPTunnel objects
-- `New-SfosIPTunnel` - Create a new IP tunnel (`-Hardware` mandatory)
-- `Set-SfosIPTunnel` - Update an existing IP tunnel
-- `Remove-SfosIPTunnel` - Delete an IP tunnel (keyed on Name and Hardware, see below)
-
-### GreTunnel (4 functions, not verified against hardware)
-- `Get-SfosGreTunnel` - Retrieve GreTunnel objects
-- `New-SfosGreTunnel` - Create a new GRE tunnel
-- `Set-SfosGreTunnel` - Update an existing GRE tunnel
-- `Remove-SfosGreTunnel` - Delete a GRE tunnel (no delete operation is documented for this entity)
-
-### GreRoute (4 functions, not verified against hardware)
-- `Get-SfosGreRoute` - Retrieve GreRoute objects
-- `New-SfosGreRoute` - Create a new GRE route (`-HostAddress`, alias `-Host`, see below)
-- `Set-SfosGreRoute` - Replace an existing GRE route (remove-then-add, no documented update operation)
-- `Remove-SfosGreRoute` - Delete a GRE route
-
-### TAP (4 functions, not verified against hardware)
-- `Get-SfosTAP` - Retrieve TAP objects
-- `New-SfosTAP` - Configure a TAP interface (an unknown `-Hardware` answers 200 and creates nothing, see below)
-- `Set-SfosTAP` - Update an existing TAP interface
-- `Remove-SfosTAP` - Remove a TAP interface configuration
-
-### REDDevice (4 functions, not verified against hardware)
-- `Get-SfosREDDevice` - Retrieve REDDevice objects
-- `New-SfosREDDevice` - Create a new RED device
-- `Set-SfosREDDevice` - Update an existing RED device
-- `Remove-SfosREDDevice` - Delete a RED device
-
-### WiFi6Interface (4 functions, not verified against hardware)
-- `Get-SfosWiFi6Interface` - Retrieve WiFi6Interface objects
-- `New-SfosWiFi6Interface` - Create a new WiFi 6 interface
-- `Set-SfosWiFi6Interface` - Update an existing WiFi 6 interface
-- `Remove-SfosWiFi6Interface` - Delete a WiFi 6 interface
-
-### Zone (4 functions, write paths not verified against hardware)
-- `Get-SfosZone` - Retrieve Zone objects (`-TypeLike` is filtered client-side, see below)
-- `New-SfosZone` - Create a new zone
-- `Set-SfosZone` - Update an existing zone
-- `Remove-SfosZone` - Delete a zone
-
-### GatewayConfiguration (3 functions, write path not verified against hardware)
-- `Get-SfosGatewayConfiguration` - Retrieve the GatewayConfiguration singleton
-- `Set-SfosGatewayConfiguration` - Update the GatewayConfiguration singleton (no New-/Remove-, see below)
-- `New-SfosGatewayConfigurationGateway` - Build a Gateway entry for Set-SfosGatewayConfiguration (no API call)
-
-### ARPConfiguration (2 functions, 1 Get/Set pair)
-- `Get-SfosARPConfiguration` / `Set-SfosARPConfiguration` - ARP cache configuration (singleton)
-
-### StaticARP (4 functions)
-- `Get-SfosStaticARP` - Retrieve StaticARP objects
-- `New-SfosStaticARP` - Create a new static ARP entry
-- `Set-SfosStaticARP` - "Update" a static ARP entry (remove-then-add, see below)
-- `Remove-SfosStaticARP` - Delete a static ARP entry
-
-### RouterAdvertisement (4 functions, write paths not verified against hardware)
-- `Get-SfosRouterAdvertisement` - Retrieve RouterAdvertisement objects
-- `New-SfosRouterAdvertisement` - Create a new router advertisement configuration
-- `Set-SfosRouterAdvertisement` - Update an existing router advertisement configuration
-- `Remove-SfosRouterAdvertisement` - Delete a router advertisement configuration
-
-### DNS (4 functions, write path not verified against hardware)
-- `Get-SfosDNS` - Retrieve the DNS resolver settings singleton
-- `Set-SfosDNS` - Update the DNS resolver settings singleton
-- `New-SfosDNSIPv4Settings` - Build the IPv4Settings object for Set-SfosDNS (no API call)
-- `New-SfosDNSIPv6Settings` - Build the IPv6Settings object for Set-SfosDNS (no API call)
-
-### DNSHostEntry (7 functions)
-- `Get-SfosDNSHostEntry` - Retrieve DNSHostEntry objects
-- `New-SfosDNSHostEntry` - Create a new DNS host entry
-- `Set-SfosDNSHostEntry` - Update an existing DNS host entry
-- `Remove-SfosDNSHostEntry` - Delete a DNS host entry
-- `New-SfosDNSHostEntryAddress` - Build an Address entry for DNSHostEntry cmdlets (no API call)
-- `Add-SfosDNSHostEntryMember` - Add an address to an existing DNS host entry
-- `Remove-SfosDNSHostEntryMember` - Remove an address from an existing DNS host entry
-
-### DNSRequestRoute (6 functions)
-- `Get-SfosDNSRequestRoute` - Retrieve DNSRequestRoute objects
-- `New-SfosDNSRequestRoute` - Create a new DNS request route (`-TargetServer` needs IPHost names, see below)
-- `Set-SfosDNSRequestRoute` - Update an existing DNS request route
-- `Remove-SfosDNSRequestRoute` - Delete a DNS request route
-- `Add-SfosDNSRequestRouteMember` - Add a target server to an existing route
-- `Remove-SfosDNSRequestRouteMember` - Remove a target server from an existing route
-
-### DynamicDNS (4 functions, write paths not verified against hardware)
-- `Get-SfosDynamicDNS` - Retrieve DynamicDNS objects
-- `New-SfosDynamicDNS` - Create a new dynamic DNS configuration
-- `Set-SfosDynamicDNS` - Update an existing dynamic DNS configuration
-- `Remove-SfosDynamicDNS` - Delete a dynamic DNS configuration
-
-### DHCPServer (4 functions, write paths not verified against hardware)
-- `Get-SfosDHCPServer` - Retrieve DHCPServer objects
-- `New-SfosDHCPServer` - Create a new DHCP server
-- `Set-SfosDHCPServer` - Update an existing DHCP server
-- `Remove-SfosDHCPServer` - Delete a DHCP server
-
-### DHCPServerStatus (1 function, not verified against hardware)
-- `Set-SfosDHCPServerStatus` - Switch an existing DHCP server ON or OFF (no separate Get-, status is read via Get-SfosDHCPServer)
-
-### DHCPServerIpv6 (4 functions, write paths not verified against hardware)
-- `Get-SfosDHCPServerIpv6` - Retrieve DHCPServerIpv6 objects
-- `New-SfosDHCPServerIpv6` - Create a new IPv6 DHCP server
-- `Set-SfosDHCPServerIpv6` - Update an existing IPv6 DHCP server
-- `Remove-SfosDHCPServerIpv6` - Delete an IPv6 DHCP server
-
-### DHCPRelay (4 functions, write paths not verified against hardware)
-- `Get-SfosDHCPRelay` - Retrieve DHCPRelay objects
-- `New-SfosDHCPRelay` - Create a new DHCP relay
-- `Set-SfosDHCPRelay` - Update an existing DHCP relay
-- `Remove-SfosDHCPRelay` - Delete a DHCP relay
-
-## Known Firmware Limitations (SFOS 22.0)
-
-Measured against a live SFOS 22.0 appliance unless marked `[doc]`. Every read-modify-write
-`Set-*` in this module exists because of the general finding that an update replaces the
-whole entity - see the points below for the exceptions and additional defects found on top
-of that.
-
-- **Eight documentation folders carry a different XML element name than their folder name.**
-  `WWAN` (folder) is `CellularWAN` (element), `ARPNeighbour` is `ARPConfiguration`, `ARP` is
-  `StaticARP`, `Gateway` is `GatewayConfiguration`, `DHCPIPV6Server` is `DHCPServerIpv6`,
-  `TapInterfaceConfiguration` is `TAP`, `GRETunnel` is `GreTunnel`, `GRERoute` is `GreRoute`.
-  The last two differ only in capitalisation - sending the folder's spelling for the root
-  element answers `529 Input request module is Invalid`.
-- **`Remove-SfosVLAN` by `Name` answers 200 and deletes nothing.** Only the firewall-computed
-  `Hardware` value (`<Interface>.<VLANID>`) identifies a VLAN for removal. The cmdlet resolves
-  `Hardware` from `Interface`/`VLANID` first, sends the delete keyed on `Hardware`, and
-  re-reads the object afterwards to confirm it is actually gone rather than trusting the
-  status code.
-- **An Alias has no caller-supplied name.** The firewall derives it as `<Interface>:<Index>`;
-  `New-SfosAlias` therefore has no `-Name` parameter, and `Set-`/`Remove-SfosAlias` identify
-  the object by the generated name returned from `Get-SfosAlias`.
-- **`DNSRequestRoute` target servers must name an existing `IPHost` object of type `IP`.** A
-  raw IP address, a resolvable-looking host name, and an `IPHost` of `HostType Network` were
-  all rejected identically. The documentation states the opposite.
-- **`New-SfosTAP` with an unknown `-Hardware` answers 200 and creates nothing.** There is no
-  distinguishing error; the only way to notice is that a subsequent `Get-SfosTAP` does not
-  show the object.
-- **`StaticARP` does not support `<Set operation="update">` at all.** Every attempt answers
-  `500 - Operation could not be performed on Entity`, including a byte-for-byte resend of a
-  preceding `Get`. `Set-SfosStaticARP` removes the existing entry and recreates it instead,
-  with a brief gap in which the mapping does not exist; if the recreate fails after the
-  remove succeeds, the original entry is gone until restored manually.
-- **`IPTunnel` needs `-Hardware` on create and both `Name` and `Hardware` on remove.** The
-  server-side filter on this entity answers `Transaction fail` rather than a normal result,
-  so `Get-SfosIPTunnel` filters client-side only; `Remove-SfosIPTunnel` resolves `Hardware`
-  automatically via `Get-SfosIPTunnel` when the caller does not supply it.
-- **`BridgePair`'s MSS child element is `<Override>`, not `<OverrideMSS>`.** `Interface`,
-  `VLAN` and `LAG` all use `<OverrideMSS>`; `New-SfosBridgePairMSSConfiguration` uses
-  `-Override` to match the wire element actually used by this entity `[doc]`.
-- **`GatewayConfiguration` documents only an update operation.** There is no add or delete for
-  this entity, so this module ships no `New-`/`Remove-SfosGatewayConfiguration` `[doc]`.
-- **`Zone`'s server-side filter on `Type` returns zero matches instead of every zone.**
-  `Get-SfosZone -TypeLike` is therefore applied client-side only, same as every other
-  unsupported filter key (the project build rules, section 6).
-- **`New-`/`Set-SfosGreRoute` use `-HostAddress` (alias `-Host`).** `$Host` is an automatic
-  PowerShell variable holding the console host; a parameter literally named `-Host` would
-  shadow it inside the function. The wire element stays `<Host>`.
-
-## Not verified against hardware
-
-The following are implemented strictly to the documented request shape and checked at the
-XML level (request captured and inspected, in several cases via `-WhatIf`), but never executed
-against a live appliance:
-
-- **`LAG`, `BridgePair`** - no write test was run; a LAG would absorb a member port and dissolve
-  its IP configuration, and the only lab interfaces available carry live session traffic.
-- **`WiFi6Interface`** - the lab appliance reports `IS_WIFI6="0"`; there is no WiFi 6 hardware
-  to test against.
-- **`REDDevice`, `GreTunnel`, `GreRoute`, `TAP`** - no matching hardware/peer was available in
-  the lab; `GreTunnel` requires a `LocalGateway` naming an existing local interface, which
-  could not be satisfied.
-- **Every write path (`New-`/`Set-`/`Remove-`) of `Interface`, `Zone`, `GatewayConfiguration`,
-  `DNS`, `DHCPServer`, `DHCPServerStatus`, `DHCPServerIpv6`, `DHCPRelay`,
-  `RouterAdvertisement` and `DynamicDNS`** - these carry the management path, DNS resolution
-  or DHCP service of the lab appliance itself; a wrong write risked losing the only access
-  path to the device, so they were deliberately not exercised. `Get-*` for all of these was
-  run live and works.
-
-## Error Handling
-
-```powershell
-try {
-    # Connect with proper error handling
-    Connect-SfosFirewall -Firewall "192.168.1.1" -Port 4444 -Credential (Get-Credential) -SkipCertificateCheck
-
-    # Retrieve a specific VLAN with error handling
-    $vlan = Get-SfosVLAN -NameLike "DMZ-VLAN" -ErrorAction Stop
-    Write-Output "Found VLAN: $($vlan.Name) - Interface: $($vlan.Interface), VLANID: $($vlan.VLANID)"
-} catch {
-    Write-Error "Failed to retrieve VLAN: $_"
-    $_.Exception
-} finally {
-    Disconnect-SfosFirewall
-}
-```
-
-## Troubleshooting
-
-- **Connection Issues**: Ensure firewall IP, port (4444 default), and credentials are correct
-- **Object Not Found**: Use `Get-SfosInterface`/`Get-SfosVLAN`/`Get-SfosZone` etc. to list all available objects
-- **Permission Denied**: Verify API user has proper role assignments on the firewall
-- **Invalid Parameters**: Check exact parameter names - functions are entity-specific (Interface, VLAN, Zone, DNSHostEntry, ...)
-- **`Remove-SfosVLAN` appears to succeed but the VLAN is still there**: See Known Firmware Limitations - removal by `Name` alone does nothing; the cmdlet resolves and verifies `Hardware` internally, so calling it with `-Interface`/`-VLANID` as documented is required
-- **`New-SfosAlias` has no `-Name` parameter**: See Known Firmware Limitations - the firewall assigns the name; read it back with `Get-SfosAlias`
-- **`New-SfosDNSRequestRoute`/`Set-SfosDNSRequestRoute` rejects a target server**: See Known Firmware Limitations - pass an existing `IPHost` object name, not an IP address
-- **`New-SfosTAP` reports success but nothing appears**: See Known Firmware Limitations - an unrecognised `-Hardware` value is silently ignored by the firewall
-
-## See Also
-
-- [SophosFirewall.Core](../SophosFirewall.Core/README.md) - Core connectivity functions (Connect-SfosFirewall, Disconnect-SfosFirewall, Invoke-SfosApi)
-- [Sophos API Documentation](https://docs.sophos.com/nsg/sophos-firewall/22.0/api/) - Official Sophos firewall REST API reference
-- [PowerShell Gallery](https://www.powershellgallery.com/packages/SophosFirewall.Network) - Download module from PSGallery
-
-## Author
-
-Jan Weis - www.it-explorations.de
+`GreTunnel` has no delete operation documented for this entity in the vendor API.
 
 ## License
+
+MIT License - Copyright (c) 2025 Jan Weis
+
+## Links
+
+- [SophosFirewall.Core](../SophosFirewall.Core/README.md)
+- [SophosFirewall.HostsAndServices](../SophosFirewall.HostsAndServices/README.md)
+- [Sophos Firewall API Documentation](https://docs.sophos.com/nsg/sophos-firewall/22.0/api/)

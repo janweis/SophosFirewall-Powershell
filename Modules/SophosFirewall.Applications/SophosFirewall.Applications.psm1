@@ -24,41 +24,32 @@
 
 #region ApplicationFilterPolicy / ApplicationObject shared helper
 
+<#
+.SYNOPSIS
+    Builds the shared selection-list XML used by ApplicationFilterPolicy rules and application
+    objects.
+
+.DESCRIPTION
+    Builds the CategoryList, RiskList, CharacteristicsList, TechnologyList and ApplicationList
+    elements that appear both inside an ApplicationFilterPolicy rule and inside a standalone
+    application object. The two entities share this nested list shape.
+
+.PARAMETER Category
+    Category names to include in CategoryList.
+
+.PARAMETER Risk
+    Risk level names to include in RiskList.
+
+.PARAMETER Characteristics
+    Characteristic names to include in CharacteristicsList.
+
+.PARAMETER Technology
+    Technology names to include in TechnologyList.
+
+.PARAMETER Application
+    Application names to include in ApplicationList.
+#>
 function ConvertTo-SfosAppFilterListXml {
-    # Internal helper, not exported. Builds the shared CategoryList/RiskList/
-    # CharacteristicsList/TechnologyList/ClassificationList/ApplicationList block used both
-    # inside an ApplicationFilterPolicy Rule and inside a standalone ApplicationObject - the
-    # two entities share this exact nested list shape [doc: both sample XMLs use identical
-    # *List wrappers].
-    #
-    # IMPORTANT (measured against the lab firewall, both entities): CategoryList, RiskList,
-    # CharacteristicsList, TechnologyList and ClassificationList are NOT settable data - they
-    # are read-only, server-computed tags:
-    #   - When -SelectAllRule is 'Disable' (an explicit -Application list is used), the
-    #     firewall ignores whatever is sent for these five lists and instead recomputes them
-    #     from the real signature metadata of the applications actually in ApplicationList.
-    #     Sending a fabricated Category/Risk/Characteristics/Technology value has zero effect
-    #     - it is silently replaced, not rejected (200, no error). ClassificationList was never
-    #     observed populated in this state (it appears to require the application to carry an
-    #     assignment from ApplicationClassificationAssignment, an entity outside the scope of
-    #     this module group - not investigated further here).
-    #   - When -SelectAllRule is 'Enable' and CategoryList/RiskList/CharacteristicsList/
-    #     TechnologyList carries at least one value the firewall recognizes, ApplicationList is
-    #     itself recomputed as every application matching that criterion (can run into the
-    #     hundreds) - whatever was sent in -Application is discarded, not merged.
-    #   - When -SelectAllRule is 'Enable' but none of those criteria lists contains a value the
-    #     firewall recognizes (an invented category name, for example), they are silently
-    #     dropped entirely (no error) and -Application is kept exactly as sent.
-    #   - When -SelectAllRule is 'Disable' and -Application is NOT sent at all, the entire Rule
-    #     is silently dropped from the policy's RuleList on write (200, but the rule vanishes) -
-    #     an explicit -Application list is mandatory whenever -SelectAllRule is 'Disable'.
-    # This helper therefore still emits CategoryList/RiskList/CharacteristicsList/
-    # TechnologyList exactly as the caller supplied them (so the 'Enable' + criteria selection
-    # mode keeps working, which DOES take effect), but every function that surfaces these
-    # parameters documents in its own help that they are ignored/overwritten in 'Disable' mode.
-    # ClassificationList is intentionally never emitted - it was never observed as a working
-    # write path in either mode and inventing an untested element risks the CountryHostGroup
-    # class of defect.
     [CmdletBinding()]
     [OutputType([string])]
     param(
@@ -114,10 +105,19 @@ function ConvertTo-SfosAppFilterListXml {
 
 #region ApplicationFilterPolicy
 
+<#
+.SYNOPSIS
+    Builds one rule element for an application filter policy.
+
+.DESCRIPTION
+    Builds a single Rule element for an ApplicationFilterPolicy's RuleList, using
+    ConvertTo-SfosAppFilterListXml for the nested selection lists.
+
+.PARAMETER Rule
+    The rule object to convert, with the properties SelectAllRule, CategoryList, RiskList,
+    CharacteristicsList, TechnologyList, ApplicationList, SmartFilter, Action and Schedule.
+#>
 function ConvertTo-SfosApplicationFilterPolicyRuleXml {
-    # Internal helper, not exported. Builds one <Rule> element for an ApplicationFilterPolicy's
-    # RuleList, using the shared ConvertTo-SfosAppFilterListXml helper for the six nested
-    # selection lists.
     [CmdletBinding()]
     [OutputType([string])]
     param(
@@ -137,18 +137,25 @@ function ConvertTo-SfosApplicationFilterPolicyRuleXml {
     return "<Rule><SelectAllRule>$selectAllEsc</SelectAllRule>$listXml<SmartFilter>$smartFilterEsc</SmartFilter><Action>$actionEsc</Action><Schedule>$scheduleEsc</Schedule></Rule>"
 }
 
+<#
+.SYNOPSIS
+    Builds the Set request body for an application filter policy.
+
+.DESCRIPTION
+    Builds the complete inner XML for a Set operation on an ApplicationFilterPolicy entity, so
+    New-, Set-SfosApplicationFilterPolicy, Add-SfosApplicationFilterPolicyRule and
+    Remove-SfosApplicationFilterPolicyRule all send the same entity shape. The firewall replaces
+    the whole entity on update, so the caller merges every field it wants to keep into -Policy
+    before calling this function. The Template field is never sent; the firewall rejects it.
+
+.PARAMETER Operation
+    The Set operation attribute, either 'add' or 'update'.
+
+.PARAMETER Policy
+    The policy object to convert, with the properties Name, Description, DefaultAction,
+    MicroAppSupport and RuleList.
+#>
 function ConvertTo-SfosApplicationFilterPolicyEntityXml {
-    # Internal helper, not exported. Builds the <Set> inner XML for an ApplicationFilterPolicy
-    # entity, so New-, Set-SfosApplicationFilterPolicy, Add-SfosApplicationFilterPolicyRule and
-    # Remove-SfosApplicationFilterPolicyRule all send an identical, complete entity body. SFOS
-    # replaces the whole entity on <Set operation="update">, so the caller merges every field it
-    # wants preserved into -Policy before calling this function; nothing is read back here.
-    #
-    # Deliberately never emits <Template> - it appears only in the vendor sample XML (with the
-    # comment "if set, ignores DefaultAction/RuleList"), has no row in the attribute table, and
-    # sending it - with the documented value 'AllowAll' - is rejected outright with a 501 naming
-    # /ApplicationFilterPolicy/Template as invalid [measured against the lab firewall]. Same
-    # finding, same non-parameter decision as IPSPolicy's Template field in the sibling module.
     [CmdletBinding()]
     [OutputType([string])]
     param(
@@ -185,89 +192,90 @@ function ConvertTo-SfosApplicationFilterPolicyEntityXml {
 }
 
 <#
-        .SYNOPSIS
-        Retrieves ApplicationFilterPolicy objects from the Sophos Firewall.
+.SYNOPSIS
+    Retrieves application filter policy objects from a Sophos Firewall.
 
-        .DESCRIPTION
-        Queries the Sophos Firewall XML API for ApplicationFilterPolicy objects (PROTECT >
-        Applications > "APP Filter Policy" in the web admin - the menu label drops the word
-        "Filter" and changes casing versus the wire element name, a doc-only naming
-        inconsistency [doc]). By default the cmdlet returns PowerShell-friendly objects. Use
-        -AsXml to return the raw XML nodes.
+.DESCRIPTION
+    Returns application filter policy objects. An application filter policy is a set of rules
+    that allow, deny or warn on application traffic, and is applied to firewall rules. Each
+    returned rule has the same shape that New-SfosApplicationFilterPolicyRule builds, so a rule
+    read with this cmdlet can be reused directly with Add-SfosApplicationFilterPolicyRule or
+    passed to Set-SfosApplicationFilterPolicy.
 
-        Each Rule in the returned RuleList mirrors the shape produced by
-        New-SfosApplicationFilterPolicyRule, so a rule read back from this cmdlet can be reused
-        directly with Add-SfosApplicationFilterPolicyRule or passed to
-        Set-SfosApplicationFilterPolicy -Rule.
+    The firewall ships 7 built-in policies ('Allow All', 'Deny All' and five 'Block ...'
+    policies). Treat them as read-only; Set-SfosApplicationFilterPolicy does not warn before
+    overwriting one.
 
-        There are 7 factory-default policies on SFOS 22.0 ('Allow All', 'Deny All' and five
-        'Block ...' policies). Treat them as read-only in your own scripts -
-        Set-SfosApplicationFilterPolicy has no protection against overwriting one.
+    The cmdlet only reads; nothing on the firewall is changed. It needs an open connection from
+    Connect-SfosFirewall, or the connection parameters supplied directly.
 
-        .PARAMETER NameLike
-        Optional name filter. In Sophos SFOS, 'like' behaves as a substring match. Sent to the
-        firewall as the server-side filter and re-applied client-side, per the project's
-        filtering rules.
+.PARAMETER NameLike
+    Optional. Returns only policies whose name contains the given text anywhere. This is a
+    substring match, not a wildcard pattern. If omitted, the name is not used to filter.
 
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+.PARAMETER Firewall
+    Optional. Host name or IP address of the firewall. If omitted, the value from the current
+    connection is used.
 
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the
-        stored connection context.
+.PARAMETER Port
+    Optional. TCP port of the management API, usually 4444. If omitted, the value from the
+    current connection is used.
 
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use
-        the stored connection context.
+.PARAMETER Username
+    Optional. User name for the API login. The account needs read permission for application
+    filter policies. If omitted, the value from the current connection is used.
 
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored
-        connection context.
+.PARAMETER Password
+    Optional. Password for the API login, as a SecureString. If omitted, the value from the
+    current connection is used.
 
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored
-        connection context.
+.PARAMETER SkipCertificateCheck
+    Optional. Accepts the firewall certificate without validating it. Use this only for
+    appliances that still present a self-signed certificate. If omitted, the certificate is
+    validated.
 
-        .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+.PARAMETER Session
+    Optional. A session object from Connect-SfosFirewall, or the name of a session that was
+    registered with Connect-SfosFirewall -Name. Use it to address a specific firewall when you
+    work with more than one at a time. Any connection parameter you pass explicitly still takes
+    precedence. If omitted, the stored default connection is used.
 
-        .PARAMETER AsXml
-        Returns raw XML nodes instead of PowerShell-friendly objects.
+.PARAMETER AsXml
+    Optional. Returns the raw XML elements sent by the firewall instead of PowerShell objects.
+    Useful when you need a field that the standard output does not show.
 
-        .OUTPUTS
-        PSCustomObject with Name, Description, DefaultAction, MicroAppSupport and RuleList
-        (array of rule objects with SelectAllRule, CategoryList, RiskList,
-        CharacteristicsList, TechnologyList, ApplicationList, SmartFilter, Action, Schedule).
-        A policy with no rules returns RuleList as @(). System.Xml.XmlElement when -AsXml is
-        specified.
+.INPUTS
+    None. This cmdlet does not accept pipeline input.
 
-        .EXAMPLE
-        # Retrieve all application filter policies
-        Get-SfosApplicationFilterPolicy
+.OUTPUTS
+    System.Management.Automation.PSCustomObject. One object per policy, with the properties
+    Name, Description, DefaultAction, MicroAppSupport and RuleList. RuleList is an array of rule
+    objects with SelectAllRule, CategoryList, RiskList, CharacteristicsList, TechnologyList,
+    ApplicationList, SmartFilter, Action and Schedule. A policy with no rules returns RuleList
+    as an empty array. Returns System.Xml.XmlElement when -AsXml is used, and an empty array
+    when no policy matches.
 
-        .EXAMPLE
-        # Filter by name (substring match)
-        Get-SfosApplicationFilterPolicy -NameLike "Block"
+.EXAMPLE
+    Get-SfosApplicationFilterPolicy
 
-        .EXAMPLE
-        # Return raw XML for troubleshooting
-        Get-SfosApplicationFilterPolicy -NameLike "Allow All" -AsXml
+    Lists every application filter policy on the firewall of the current connection.
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        ClassificationList is never populated in any measurement made for this build (see the
-        internal ConvertTo-SfosAppFilterListXml helper) and is therefore not exposed as a
-        RuleList property - there was nothing to round-trip.
+.EXAMPLE
+    Get-SfosApplicationFilterPolicy -NameLike 'Block'
 
-        .LINK
-        https://docs.sophos.com/nsg/sophos-firewall/22.0/API/PROTECT/Applications/ApplicationFilterPolicy/ApplicationFilterPolicy.html
+    Lists all policies whose name contains 'Block'.
 
-        .LINK
-        New-SfosApplicationFilterPolicyRule
+.EXAMPLE
+    Get-SfosApplicationFilterPolicy -NameLike 'Allow All' -AsXml
+
+    Returns the raw XML of the matching policy, for example to check a field that the standard
+    output does not contain.
+
+.LINK
+    https://docs.sophos.com/nsg/sophos-firewall/22.0/API/PROTECT/Applications/ApplicationFilterPolicy/ApplicationFilterPolicy.html
+
+.LINK
+    New-SfosApplicationFilterPolicyRule
 #>
 function Get-SfosApplicationFilterPolicy {
     [CmdletBinding()]
@@ -319,9 +327,8 @@ function Get-SfosApplicationFilterPolicy {
     }
 
     $policyObjects = foreach ($node in @($nodes)) {
-        # A policy with no rules has no <RuleList> element at all (SFOS drops it rather than
-        # sending an empty wrapper, measured), so $node.RuleList is $null. Without the
-        # -FilterScript below, @($null.Rule) is a one-element array containing $null.
+        # A policy with no rules has no <RuleList> element at all, so $node.RuleList is $null.
+        # Without the -FilterScript below, @($null.Rule) is a one-element array containing $null.
         $rules = foreach ($ruleNode in @($node.RuleList.Rule | Where-Object -FilterScript { $_ })) {
             [PSCustomObject]@{
                 SelectAllRule       = [string]$ruleNode.SelectAllRule
@@ -359,86 +366,97 @@ function Get-SfosApplicationFilterPolicy {
 }
 
 <#
-        .SYNOPSIS
-        Creates a new ApplicationFilterPolicy on the Sophos Firewall.
+.SYNOPSIS
+    Creates an application filter policy on a Sophos Firewall.
 
-        .DESCRIPTION
-        Creates an ApplicationFilterPolicy object, which groups application-matching rules
-        into a policy that can be assigned to a firewall rule. Rules can be supplied at
-        creation time via -Rule, built with New-SfosApplicationFilterPolicyRule, or added
-        afterwards with Add-SfosApplicationFilterPolicyRule. Creating a policy with no rules
-        at all is accepted by the firewall (measured) - -Rule is optional.
+.DESCRIPTION
+    Creates an application filter policy, which groups application-matching rules into a policy
+    that can be assigned to a firewall rule. Rules can be supplied at creation time with -Rule,
+    built with New-SfosApplicationFilterPolicyRule, or added afterwards with
+    Add-SfosApplicationFilterPolicyRule. A policy with no rules at all is accepted.
 
-        .PARAMETER Name
-        Name of the policy (1-60 characters, no commas) [doc].
+    DefaultAction cannot be changed after the policy is created; choose it carefully.
+    MicroAppSupport always reads back as 'True', whatever value is sent.
 
-        .PARAMETER Description
-        Optional description (max 1000 characters) [doc].
+    It needs an open connection from Connect-SfosFirewall, or the connection parameters
+    supplied directly, and an account with write permission for application filter policies.
 
-        .PARAMETER DefaultAction
-        'Allow' or 'Deny' - the action for traffic that matches no rule [doc]. IMPORTANT
-        (measured): this value is only honored at creation time. Every subsequent
-        Set-SfosApplicationFilterPolicy call silently keeps the value set here, no matter
-        what is sent for -DefaultAction on the update - see Set-SfosApplicationFilterPolicy's
-        .NOTES. Choose it carefully; it cannot be changed later through this API.
+.PARAMETER Name
+    Required. Name of the policy, 1 to 60 characters, no commas.
 
-        .PARAMETER MicroAppSupport
-        'True' or 'False' [doc]. IMPORTANT (measured): the firewall always reports this as
-        'True' regardless of what is sent, on both add and update - every attempt to create
-        or set it to 'False' in this build's testing came back 'True'. Default 'True', to
-        match what the firewall actually does.
+.PARAMETER Description
+    Optional. Free-text description, up to 1000 characters.
 
-        .PARAMETER Rule
-        Zero or more rule objects, in the order they should be evaluated. Build each entry
-        with New-SfosApplicationFilterPolicyRule. Omitting -Rule entirely creates a policy
-        with an empty RuleList (measured), which Get-SfosApplicationFilterPolicy then reports
-        back as RuleList = @().
+.PARAMETER DefaultAction
+    Required. Action for traffic that matches no rule in the policy: Allow or Deny. This value
+    cannot be changed after the policy is created.
 
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+.PARAMETER MicroAppSupport
+    Optional. True or False. Defaults to True. The firewall always reports this field as True.
 
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, uses stored connection context.
+.PARAMETER Rule
+    Optional. Zero or more rule objects, in the order they are evaluated. Build each entry with
+    New-SfosApplicationFilterPolicyRule. If omitted, the policy is created with an empty rule
+    list.
 
-        .PARAMETER Port
-        Management/API port number. If omitted, uses stored connection context.
+.PARAMETER Firewall
+    Optional. Host name or IP address of the firewall. If omitted, the value from the current
+    connection is used.
 
-        .PARAMETER Username
-        Username for API authentication. If omitted, uses stored connection context.
+.PARAMETER Port
+    Optional. TCP port of the management API, usually 4444. If omitted, the value from the
+    current connection is used.
 
-        .PARAMETER Password
-        Password for API authentication. If omitted, uses stored connection context.
+.PARAMETER Username
+    Optional. User name for the API login. The account needs write permission for application
+    filter policies. If omitted, the value from the current connection is used.
 
-        .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation.
+.PARAMETER Password
+    Optional. Password for the API login, as a SecureString. If omitted, the value from the
+    current connection is used.
 
-        .OUTPUTS
-        None. Throws an exception if creation fails.
+.PARAMETER SkipCertificateCheck
+    Optional. Accepts the firewall certificate without validating it. Use this only for
+    appliances that still present a self-signed certificate. If omitted, the certificate is
+    validated.
 
-        .EXAMPLE
-        # Create a policy with no rules yet
-        New-SfosApplicationFilterPolicy -Name "BranchOfficeApps" -Description "Empty test policy" -DefaultAction Allow
+.PARAMETER Session
+    Optional. A session object from Connect-SfosFirewall, or the name of a session that was
+    registered with Connect-SfosFirewall -Name. Use it to address a specific firewall when you
+    work with more than one at a time. Any connection parameter you pass explicitly still takes
+    precedence. If omitted, the stored default connection is used.
 
-        .EXAMPLE
-        # Create a policy with one rule that blocks a specific named application
-        $rule = New-SfosApplicationFilterPolicyRule -SelectAllRule Disable -Application "Lantern" -Action Deny -Schedule "All The Time"
-        New-SfosApplicationFilterPolicy -Name "BranchOfficeBlockLantern" -DefaultAction Allow -Rule $rule
+.INPUTS
+    System.Management.Automation.PSCustomObject. Accepts Name, Description and DefaultAction by
+    property name, for example from Get-SfosApplicationFilterPolicy.
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
+.OUTPUTS
+    None. The cmdlet writes no output and raises an error if the firewall rejects the create.
 
-        .LINK
-        https://docs.sophos.com/nsg/sophos-firewall/22.0/API/PROTECT/Applications/ApplicationFilterPolicy/operations/Appfilterpolicyaddfromapi%26Appfilterpolicyedit.html
+.EXAMPLE
+    New-SfosApplicationFilterPolicy -Name 'BranchOfficeApps' -Description 'Empty policy' -DefaultAction Allow -WhatIf
 
-        .LINK
-        Get-SfosApplicationFilterPolicy
+    Shows what the call would create without sending it to the firewall.
 
-        .LINK
-        New-SfosApplicationFilterPolicyRule
+.EXAMPLE
+    New-SfosApplicationFilterPolicy -Name 'BranchOfficeApps' -Description 'Empty policy' -DefaultAction Allow
+
+    Creates a policy with no rules yet. The cmdlet asks for confirmation before it writes.
+
+.EXAMPLE
+    $rule = New-SfosApplicationFilterPolicyRule -SelectAllRule Disable -Application 'Lantern' -Action Deny -Schedule 'All The Time'
+    New-SfosApplicationFilterPolicy -Name 'BranchOfficeBlockLantern' -DefaultAction Allow -Rule $rule
+
+    Creates a policy with one rule that blocks a specific named application.
+
+.LINK
+    https://docs.sophos.com/nsg/sophos-firewall/22.0/API/PROTECT/Applications/ApplicationFilterPolicy/operations/Appfilterpolicyaddfromapi%26Appfilterpolicyedit.html
+
+.LINK
+    Get-SfosApplicationFilterPolicy
+
+.LINK
+    New-SfosApplicationFilterPolicyRule
 #>
 function New-SfosApplicationFilterPolicy {
     [CmdletBinding(SupportsShouldProcess)]
@@ -506,96 +524,95 @@ function New-SfosApplicationFilterPolicy {
 }
 
 <#
-        .SYNOPSIS
-        Updates an existing ApplicationFilterPolicy object on the Sophos Firewall.
+.SYNOPSIS
+    Updates an application filter policy on a Sophos Firewall.
 
-        .DESCRIPTION
-        Updates an ApplicationFilterPolicy object using the Sophos Firewall XML API. You can
-        supply the target object name directly or via the pipeline.
+.DESCRIPTION
+    Updates an application filter policy. You can supply the target policy name directly or
+    through the pipeline.
 
-        SFOS replaces the whole entity on update - any element not sent in the request is
-        cleared on the firewall. This cmdlet reads the current policy first and keeps
-        whatever the caller does not explicitly pass.
+    The firewall replaces the whole policy on update; any field not sent is cleared. This
+    cmdlet reads the current policy first and keeps whatever the caller does not explicitly
+    pass. DefaultAction cannot be changed after the policy was created; the value sent here has
+    no effect and the original value is kept. The firewall built-in policies have no write
+    protection; this cmdlet overwrites one, including its rule list, without a warning from the
+    firewall.
 
-        .PARAMETER Name
-        Name of the target policy.
+.PARAMETER Name
+    Required. Name of the target policy.
 
-        .PARAMETER Description
-        Optional description text. If omitted, the existing description is kept.
+.PARAMETER Description
+    Optional. Free-text description. If omitted, the existing description is kept.
 
-        .PARAMETER DefaultAction
-        'Allow' or 'Deny' [doc]. IMPORTANT (measured): sending this parameter has NO EFFECT.
-        The firewall silently keeps whatever DefaultAction was set when the policy was
-        created, no matter what value is sent here - reproduced across repeated updates with
-        both 'Allow' and 'Deny'. The parameter is still accepted (and, per the project's
-        read-modify-write rule, always resent with the current value so nothing else about
-        the request looks incomplete) so that a caller's intent is visible in their script,
-        but it will not change the policy on this firmware. There is no way to change
-        DefaultAction after creation through this API - recreate the policy instead.
+.PARAMETER DefaultAction
+    Optional. Allow or Deny. Has no effect on an existing policy; the value set at creation is
+    kept regardless of what is sent here.
 
-        .PARAMETER MicroAppSupport
-        'True' or 'False' [doc]. IMPORTANT (measured): the firewall always reports this as
-        'True' after any write, regardless of what is sent - see
-        New-SfosApplicationFilterPolicy's .PARAMETER MicroAppSupport for the same finding on
-        create.
+.PARAMETER MicroAppSupport
+    Optional. True or False. The firewall always reports this field as True after any write.
 
-        .PARAMETER Rule
-        Complete replacement rule list, in the order the firewall should evaluate them. This
-        REPLACES the existing RuleList wholesale, exactly as the API does - it does not merge
-        with the rules already on the firewall (measured: shrinking from 2 rules to 1, and
-        sending an empty RuleList, both work as expected - RuleList is not append-only on
-        this entity). Omit this parameter to keep the existing rules unchanged. To add or
-        remove a single rule without touching the rest of the list, use
-        Add-SfosApplicationFilterPolicyRule / Remove-SfosApplicationFilterPolicyRule instead.
+.PARAMETER Rule
+    Optional. Complete replacement rule list, in the order the firewall should evaluate them.
+    This replaces the existing rule list; it does not merge with the rules already on the
+    firewall. If omitted, the existing rules are kept. To add or remove a single rule without
+    touching the rest of the list, use Add-SfosApplicationFilterPolicyRule or
+    Remove-SfosApplicationFilterPolicyRule instead.
 
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+.PARAMETER Firewall
+    Optional. Host name or IP address of the firewall. If omitted, the value from the current
+    connection is used.
 
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the
-        stored connection context.
+.PARAMETER Port
+    Optional. TCP port of the management API, usually 4444. If omitted, the value from the
+    current connection is used.
 
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use
-        the stored connection context.
+.PARAMETER Username
+    Optional. User name for the API login. The account needs write permission for application
+    filter policies. If omitted, the value from the current connection is used.
 
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored
-        connection context.
+.PARAMETER Password
+    Optional. Password for the API login, as a SecureString. If omitted, the value from the
+    current connection is used.
 
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored
-        connection context.
+.PARAMETER SkipCertificateCheck
+    Optional. Accepts the firewall certificate without validating it. Use this only for
+    appliances that still present a self-signed certificate. If omitted, the certificate is
+    validated.
 
-        .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+.PARAMETER Session
+    Optional. A session object from Connect-SfosFirewall, or the name of a session that was
+    registered with Connect-SfosFirewall -Name. Use it to address a specific firewall when you
+    work with more than one at a time. Any connection parameter you pass explicitly still takes
+    precedence. If omitted, the stored default connection is used.
 
-        .OUTPUTS
-        None. Throws an exception if the update fails.
+.INPUTS
+    System.Management.Automation.PSCustomObject. Accepts a policy object by value or by
+    property name, for example from Get-SfosApplicationFilterPolicy.
 
-        .EXAMPLE
-        # Change only the description, RuleList and DefaultAction are preserved
-        Set-SfosApplicationFilterPolicy -Name "BranchOfficeApps" -Description "Updated description" -DefaultAction Allow
+.OUTPUTS
+    None. The cmdlet writes no output and raises an error if the firewall rejects the update.
 
-        .EXAMPLE
-        # Update using pipeline input
-        Get-SfosApplicationFilterPolicy -NameLike "BranchOfficeApps" | Set-SfosApplicationFilterPolicy -Description "Updated"
+.EXAMPLE
+    Set-SfosApplicationFilterPolicy -Name 'BranchOfficeApps' -Description 'Updated description' -WhatIf
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        No write protection for the 7 factory-default application filter policies - this
-        cmdlet will overwrite one, including its RuleList, without any warning from the API.
-        Verify -Name before running this against a shared/production policy.
+    Shows what the call would change without sending it to the firewall.
 
-        .LINK
-        https://docs.sophos.com/nsg/sophos-firewall/22.0/API/PROTECT/Applications/ApplicationFilterPolicy/operations/Appfilterpolicyaddfromapi%26Appfilterpolicyedit.html
+.EXAMPLE
+    Set-SfosApplicationFilterPolicy -Name 'BranchOfficeApps' -Description 'Updated description'
 
-        .LINK
-        Get-SfosApplicationFilterPolicy
+    Changes only the description; the rule list and default action are kept. The cmdlet asks
+    for confirmation before it writes.
+
+.EXAMPLE
+    Get-SfosApplicationFilterPolicy -NameLike 'BranchOfficeApps' | Set-SfosApplicationFilterPolicy -Description 'Updated'
+
+    Reads the matching policy and applies the same change through the pipeline.
+
+.LINK
+    https://docs.sophos.com/nsg/sophos-firewall/22.0/API/PROTECT/Applications/ApplicationFilterPolicy/operations/Appfilterpolicyaddfromapi%26Appfilterpolicyedit.html
+
+.LINK
+    Get-SfosApplicationFilterPolicy
 #>
 function Set-SfosApplicationFilterPolicy {
     [CmdletBinding(SupportsShouldProcess)]
@@ -688,63 +705,67 @@ function Set-SfosApplicationFilterPolicy {
 }
 
 <#
-        .SYNOPSIS
-        Removes an ApplicationFilterPolicy object from the Sophos Firewall.
+.SYNOPSIS
+    Removes an application filter policy from a Sophos Firewall.
 
-        .DESCRIPTION
-        Removes an ApplicationFilterPolicy object using the Sophos Firewall XML API. This
-        cmdlet supports ShouldProcess; use -WhatIf to preview the change.
+.DESCRIPTION
+    Removes an application filter policy. The cmdlet reads the policy first and throws an error
+    if the given name does not exist, so the caller gets a clear reason for the failure. Do not
+    target the firewall built-in policies with this cmdlet.
 
-        Removing a policy name that does not exist answers a misleading 503 'Operation
-        failed. Entity having same parameter details already exists.' [measured against the
-        lab firewall] - not a 'not found'-shaped message at all. This cmdlet therefore reads
-        the object first and throws 'was not found' for a name that is not present, rather
-        than surfacing that response.
+.PARAMETER Name
+    Required. Name of the policy to remove.
 
-        .PARAMETER Name
-        Name of the target policy.
+.PARAMETER Firewall
+    Optional. Host name or IP address of the firewall. If omitted, the value from the current
+    connection is used.
 
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+.PARAMETER Port
+    Optional. TCP port of the management API, usually 4444. If omitted, the value from the
+    current connection is used.
 
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the
-        stored connection context.
+.PARAMETER Username
+    Optional. User name for the API login. The account needs write permission for application
+    filter policies. If omitted, the value from the current connection is used.
 
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use
-        the stored connection context.
+.PARAMETER Password
+    Optional. Password for the API login, as a SecureString. If omitted, the value from the
+    current connection is used.
 
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored
-        connection context.
+.PARAMETER SkipCertificateCheck
+    Optional. Accepts the firewall certificate without validating it. Use this only for
+    appliances that still present a self-signed certificate. If omitted, the certificate is
+    validated.
 
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored
-        connection context.
+.PARAMETER Session
+    Optional. A session object from Connect-SfosFirewall, or the name of a session that was
+    registered with Connect-SfosFirewall -Name. Use it to address a specific firewall when you
+    work with more than one at a time. Any connection parameter you pass explicitly still takes
+    precedence. If omitted, the stored default connection is used.
 
-        .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+.INPUTS
+    System.Management.Automation.PSCustomObject. Accepts a policy object by value or by
+    property name, for example from Get-SfosApplicationFilterPolicy.
 
-        .OUTPUTS
-        None. Throws an exception if removal fails, or if the named object does not exist.
+.OUTPUTS
+    None. The cmdlet writes no output and raises an error if the firewall rejects the removal,
+    or if the named policy does not exist.
 
-        .EXAMPLE
-        Remove-SfosApplicationFilterPolicy -Name "BranchOfficeApps"
+.EXAMPLE
+    Remove-SfosApplicationFilterPolicy -Name 'BranchOfficeApps' -WhatIf
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        Never target the 7 factory-default application filter policies with this cmdlet.
+    Shows what the call would remove without sending it to the firewall.
 
-        .LINK
-        https://docs.sophos.com/nsg/sophos-firewall/22.0/API/PROTECT/Applications/ApplicationFilterPolicy/operations/Appfilter%20Policy%20delete.html
+.EXAMPLE
+    Remove-SfosApplicationFilterPolicy -Name 'BranchOfficeApps'
 
-        .LINK
-        Get-SfosApplicationFilterPolicy
+    Removes the named policy. The cmdlet asks for confirmation before it writes.
+
+.LINK
+    https://docs.sophos.com/nsg/sophos-firewall/22.0/API/PROTECT/Applications/ApplicationFilterPolicy/operations/Appfilter%20Policy%20delete.html
+
+.LINK
+    Get-SfosApplicationFilterPolicy
 #>
 function Remove-SfosApplicationFilterPolicy {
     [CmdletBinding(SupportsShouldProcess)]
@@ -804,118 +825,108 @@ function Remove-SfosApplicationFilterPolicy {
 }
 
 <#
-        .SYNOPSIS
-        Builds a rule for use inside an ApplicationFilterPolicy's RuleList.
+.SYNOPSIS
+    Builds a rule object for an application filter policy.
 
-        .DESCRIPTION
-        Creates the object New-SfosApplicationFilterPolicy -Rule, Set-SfosApplicationFilterPolicy
-        -Rule and Add-SfosApplicationFilterPolicyRule expect. Performs no API call - the rule
-        only becomes part of a policy once handed to one of those cmdlets. SFOS persists rule
-        order unchanged, so build rules in the order they must be evaluated.
+.DESCRIPTION
+    Builds the object that New-SfosApplicationFilterPolicy -Rule, Set-SfosApplicationFilterPolicy
+    -Rule and Add-SfosApplicationFilterPolicyRule expect. This cmdlet makes no API call; the
+    rule only becomes part of a policy once handed to one of those cmdlets. The firewall keeps
+    the rule order as built, so build rules in the order they must be evaluated.
 
-        A rule works in one of two measured selection modes, controlled by -SelectAllRule:
+    A rule works in one of two selection modes, controlled by SelectAllRule. With 'Disable', the
+    rule matches the applications named in Application, and the firewall computes Category,
+    Risk, Characteristics and Technology itself from those applications; any value sent for
+    those four parameters is discarded. With 'Enable', the rule matches by Category, Risk,
+    Characteristics and/or Technology, and the firewall computes Application itself from the
+    matching applications; any value sent for Application is discarded. With 'Disable' and no
+    Application entry at all, this cmdlet throws rather than building a rule the firewall would
+    silently drop from the policy.
 
-        - 'Disable' (individual applications): -Application is mandatory and is stored
-          exactly as supplied. -Category, -Risk, -Characteristics and -Technology are IGNORED
-          - the firewall recomputes them itself from the real signature metadata of the
-            applications in -Application, regardless of what is passed here [measured].
-          Omitting -Application entirely in this mode causes the whole rule to be silently
-          dropped by the firewall on write (200, but the rule disappears) [measured] - this
-          cmdlet throws instead of building a rule that would vanish.
-        - 'Enable' (broad selection): supply -Category, -Risk, -Characteristics and/or
-          -Technology with values the firewall recognizes (there is no client-side
-          ValidateSet - the live category/risk/characteristic/technology catalog is large and
-          was not enumerated for this build); the firewall computes the matching
-          -ApplicationList itself, discarding anything passed there [measured]. An
-          unrecognized value in these lists is not rejected - it is silently dropped and
-          nothing is computed (200, no error) [measured], so verify with
-          Get-SfosApplicationFilterPolicy after using this mode with values you have not
-          confirmed against the live category catalog (Get-SfosApplicationFilterCategory in
-          another module group of this project, or the web admin).
+    There is no fixed list of valid Category, Risk, Characteristics, Technology or Schedule
+    values. A name the firewall does not recognize is not rejected; it is silently dropped (for
+    Category/Risk/Characteristics/Technology) or replaced with 'All The Time' (for Schedule),
+    which results in a rule that matches less than intended. Check the result with
+    Get-SfosApplicationFilterPolicy after using an unfamiliar value.
 
-        .PARAMETER InputObject
-        An existing rule to use as the base, as returned in the RuleList of
-        Get-SfosApplicationFilterPolicy. Accepts pipeline input. Only the parameters you
-        actually supply override it, so a single field can be changed without disturbing the
-        rest. Without it, every omitted parameter falls back to its default.
+.PARAMETER InputObject
+    Optional. An existing rule to use as the base, as returned in the RuleList property of
+    Get-SfosApplicationFilterPolicy. Accepts pipeline input. Only the parameters you actually
+    supply override it, so a single field can be changed without disturbing the rest.
 
-        .PARAMETER SelectAllRule
-        'Enable' or 'Disable' - see .DESCRIPTION for the two selection modes this actually
-        drives. Default 'Disable'.
+.PARAMETER SelectAllRule
+    Optional. Enable or Disable; selects which of the two matching modes the rule uses. See
+    .DESCRIPTION. Defaults to Disable.
 
-        .PARAMETER Category
-        Application category names for 'Enable' mode, for example 'Proxy and Tunnel',
-        'Gaming'. Ignored in 'Disable' mode - see .DESCRIPTION.
+.PARAMETER Category
+    Optional. Application category names for Enable mode, for example 'Gaming'. Ignored in
+    Disable mode. No fixed list of valid values; an unrecognized name is silently dropped.
 
-        .PARAMETER Risk
-        Risk level names for 'Enable' mode, for example 'Very High'. Ignored in 'Disable'
-        mode - see .DESCRIPTION.
+.PARAMETER Risk
+    Optional. Risk level names for Enable mode, for example 'Very High'. Ignored in Disable
+    mode. No fixed list of valid values; an unrecognized name is silently dropped.
 
-        .PARAMETER Characteristics
-        Characteristic names for 'Enable' mode, for example 'Tunnels other apps'. Ignored in
-        'Disable' mode - see .DESCRIPTION.
+.PARAMETER Characteristics
+    Optional. Characteristic names for Enable mode, for example 'Tunnels other apps'. Ignored
+    in Disable mode. No fixed list of valid values; an unrecognized name is silently dropped.
 
-        .PARAMETER Technology
-        Technology names for 'Enable' mode, for example 'Client Server'. Ignored in 'Disable'
-        mode - see .DESCRIPTION.
+.PARAMETER Technology
+    Optional. Technology names for Enable mode, for example 'Client Server'. Ignored in Disable
+    mode. No fixed list of valid values; an unrecognized name is silently dropped.
 
-        .PARAMETER Application
-        Application signature names, for example 'Lantern', 'TurboVPN'. Mandatory when
-        -SelectAllRule is 'Disable' (see .DESCRIPTION); server-computed and thus ignored when
-        -SelectAllRule is 'Enable' with a recognized category/risk/characteristics/technology
-        value.
+.PARAMETER Application
+    Optional in Enable mode, required in Disable mode. Application signature names, for
+    example 'Lantern'. Ignored in Enable mode when the criteria lists match at least one
+    recognized value.
 
-        .PARAMETER SmartFilter
-        Free-text search filter, as stored by the web admin's rule builder search box.
-        IMPORTANT (measured): a non-empty -SmartFilter causes the firewall to report
-        SelectAllRule back as 'Enable' regardless of what was actually sent, and drops the
-        computed CategoryList/RiskList/CharacteristicsList/TechnologyList - it behaves as a
-        third, separate selection mode. Default '' (empty), matching every factory-default
-        rule.
+.PARAMETER SmartFilter
+    Optional. Free-text search filter, as stored by the web admin rule builder search box. A
+    non-empty value makes the firewall report SelectAllRule back as Enable, and drops the
+    computed Category, Risk, Characteristics and Technology lists, regardless of what
+    SelectAllRule was set to. Defaults to an empty string.
 
-        .PARAMETER Action
-        'Allow' or 'Deny' [doc, and validated live with a 501 on any other value]. Default
-        'Deny'.
+.PARAMETER Action
+    Optional. Allow or Deny. Defaults to Deny.
 
-        .PARAMETER Schedule
-        Name of an existing Schedule object, for example 'All The Time' (the default on every
-        factory-default rule). IMPORTANT (measured): a Schedule name the firewall does not
-        recognize is not rejected - it is silently replaced with 'All The Time' (200, no
-        error). No client-side ValidateSet is offered, since the schedule catalog is a
-        separate, dynamic entity outside the scope of this module group. Default
-        'All The Time'.
+.PARAMETER Schedule
+    Optional. Name of an existing Schedule object, for example 'All The Time'. No fixed list of
+    valid values; a name the firewall does not recognize is silently replaced with
+    'All The Time'. Defaults to 'All The Time'.
 
-        .OUTPUTS
-        PSCustomObject with SelectAllRule, CategoryList, RiskList, CharacteristicsList,
-        TechnologyList, ApplicationList, SmartFilter, Action and Schedule properties - the
-        same shape Get-SfosApplicationFilterPolicy returns for each RuleList entry.
+.INPUTS
+    System.Management.Automation.PSCustomObject. Accepts an existing rule object from the
+    pipeline as -InputObject.
 
-        .EXAMPLE
-        # Block a single named application
-        New-SfosApplicationFilterPolicyRule -SelectAllRule Disable -Application "Lantern" -Action Deny -Schedule "All The Time"
+.OUTPUTS
+    System.Management.Automation.PSCustomObject. An object with SelectAllRule, CategoryList,
+    RiskList, CharacteristicsList, TechnologyList, ApplicationList, SmartFilter, Action and
+    Schedule, matching the shape Get-SfosApplicationFilterPolicy returns for each rule.
 
-        .EXAMPLE
-        # Block every application in a whole category
-        New-SfosApplicationFilterPolicyRule -SelectAllRule Enable -Category "Gaming" -Action Deny
+.EXAMPLE
+    New-SfosApplicationFilterPolicyRule -SelectAllRule Disable -Application 'Lantern' -Action Deny -Schedule 'All The Time'
 
-        .EXAMPLE
-        # Change one field of an existing rule read back from the firewall
-        $policy = Get-SfosApplicationFilterPolicy -NameLike "BranchOfficeApps"
-        $edited = $policy.RuleList[0] | New-SfosApplicationFilterPolicyRule -Action "Allow"
-        Set-SfosApplicationFilterPolicy -Name "BranchOfficeApps" -Rule $edited
+    Builds a rule that blocks a single named application.
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This cmdlet performs no API call; it only builds an in-memory object.
+.EXAMPLE
+    New-SfosApplicationFilterPolicyRule -SelectAllRule Enable -Category 'Gaming' -Action Deny
 
-        .LINK
-        https://docs.sophos.com/nsg/sophos-firewall/22.0/API/PROTECT/Applications/ApplicationFilterPolicy/ApplicationFilterPolicy.html
+    Builds a rule that blocks every application in a category.
 
-        .LINK
-        New-SfosApplicationFilterPolicy
+.EXAMPLE
+    $policy = Get-SfosApplicationFilterPolicy -NameLike 'BranchOfficeApps'
+    $edited = $policy.RuleList[0] | New-SfosApplicationFilterPolicyRule -Action 'Allow'
+    Set-SfosApplicationFilterPolicy -Name 'BranchOfficeApps' -Rule $edited
 
-        .LINK
-        Add-SfosApplicationFilterPolicyRule
+    Changes one field of an existing rule and writes the updated rule list back.
+
+.LINK
+    https://docs.sophos.com/nsg/sophos-firewall/22.0/API/PROTECT/Applications/ApplicationFilterPolicy/ApplicationFilterPolicy.html
+
+.LINK
+    New-SfosApplicationFilterPolicy
+
+.LINK
+    Add-SfosApplicationFilterPolicyRule
 #>
 function New-SfosApplicationFilterPolicyRule {
     # PSUseShouldProcessForStateChangingFunctions is suppressed on purpose. This function
@@ -1008,67 +1019,73 @@ function New-SfosApplicationFilterPolicyRule {
 }
 
 <#
-        .SYNOPSIS
-        Appends a rule to the end of an existing ApplicationFilterPolicy's RuleList.
+.SYNOPSIS
+    Appends a rule to the end of an application filter policy.
 
-        .DESCRIPTION
-        Reads the current ApplicationFilterPolicy, appends the supplied rule after the
-        existing ones, and writes the whole entity back - SFOS replaces RuleList wholesale on
-        update, so the existing rules and their order are read back first and resent
-        unchanged alongside the new one.
+.DESCRIPTION
+    Reads the current policy, appends the supplied rule after the existing ones, and writes the
+    whole policy back. The firewall built-in policies have no write protection; verify the
+    policy name before running this against a shared or production policy.
 
-        .PARAMETER Name
-        Name of the target policy.
+.PARAMETER Name
+    Required. Name of the target policy.
 
-        .PARAMETER Rule
-        Rule object to append, built with New-SfosApplicationFilterPolicyRule.
+.PARAMETER Rule
+    Required. Rule object to append, built with New-SfosApplicationFilterPolicyRule.
 
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+.PARAMETER Firewall
+    Optional. Host name or IP address of the firewall. If omitted, the value from the current
+    connection is used.
 
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the
-        stored connection context.
+.PARAMETER Port
+    Optional. TCP port of the management API, usually 4444. If omitted, the value from the
+    current connection is used.
 
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use
-        the stored connection context.
+.PARAMETER Username
+    Optional. User name for the API login. The account needs write permission for application
+    filter policies. If omitted, the value from the current connection is used.
 
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored
-        connection context.
+.PARAMETER Password
+    Optional. Password for the API login, as a SecureString. If omitted, the value from the
+    current connection is used.
 
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored
-        connection context.
+.PARAMETER SkipCertificateCheck
+    Optional. Accepts the firewall certificate without validating it. Use this only for
+    appliances that still present a self-signed certificate. If omitted, the certificate is
+    validated.
 
-        .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+.PARAMETER Session
+    Optional. A session object from Connect-SfosFirewall, or the name of a session that was
+    registered with Connect-SfosFirewall -Name. Use it to address a specific firewall when you
+    work with more than one at a time. Any connection parameter you pass explicitly still takes
+    precedence. If omitted, the stored default connection is used.
 
-        .OUTPUTS
-        None. Throws an exception if the update fails.
+.INPUTS
+    System.Management.Automation.PSCustomObject. Accepts the policy name by property name.
 
-        .EXAMPLE
-        $rule = New-SfosApplicationFilterPolicyRule -SelectAllRule Disable -Application "TurboVPN" -Action Deny
-        Add-SfosApplicationFilterPolicyRule -Name "BranchOfficeApps" -Rule $rule
+.OUTPUTS
+    None. The cmdlet writes no output and raises an error if the firewall rejects the update.
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        No write protection for the 7 factory-default application filter policies. Verify
-        -Name before running this against a shared/production policy.
+.EXAMPLE
+    $rule = New-SfosApplicationFilterPolicyRule -SelectAllRule Disable -Application 'TurboVPN' -Action Deny
+    Add-SfosApplicationFilterPolicyRule -Name 'BranchOfficeApps' -Rule $rule -WhatIf
 
-        .LINK
-        https://docs.sophos.com/nsg/sophos-firewall/22.0/API/PROTECT/Applications/ApplicationFilterPolicy/operations/Appfilterpolicyaddfromapi%26Appfilterpolicyedit.html
+    Shows what the call would add without sending it to the firewall.
 
-        .LINK
-        New-SfosApplicationFilterPolicyRule
+.EXAMPLE
+    $rule = New-SfosApplicationFilterPolicyRule -SelectAllRule Disable -Application 'TurboVPN' -Action Deny
+    Add-SfosApplicationFilterPolicyRule -Name 'BranchOfficeApps' -Rule $rule
 
-        .LINK
-        Remove-SfosApplicationFilterPolicyRule
+    Appends the rule to the named policy. The cmdlet asks for confirmation before it writes.
+
+.LINK
+    https://docs.sophos.com/nsg/sophos-firewall/22.0/API/PROTECT/Applications/ApplicationFilterPolicy/operations/Appfilterpolicyaddfromapi%26Appfilterpolicyedit.html
+
+.LINK
+    New-SfosApplicationFilterPolicyRule
+
+.LINK
+    Remove-SfosApplicationFilterPolicyRule
 #>
 function Add-SfosApplicationFilterPolicyRule {
     [CmdletBinding(SupportsShouldProcess)]
@@ -1134,72 +1151,72 @@ function Add-SfosApplicationFilterPolicyRule {
 }
 
 <#
-        .SYNOPSIS
-        Removes a single rule from an existing ApplicationFilterPolicy's RuleList by index.
+.SYNOPSIS
+    Removes a single rule from an application filter policy by index.
 
-        .DESCRIPTION
-        Reads the current ApplicationFilterPolicy, drops the rule at the given zero-based
-        index from its RuleList, and writes the whole entity back - SFOS replaces RuleList
-        wholesale on update, so the remaining rules and their order are resent unchanged.
+.DESCRIPTION
+    Reads the current policy, drops the rule at the given zero-based index from the rule list,
+    and writes the whole policy back. The cmdlet reads the policy back afterwards and throws if
+    the rule count on the firewall does not match what was sent, rather than trusting a success
+    status alone. The firewall built-in policies have no write protection; verify the policy
+    name before running this against a shared or production policy.
 
-        RuleList was measured to NOT be append-only on this entity: shrinking a policy from
-        two rules to one took effect correctly and Get-SfosApplicationFilterPolicy read back
-        the reduced list. This cmdlet still reads the object back after the update and throws
-        if the rule count on the firewall does not match what was sent, rather than trusting
-        the 200 status code alone - the defensive pattern used throughout this project for
-        writes that could otherwise report success while changing nothing.
+.PARAMETER Name
+    Required. Name of the target policy.
 
-        .PARAMETER Name
-        Name of the target policy.
+.PARAMETER Index
+    Required. Zero-based position of the rule to remove, in the order returned by
+    Get-SfosApplicationFilterPolicy. The cmdlet throws if the index is out of range.
 
-        .PARAMETER Index
-        Zero-based position of the rule to remove within the policy's RuleList, in the order
-        returned by Get-SfosApplicationFilterPolicy. Throws if out of range.
+.PARAMETER Firewall
+    Optional. Host name or IP address of the firewall. If omitted, the value from the current
+    connection is used.
 
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+.PARAMETER Port
+    Optional. TCP port of the management API, usually 4444. If omitted, the value from the
+    current connection is used.
 
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the
-        stored connection context.
+.PARAMETER Username
+    Optional. User name for the API login. The account needs write permission for application
+    filter policies. If omitted, the value from the current connection is used.
 
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use
-        the stored connection context.
+.PARAMETER Password
+    Optional. Password for the API login, as a SecureString. If omitted, the value from the
+    current connection is used.
 
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored
-        connection context.
+.PARAMETER SkipCertificateCheck
+    Optional. Accepts the firewall certificate without validating it. Use this only for
+    appliances that still present a self-signed certificate. If omitted, the certificate is
+    validated.
 
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored
-        connection context.
+.PARAMETER Session
+    Optional. A session object from Connect-SfosFirewall, or the name of a session that was
+    registered with Connect-SfosFirewall -Name. Use it to address a specific firewall when you
+    work with more than one at a time. Any connection parameter you pass explicitly still takes
+    precedence. If omitted, the stored default connection is used.
 
-        .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+.INPUTS
+    System.Management.Automation.PSCustomObject. Accepts the policy name by property name.
 
-        .OUTPUTS
-        None. Throws an exception if the update fails, or if the rule was not actually
-        removed.
+.OUTPUTS
+    None. The cmdlet writes no output and raises an error if the firewall rejects the update, or
+    if the rule was not actually removed.
 
-        .EXAMPLE
-        # Remove the first rule of the policy
-        Remove-SfosApplicationFilterPolicyRule -Name "BranchOfficeApps" -Index 0
+.EXAMPLE
+    Remove-SfosApplicationFilterPolicyRule -Name 'BranchOfficeApps' -Index 0 -WhatIf
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        No write protection for the 7 factory-default application filter policies. Verify
-        -Name before running this against a shared/production policy.
+    Shows what the call would remove without sending it to the firewall.
 
-        .LINK
-        https://docs.sophos.com/nsg/sophos-firewall/22.0/API/PROTECT/Applications/ApplicationFilterPolicy/operations/Appfilterpolicyaddfromapi%26Appfilterpolicyedit.html
+.EXAMPLE
+    Remove-SfosApplicationFilterPolicyRule -Name 'BranchOfficeApps' -Index 0
 
-        .LINK
-        Add-SfosApplicationFilterPolicyRule
+    Removes the first rule of the policy. The cmdlet asks for confirmation before it writes.
+
+.LINK
+    https://docs.sophos.com/nsg/sophos-firewall/22.0/API/PROTECT/Applications/ApplicationFilterPolicy/operations/Appfilterpolicyaddfromapi%26Appfilterpolicyedit.html
+
+.LINK
+    Add-SfosApplicationFilterPolicyRule
 #>
 function Remove-SfosApplicationFilterPolicyRule {
     [CmdletBinding(SupportsShouldProcess)]
@@ -1273,9 +1290,9 @@ function Remove-SfosApplicationFilterPolicyRule {
         $XmlResponse = [xml]$response.Content
         Assert-SfosApiReturnSuccess -Xml $XmlResponse -ObjectName 'ApplicationFilterPolicy' -Action 'remove rule' -Target $Name
 
-        # RuleList is not append-only on this entity (measured, see .DESCRIPTION), but a 200
-        # that changes nothing is exactly the failure mode this project has been bitten by
-        # before - read back and throw rather than trust the status code alone.
+        # RuleList is not append-only on this entity, but a 200 that changes nothing is a
+        # known failure mode of this API - read back and throw rather than trust the status
+        # code alone.
         $after = @(Get-SfosApplicationFilterPolicy -Firewall $params.Firewall `
                 -Port $params.Port `
                 -Username $params.Username `
@@ -1295,12 +1312,24 @@ function Remove-SfosApplicationFilterPolicyRule {
 
 #region ApplicationObject
 
+<#
+.SYNOPSIS
+    Builds the Set request body for an application object.
+
+.DESCRIPTION
+    Builds the complete inner XML for a Set operation on an ApplicationObject entity, using
+    ConvertTo-SfosAppFilterListXml for the nested selection lists. The firewall replaces the
+    whole entity on update, so New- and Set-SfosApplicationObject merge every field they want to
+    keep into -Application before calling this function.
+
+.PARAMETER Operation
+    The Set operation attribute, either 'add' or 'update'.
+
+.PARAMETER Application
+    The application object to convert, with the properties Name, SelectAllRule, CategoryList,
+    RiskList, CharacteristicsList, TechnologyList, ApplicationList and SmartFilter.
+#>
 function ConvertTo-SfosApplicationObjectEntityXml {
-    # Internal helper, not exported. Builds the <Set> inner XML for an ApplicationObject
-    # entity, using the shared ConvertTo-SfosAppFilterListXml helper for the same nested
-    # selection lists a policy Rule uses. SFOS replaces the whole entity on
-    # <Set operation="update">, so New-/Set-SfosApplicationObject merge every field they want
-    # preserved into -Application before calling this function.
     [CmdletBinding()]
     [OutputType([string])]
     param(
@@ -1334,69 +1363,71 @@ function ConvertTo-SfosApplicationObjectEntityXml {
 
 <#
         .SYNOPSIS
-        Retrieves ApplicationObject objects from the Sophos Firewall.
+        Retrieves application objects from a Sophos Firewall.
 
         .DESCRIPTION
-        Queries the Sophos Firewall XML API for ApplicationObject objects (PROTECT >
-        Applications > "Application" in the web admin). By default the cmdlet returns
-        PowerShell-friendly objects. Use -AsXml to return the raw XML nodes.
+        Returns application objects (PROTECT > Applications > "Application").
 
-        An ApplicationObject groups a set of applications (individually, or via
-        category/risk/characteristics/technology criteria) into a single reusable named
-        object - the same selection shape used inside an ApplicationFilterPolicy Rule (see
-        the internal ConvertTo-SfosAppFilterListXml helper shared by both entities), but
-        without the rule-specific Action/Schedule fields. There are no factory-default
-        ApplicationObjects - the lab appliance had zero at the start of this build.
+        An application object groups a set of applications, either individually or by
+        category/risk/characteristics/technology criteria, into a single reusable named object.
+        It uses the same selection shape as a rule inside an application filter policy, but has
+        no Action or Schedule field. The cmdlet only reads; nothing on the firewall is changed.
+        It needs an open connection from Connect-SfosFirewall, or the connection parameters
+        supplied directly.
 
         .PARAMETER NameLike
-        Optional name filter. In Sophos SFOS, 'like' behaves as a substring match. Sent to
-        the firewall as the server-side filter and re-applied client-side, per the project's
-        filtering rules.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. Returns only objects whose name contains the given text anywhere. This is a
+        substring match, not a wildcard pattern. If omitted, the name is not used to filter.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the
-        stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use
-        the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored
-        connection context.
+        Optional. User name for the API login. The account needs read permission for
+        application objects. If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored
-        connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate is
+        validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that was
+        registered with Connect-SfosFirewall -Name. Use it to address a specific firewall when
+        you work with more than one at a time. Any connection parameter you pass explicitly
+        still takes precedence. If omitted, the stored default connection is used.
 
         .PARAMETER AsXml
-        Returns raw XML nodes instead of PowerShell-friendly objects.
+        Optional. Returns the raw XML elements sent by the firewall instead of PowerShell
+        objects. Useful when you need a field that the standard output does not show.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        PSCustomObject with Name, SelectAllRule, CategoryList, RiskList,
-        CharacteristicsList, TechnologyList, ApplicationList and SmartFilter.
-        System.Xml.XmlElement when -AsXml is specified.
+        System.Management.Automation.PSCustomObject. One object per application object, with
+        the properties Name, SelectAllRule, CategoryList, RiskList, CharacteristicsList,
+        TechnologyList, ApplicationList and SmartFilter. Returns System.Xml.XmlElement when
+        -AsXml is used, and an empty array when no object matches.
 
         .EXAMPLE
         Get-SfosApplicationObject
 
-        .EXAMPLE
-        Get-SfosApplicationObject -NameLike "VPN"
+        Lists every application object on the firewall of the current connection.
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        Same measured CategoryList/RiskList/CharacteristicsList/TechnologyList computation
-        behavior as ApplicationFilterPolicy's Rule - see New-SfosApplicationObject's .NOTES.
+        .EXAMPLE
+        Get-SfosApplicationObject -NameLike 'VPN'
+
+        Lists all application objects whose name contains 'VPN'.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/API/PROTECT/Applications/ApplicationObject/ApplicationObject.html
@@ -1477,94 +1508,110 @@ function Get-SfosApplicationObject {
 }
 
 <#
-        .SYNOPSIS
-        Creates a new ApplicationObject on the Sophos Firewall.
+.SYNOPSIS
+    Creates an application object on a Sophos Firewall.
 
-        .DESCRIPTION
-        Creates an ApplicationObject, a reusable named grouping of applications that can be
-        referenced elsewhere (for example from a firewall rule) instead of listing individual
-        applications each time.
+.DESCRIPTION
+    Creates an application object, a reusable named grouping of applications that can be
+    referenced elsewhere, for example from a firewall rule, instead of listing individual
+    applications each time.
 
-        Uses the same two measured selection modes as an ApplicationFilterPolicy Rule (see
-        New-SfosApplicationFilterPolicyRule's .DESCRIPTION for the full write-up):
-        -SelectAllRule 'Disable' stores -Application literally and requires at least one
-        entry; -SelectAllRule 'Enable' with a recognized -Category/-Risk/-Characteristics/
-        -Technology value computes -Application from that criterion server-side. In both
-        modes, whichever of Category/Risk/Characteristics/Technology is NOT the active
-        selection mechanism is ignored or dropped by the firewall on write, exactly as
-        measured for the policy Rule shape.
+    It uses the same two selection modes as a rule inside an application filter policy: with
+    SelectAllRule 'Disable', Application is stored as given and at least one entry is required;
+    with SelectAllRule 'Enable' and a recognized Category, Risk, Characteristics or Technology
+    value, the firewall computes Application from that criterion itself. In both modes,
+    whichever of Category, Risk, Characteristics and Technology is not the active selection
+    criterion is ignored or dropped on write.
 
-        .PARAMETER Name
-        Name of the application object (1-80 characters, no commas) [doc].
+    It needs an open connection from Connect-SfosFirewall, or the connection parameters
+    supplied directly, and an account with write permission for application objects.
 
-        .PARAMETER SelectAllRule
-        'Enable' or 'Disable' [doc, validated live with a 501 on any other value]. Default
-        'Disable'.
+.PARAMETER Name
+    Required. Name of the application object, 1 to 80 characters, no commas.
 
-        .PARAMETER Category
-        Application category names for 'Enable' mode. Ignored in 'Disable' mode - see
-        .DESCRIPTION.
+.PARAMETER SelectAllRule
+    Optional. Enable or Disable; selects which of the two matching modes the object uses.
+    Defaults to Disable.
 
-        .PARAMETER Risk
-        Risk level names for 'Enable' mode. Ignored in 'Disable' mode - see .DESCRIPTION.
+.PARAMETER Category
+    Optional. Application category names for Enable mode. Ignored in Disable mode. No fixed
+    list of valid values; an unrecognized name is silently dropped.
 
-        .PARAMETER Characteristics
-        Characteristic names for 'Enable' mode. Ignored in 'Disable' mode - see .DESCRIPTION.
+.PARAMETER Risk
+    Optional. Risk level names for Enable mode. Ignored in Disable mode. No fixed list of valid
+    values; an unrecognized name is silently dropped.
 
-        .PARAMETER Technology
-        Technology names for 'Enable' mode. Ignored in 'Disable' mode - see .DESCRIPTION.
+.PARAMETER Characteristics
+    Optional. Characteristic names for Enable mode. Ignored in Disable mode. No fixed list of
+    valid values; an unrecognized name is silently dropped.
 
-        .PARAMETER Application
-        Application signature names, for example 'Lantern'. Mandatory when -SelectAllRule is
-        'Disable'; server-computed and thus ignored when -SelectAllRule is 'Enable' with a
-        recognized criterion.
+.PARAMETER Technology
+    Optional. Technology names for Enable mode. Ignored in Disable mode. No fixed list of valid
+    values; an unrecognized name is silently dropped.
 
-        .PARAMETER SmartFilter
-        Free-text search filter. IMPORTANT (measured): a non-empty value causes the firewall
-        to report SelectAllRule back as 'Enable' regardless of what was sent, and drops the
-        computed lists - same finding as the policy Rule shape. Default '' (empty).
+.PARAMETER Application
+    Optional in Enable mode, required in Disable mode. Application signature names, for example
+    'Lantern'. Ignored in Enable mode when the criteria lists match at least one recognized
+    value.
 
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+.PARAMETER SmartFilter
+    Optional. Free-text search filter. A non-empty value makes the firewall report
+    SelectAllRule back as Enable, and drops the computed lists, regardless of what SelectAllRule
+    was set to. Defaults to an empty string.
 
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, uses stored connection context.
+.PARAMETER Firewall
+    Optional. Host name or IP address of the firewall. If omitted, the value from the current
+    connection is used.
 
-        .PARAMETER Port
-        Management/API port number. If omitted, uses stored connection context.
+.PARAMETER Port
+    Optional. TCP port of the management API, usually 4444. If omitted, the value from the
+    current connection is used.
 
-        .PARAMETER Username
-        Username for API authentication. If omitted, uses stored connection context.
+.PARAMETER Username
+    Optional. User name for the API login. The account needs write permission for application
+    objects. If omitted, the value from the current connection is used.
 
-        .PARAMETER Password
-        Password for API authentication. If omitted, uses stored connection context.
+.PARAMETER Password
+    Optional. Password for the API login, as a SecureString. If omitted, the value from the
+    current connection is used.
 
-        .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation.
+.PARAMETER SkipCertificateCheck
+    Optional. Accepts the firewall certificate without validating it. Use this only for
+    appliances that still present a self-signed certificate. If omitted, the certificate is
+    validated.
 
-        .OUTPUTS
-        None. Throws an exception if creation fails.
+.PARAMETER Session
+    Optional. A session object from Connect-SfosFirewall, or the name of a session that was
+    registered with Connect-SfosFirewall -Name. Use it to address a specific firewall when you
+    work with more than one at a time. Any connection parameter you pass explicitly still takes
+    precedence. If omitted, the stored default connection is used.
 
-        .EXAMPLE
-        # Group a single named application
-        New-SfosApplicationObject -Name "KnownProxyApp" -SelectAllRule Disable -Application "Lantern"
+.INPUTS
+    System.Management.Automation.PSCustomObject. Accepts the object name by property name.
 
-        .EXAMPLE
-        # Group every application in a category
-        New-SfosApplicationObject -Name "AllGamingApps" -SelectAllRule Enable -Category "Gaming"
+.OUTPUTS
+    None. The cmdlet writes no output and raises an error if the firewall rejects the create.
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
+.EXAMPLE
+    New-SfosApplicationObject -Name 'KnownProxyApp' -SelectAllRule Disable -Application 'Lantern' -WhatIf
 
-        .LINK
-        https://docs.sophos.com/nsg/sophos-firewall/22.0/API/PROTECT/Applications/ApplicationObject/operations/Applicationobjectadd%26Applicationobjectedit.html
+    Shows what the call would create without sending it to the firewall.
 
-        .LINK
-        Get-SfosApplicationObject
+.EXAMPLE
+    New-SfosApplicationObject -Name 'KnownProxyApp' -SelectAllRule Disable -Application 'Lantern'
+
+    Groups a single named application. The cmdlet asks for confirmation before it writes.
+
+.EXAMPLE
+    New-SfosApplicationObject -Name 'AllGamingApps' -SelectAllRule Enable -Category 'Gaming'
+
+    Groups every application in a category.
+
+.LINK
+    https://docs.sophos.com/nsg/sophos-firewall/22.0/API/PROTECT/Applications/ApplicationObject/operations/Applicationobjectadd%26Applicationobjectedit.html
+
+.LINK
+    Get-SfosApplicationObject
 #>
 function New-SfosApplicationObject {
     [CmdletBinding(SupportsShouldProcess)]
@@ -1601,7 +1648,7 @@ function New-SfosApplicationObject {
     process {
         $applicationValue = @($Application | Where-Object -FilterScript { $_ })
         if ($SelectAllRule -eq 'Disable' -and $applicationValue.Count -eq 0) {
-            throw "New-SfosApplicationObject: -SelectAllRule 'Disable' requires at least one -Application entry - the firewall silently drops an ApplicationObject with no ApplicationList (measured, same finding as the policy Rule shape)."
+            throw "New-SfosApplicationObject: -SelectAllRule 'Disable' requires at least one -Application entry - the firewall silently drops an ApplicationObject with no ApplicationList."
         }
 
         if (-not $PSCmdlet.ShouldProcess("ApplicationObject '$Name' on $($params.Firewall)", 'Create')) {
@@ -1638,92 +1685,102 @@ function New-SfosApplicationObject {
 }
 
 <#
-        .SYNOPSIS
-        Updates an existing ApplicationObject on the Sophos Firewall.
+.SYNOPSIS
+    Updates an application object on a Sophos Firewall.
 
-        .DESCRIPTION
-        Updates an ApplicationObject using the Sophos Firewall XML API. You can supply the
-        target object name directly or via the pipeline.
+.DESCRIPTION
+    Updates an application object. You can supply the target object name directly or through
+    the pipeline.
 
-        SFOS replaces the whole entity on update - any element not sent in the request is
-        cleared on the firewall. This cmdlet reads the current object first and keeps
-        whatever the caller does not explicitly pass. operation="update" was measured to
-        update the existing object in place (no duplicate created) - unlike some other
-        entities in this project's history, "edit" was not needed.
+    The firewall replaces the whole object on update; any field not sent is cleared. This
+    cmdlet reads the current object first and keeps whatever the caller does not explicitly
+    pass.
 
-        .PARAMETER Name
-        Name of the target object.
+.PARAMETER Name
+    Required. Name of the target object.
 
-        .PARAMETER SelectAllRule
-        'Enable' or 'Disable'. If omitted, the existing value is kept. See
-        New-SfosApplicationObject's .DESCRIPTION for the two selection modes.
+.PARAMETER SelectAllRule
+    Optional. Enable or Disable. If omitted, the existing value is kept. See
+    New-SfosApplicationObject for the two selection modes.
 
-        .PARAMETER Category
-        Application category names for 'Enable' mode. If omitted, the existing value is kept
-        (though it is recomputed by the firewall regardless in 'Disable' mode - see New-SfosApplicationObject's .DESCRIPTION above).
+.PARAMETER Category
+    Optional. Application category names for Enable mode. If omitted, the existing value is
+    kept. No fixed list of valid values; an unrecognized name is silently dropped.
 
-        .PARAMETER Risk
-        Risk level names for 'Enable' mode. If omitted, the existing value is kept.
+.PARAMETER Risk
+    Optional. Risk level names for Enable mode. If omitted, the existing value is kept. No
+    fixed list of valid values; an unrecognized name is silently dropped.
 
-        .PARAMETER Characteristics
-        Characteristic names for 'Enable' mode. If omitted, the existing value is kept.
+.PARAMETER Characteristics
+    Optional. Characteristic names for Enable mode. If omitted, the existing value is kept. No
+    fixed list of valid values; an unrecognized name is silently dropped.
 
-        .PARAMETER Technology
-        Technology names for 'Enable' mode. If omitted, the existing value is kept.
+.PARAMETER Technology
+    Optional. Technology names for Enable mode. If omitted, the existing value is kept. No
+    fixed list of valid values; an unrecognized name is silently dropped.
 
-        .PARAMETER Application
-        Application signature names. If omitted, the existing value is kept. Mandatory
-        (directly or via the preserved existing value) when the resulting -SelectAllRule is
-        'Disable'.
+.PARAMETER Application
+    Optional. Application signature names. If omitted, the existing value is kept. Required,
+    directly or through the existing value, when the resulting SelectAllRule is Disable.
 
-        .PARAMETER SmartFilter
-        Free-text search filter. If omitted, the existing value is kept.
+.PARAMETER SmartFilter
+    Optional. Free-text search filter. If omitted, the existing value is kept.
 
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+.PARAMETER Firewall
+    Optional. Host name or IP address of the firewall. If omitted, the value from the current
+    connection is used.
 
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the
-        stored connection context.
+.PARAMETER Port
+    Optional. TCP port of the management API, usually 4444. If omitted, the value from the
+    current connection is used.
 
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use
-        the stored connection context.
+.PARAMETER Username
+    Optional. User name for the API login. The account needs write permission for application
+    objects. If omitted, the value from the current connection is used.
 
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored
-        connection context.
+.PARAMETER Password
+    Optional. Password for the API login, as a SecureString. If omitted, the value from the
+    current connection is used.
 
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored
-        connection context.
+.PARAMETER SkipCertificateCheck
+    Optional. Accepts the firewall certificate without validating it. Use this only for
+    appliances that still present a self-signed certificate. If omitted, the certificate is
+    validated.
 
-        .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+.PARAMETER Session
+    Optional. A session object from Connect-SfosFirewall, or the name of a session that was
+    registered with Connect-SfosFirewall -Name. Use it to address a specific firewall when you
+    work with more than one at a time. Any connection parameter you pass explicitly still takes
+    precedence. If omitted, the stored default connection is used.
 
-        .OUTPUTS
-        None. Throws an exception if the update fails.
+.INPUTS
+    System.Management.Automation.PSCustomObject. Accepts an application object by value or by
+    property name, for example from Get-SfosApplicationObject.
 
-        .EXAMPLE
-        # Add a second application to an existing 'Disable'-mode object
-        Set-SfosApplicationObject -Name "KnownProxyApp" -Application "Lantern", "TurboVPN"
+.OUTPUTS
+    None. The cmdlet writes no output and raises an error if the firewall rejects the update.
 
-        .EXAMPLE
-        # Update using pipeline input
-        Get-SfosApplicationObject -NameLike "KnownProxyApp" | Set-SfosApplicationObject -SmartFilter "proxy"
+.EXAMPLE
+    Set-SfosApplicationObject -Name 'KnownProxyApp' -Application 'Lantern', 'TurboVPN' -WhatIf
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
+    Shows what the call would change without sending it to the firewall.
 
-        .LINK
-        https://docs.sophos.com/nsg/sophos-firewall/22.0/API/PROTECT/Applications/ApplicationObject/operations/Applicationobjectadd%26Applicationobjectedit.html
+.EXAMPLE
+    Set-SfosApplicationObject -Name 'KnownProxyApp' -Application 'Lantern', 'TurboVPN'
 
-        .LINK
-        Get-SfosApplicationObject
+    Replaces the application list of an existing Disable-mode object. The cmdlet asks for
+    confirmation before it writes.
+
+.EXAMPLE
+    Get-SfosApplicationObject -NameLike 'KnownProxyApp' | Set-SfosApplicationObject -SmartFilter 'proxy'
+
+    Reads the matching object and applies the same change through the pipeline.
+
+.LINK
+    https://docs.sophos.com/nsg/sophos-firewall/22.0/API/PROTECT/Applications/ApplicationObject/operations/Applicationobjectadd%26Applicationobjectedit.html
+
+.LINK
+    Get-SfosApplicationObject
 #>
 function Set-SfosApplicationObject {
     [CmdletBinding(SupportsShouldProcess)]
@@ -1818,62 +1875,66 @@ function Set-SfosApplicationObject {
 }
 
 <#
-        .SYNOPSIS
-        Removes an ApplicationObject from the Sophos Firewall.
+.SYNOPSIS
+    Removes an application object from a Sophos Firewall.
 
-        .DESCRIPTION
-        Removes an ApplicationObject using the Sophos Firewall XML API. This cmdlet supports
-        ShouldProcess; use -WhatIf to preview the change.
+.DESCRIPTION
+    Removes an application object. The cmdlet reads the object first and throws an error if the
+    given name does not exist, so the caller gets a clear reason for the failure.
 
-        Removing an object name that does not exist answers a misleading 503 'Operation
-        failed. Entity having same parameter details already exists.' [measured against the
-        lab firewall] - the same wrong-shaped message measured for
-        Remove-SfosApplicationFilterPolicy. This cmdlet therefore reads the object first and
-        throws 'was not found' for a name that is not present.
+.PARAMETER Name
+    Required. Name of the object to remove.
 
-        .PARAMETER Name
-        Name of the target object.
+.PARAMETER Firewall
+    Optional. Host name or IP address of the firewall. If omitted, the value from the current
+    connection is used.
 
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+.PARAMETER Port
+    Optional. TCP port of the management API, usually 4444. If omitted, the value from the
+    current connection is used.
 
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the
-        stored connection context.
+.PARAMETER Username
+    Optional. User name for the API login. The account needs write permission for application
+    objects. If omitted, the value from the current connection is used.
 
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use
-        the stored connection context.
+.PARAMETER Password
+    Optional. Password for the API login, as a SecureString. If omitted, the value from the
+    current connection is used.
 
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored
-        connection context.
+.PARAMETER SkipCertificateCheck
+    Optional. Accepts the firewall certificate without validating it. Use this only for
+    appliances that still present a self-signed certificate. If omitted, the certificate is
+    validated.
 
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored
-        connection context.
+.PARAMETER Session
+    Optional. A session object from Connect-SfosFirewall, or the name of a session that was
+    registered with Connect-SfosFirewall -Name. Use it to address a specific firewall when you
+    work with more than one at a time. Any connection parameter you pass explicitly still takes
+    precedence. If omitted, the stored default connection is used.
 
-        .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+.INPUTS
+    System.Management.Automation.PSCustomObject. Accepts an application object by value or by
+    property name, for example from Get-SfosApplicationObject.
 
-        .OUTPUTS
-        None. Throws an exception if removal fails, or if the named object does not exist.
+.OUTPUTS
+    None. The cmdlet writes no output and raises an error if the firewall rejects the removal,
+    or if the named object does not exist.
 
-        .EXAMPLE
-        Remove-SfosApplicationObject -Name "KnownProxyApp"
+.EXAMPLE
+    Remove-SfosApplicationObject -Name 'KnownProxyApp' -WhatIf
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
+    Shows what the call would remove without sending it to the firewall.
 
-        .LINK
-        https://docs.sophos.com/nsg/sophos-firewall/22.0/API/PROTECT/Applications/ApplicationObject/operations/Application%20object%20delete.html
+.EXAMPLE
+    Remove-SfosApplicationObject -Name 'KnownProxyApp'
 
-        .LINK
-        Get-SfosApplicationObject
+    Removes the named object. The cmdlet asks for confirmation before it writes.
+
+.LINK
+    https://docs.sophos.com/nsg/sophos-firewall/22.0/API/PROTECT/Applications/ApplicationObject/operations/Application%20object%20delete.html
+
+.LINK
+    Get-SfosApplicationObject
 #>
 function Remove-SfosApplicationObject {
     [CmdletBinding(SupportsShouldProcess)]
@@ -1934,180 +1995,113 @@ function Remove-SfosApplicationObject {
 
 #endregion
 
-# SophosFirewall.Applications - Group B: ApplicationFilterCategory,
-# ApplicationClassificationAssignment (single + batch), ApplicationClassification switch.
+# ApplicationFilterCategory, ApplicationClassificationAssignment (single and batch) and the
+# ApplicationClassification switch.
 #
-# Measured live against SFOS 22.0 in the lab. Key cross-cutting findings for
-# this fragment - see each function's .NOTES for the specific evidence:
+# ApplicationFilterCategory has no add or delete operation, only edit; the 26 categories are
+# fixed. operation="edit" and operation="update" behave identically for this entity; the
+# module uses "update" exclusively, since only "add"/"update" are trusted verbs in this API.
+# There is no New-/Remove-SfosApplicationFilterCategory, because there is no operation to
+# build them on. Server-side filtering on the Name and Description keys has no effect; no
+# <Filter> is sent and NameLike is applied on the client. Description cannot be changed
+# through this entity's update operation; the field is accepted and sent but the firewall
+# discards the change, so Set-SfosApplicationFilterCategory reads the object back and throws
+# if a requested Description change did not take effect. QoSPolicy only accepts a policy
+# whose own PolicyBasedOn is Application; a policy based on FirewallRule or User is rejected.
+# BandwidthUsageType only takes effect together with a QoSPolicy value other than None in the
+# same request. The per-application QoS override list (ApplicationSettings) follows the
+# general full-replace rule: Set-SfosApplicationFilterCategory preserves the existing list
+# whenever the caller does not pass -ApplicationSettings, and
+# Add-/Remove-SfosApplicationFilterCategoryMember read the current list before changing it.
 #
-# 1. ApplicationFilterCategory has NO documented add or delete operation - only "edit"
-#    (doc URL .../ApplicationFilterCategory/operations/ApplicationCategory.html). The 26
-#    categories are firmware-fixed. operation="edit" is untrusted without
-#    a duplicate check; measured live, "edit" behaves identically to "update" for this
-#    entity (200, no duplicate created, same silent-no-op-on-Description behaviour - see
-#    Set-SfosApplicationFilterCategory). "update" is used exclusively, since only "add"/
-#    "update" are trusted verbs in this API. New-/Remove- are deliberately not built:
-#    there is no operation to base them on, and inventing operation="add" against a fixed
-#    26-row table would be exactly the kind of unsafe guess.
-# 2. Get-SfosApplicationFilterCategory: server-side filtering is a no-op for BOTH "Name"
-#    and "Description" keys (measured: a Name-like or Description-like filter for a single
-#    category returns all 26 rows unchanged). This project sends only keys
-#    "known to work" - since neither measured key works for this entity, no <Filter> is sent
-#    at all and -NameLike is client-side only, the same exception already documented for
-#    ContentConditionList.
-# 3. Set-SfosApplicationFilterCategory -Description is a genuine silent no-op on this
-#    firmware [measured]: a <Set operation="update"> that changes ONLY Description answers
-#    200, and a subsequent Get shows the original text unchanged - reproduced 3 times,
-#    including bundled with a QoSPolicy change that DID persist in the same request. This is
-#    the same defect class as Remove-SfosSSLBookmark: a write that reports
-#    success and changes nothing. For that class, the cmdlet reads the object
-#    back and throws when a caller-requested Description change did not take effect, rather
-#    than silently reporting success.
-# 4. QoSPolicy on ApplicationFilterCategory only accepts a QoSPolicy object whose own
-#    PolicyBasedOn is "Application" [measured]: 'Streaming Video - Limit to SD Quality'
-#    (PolicyBasedOn=Application) succeeded and persisted; 'VoIP Guarantee'
-#    (PolicyBasedOn=FirewallRule) and 'Low Guarantee User' (PolicyBasedOn=User) both answered
-#    501 "Configuration parameters validation failed" with no <InvalidParams> detail. 'None'
-#    (the default, clearing any QoS assignment) round-trips as a genuine no-op. This
-#    constraint is undocumented on the ApplicationFilterCategory operation page.
-# 5. BandwidthUsageType only takes effect together with a real (non-'None') QoSPolicy
-#    [measured]: sending BandwidthUsageType alone against QoSPolicy=None is silently ignored
-#    (200, unchanged on re-Get), but sending it alongside a valid Application-scoped
-#    QoSPolicy in the same request persists correctly.
-# 6. The per-application QoS override subtree <ApplicationSettings><Application><Name/
-#    QoSPolicy></Application></ApplicationSettings> DOES work and follows the documented
-#    full-replace rule: writing it with one <Application> entry persists
-#    and is visible on the next Get (measured with Application 'Instagram' and QoSPolicy
-#    'Streaming Video - Limit to SD Quality' inside category 'Mobile Applications');
-#    omitting the wrapper entirely on a later update clears it back to no per-app overrides.
-#    Set-SfosApplicationFilterCategory therefore preserves the existing ApplicationSettings
-#    list whenever the caller does not pass -ApplicationSettings, and the dedicated
-#    Add-/Remove-SfosApplicationFilterCategoryMember cmdlets exist because every
-#    entity that has a member list gets Add-/Remove-...Member cmdlets.
-# 7. ApplicationClassificationAssignment: server-side filtering is a no-op for BOTH
-#    "Application" and "Classification" keys, exact and like criteria alike [measured against
-#    the live 520-row set - every filter tried still returned all 520 rows]. -ApplicationLike
-#    and -ClassificationLike are therefore client-side only, no <Filter> is sent.
-# 8. Classification value space [measured]: every one of the live 520 assignments currently
-#    reads 'New'. Resending 'New' (exact case) succeeds as a no-op (200). Every other
-#    candidate tried - 'Reviewed', 'Existing', 'Approved', 'Old', 'Unclassified', 'Known',
-#    'Ignore', 'Ignored', 'Acknowledged', 'Seen', 'Discovered', 'None', 'Default', '' (empty),
-#    and case variants 'new'/'NEW' - answered 501 "Configuration parameters validation
-#    failed" naming /ApplicationClassificationAssignment/Classification in <InvalidParams>.
-#    No documented enum exists for this field and the vendor operation page confirms none is
-#    published. Only 'New' is confirmed to work on this firmware; the parameter is therefore
-#    left as an unrestricted string (no ValidateSet) rather than inventing enum values the
-#    API does not document, and the finding is recorded
-#    here rather than baked into client-side validation that could reject a value the vendor
-#    later documents.
-# 9. ApplicationClassificationBatchAssignment: the wire element names are lower-case
-#    <app>/<class> (confirmed both by the doc sample AND by re-sending live Get data), unlike
-#    the single-assignment operation's <Application>/<Classification>. Sending the
-#    upper-case, single-assignment names inside the batch wrapper is rejected: 501 with an
-#    EMPTY <InvalidParams/> (no field named) - measured, and the same empty-InvalidParams
-#    signature seen for the IsDefault/PerConnectionAuth blockers elsewhere in
-#    this project. A batch call with an unknown Application name is rejected the same way
-#    (501, empty <InvalidParams/>), so an unresolvable entry in a batch cannot be diagnosed
-#    per-item from the response - it is reported as one failure for the whole batch, unlike
-#    the single-assignment operation which names the specific field in <InvalidParams>.
-#    Multi-entry batches with valid data succeed as a single 200 (measured with 2 entries).
+# ApplicationClassificationAssignment: server-side filtering on the Application and
+# Classification keys has no effect; both filters are applied on the client. Only the
+# classification value 'New' is confirmed to work; there is no documented value set, so the
+# parameter is left as an unrestricted string rather than an invented ValidateSet.
 #
-# Design choice for pipeline vs. batch (both cmdlets exist, deliberately):
-# Set-SfosApplicationClassificationAssignment sends one API request per pipeline item,
-# matching this project's usual Set-* semantics: precise per-object error attribution (the
-# single-assignment operation names the failing field in <InvalidParams>; the batch
-# operation, per finding 9 above, does not), and it is the natural target of
-# `Get-SfosApplicationClassificationAssignment | Where-Object {...} | Set-...`.
-# Set-SfosApplicationClassificationAssignmentBatch collects every pipeline item in the `end`
-# block and issues exactly one API round trip, which is the whole point of the batch
-# operation - saving N round trips for a bulk reclassification at the cost of per-item error
-# detail. Callers who need per-item confirmation use the single cmdlet; callers who need to
-# push hundreds of reclassifications quickly use the batch cmdlet.
+# ApplicationClassificationBatchAssignment sends the same pairs as one request instead of one
+# request per item. A rejected batch fails as a whole, with no way to tell from the response
+# which entry caused it. Set-SfosApplicationClassificationAssignment exists for callers who
+# need per-item error detail; Set-SfosApplicationClassificationAssignmentBatch exists for
+# bulk reclassification in a single round trip.
 #
-# ApplicationClassification (undocumented singleton, wire root <ApplicationClassification>,
-# single field <ACTION>On/Off</ACTION> - upper-case element name, unlike every other entity
-# in this module):
-# - No operation page exists for this entity at all (confirmed absent from the Applications
-#   doc tree per apps-doku-inventar.md). The write path was probed only after capturing
-#   baseline-ApplicationClassification-b.xml, and the ACTUAL toggle (On -> Off -> On) is
-#   run as the LAST step of the whole session, not interleaved with the rest of the
-#   verification, to keep the window during which application classification is off as
-#   short as possible.
-# - Status XPath measured the same way as every other entity: an invalid <ACTION>Bogus</ACTION>
-#   answered code 501 at /Response/ApplicationClassification/Status[@code], with
-#   <InvalidParams><Params>/ApplicationClassification/ACTION</Params></InvalidParams> - same
-#   shape as IPSSwitch. A same-value no-op resend of <ACTION>On</ACTION> with
-#   operation="update" answered a clean 200 and a following Get still read 'On' - the
-#   documented precondition for going ahead with the real toggle test.
-# - Get-SfosApplicationClassification uses the identical coded-vs-code-less Status special
-#   case as Get-SfosIPSSwitch (a Status DATA FIELD without a code attribute is not
-#   an API error) - here the field is <ACTION>, not <Status>, so there is no naming collision
-#   at all and no special-casing is actually required; Get-SfosApplicationClassification
-#   simply reads /Response/ApplicationClassification/ACTION as data. Documented here because
-#   the task explicitly asked the heuristic to be checked, not assumed.
+# ApplicationClassification is an undocumented singleton with a single field, ACTION (On or
+# Off), controlling whether the firewall classifies newly discovered applications at all.
+# Unlike most entities in this module, the field is named ACTION rather than a mixed-case
+# name, and there is no <Status> element to collide with it.
 
 #region ApplicationFilterCategory
 
 <#
 .SYNOPSIS
-    Retrieves ApplicationFilterCategory objects from the Sophos Firewall.
+    Retrieves application filter category objects from a Sophos Firewall.
 
 .DESCRIPTION
-    Queries the Sophos Firewall XML API for ApplicationFilterCategory objects (PROTECT >
-    Applications > Application Filter, called "Application Category" in the API operation
-    name). These 26 categories are firmware-fixed - there is no add or delete operation, only
-    edit - so this module ships Get/Set plus Add-/Remove-SfosApplicationFilterCategoryMember
-    for the nested per-application QoS overrides, and no New-/Remove-SfosApplicationFilterCategory.
+    Returns application filter category objects (PROTECT > Applications > Application Filter,
+    called "Application Category" in the API). The firewall ships 26 fixed categories; there is
+    no create or delete operation, only update, so this module offers Get and Set plus
+    Add-/Remove-SfosApplicationFilterCategoryMember for the nested per-application QoS
+    overrides.
 
-    Server-side filtering is measured to be a no-op for this entity on both the "Name" and
-    "Description" keys - a filtered Get returns all 26 rows regardless. No <Filter> is sent;
-    -NameLike is applied entirely client-side.
+    Server-side filtering on Name or Description has no effect for this entity; a filtered
+    request still returns all 26 categories, so NameLike is applied on the client. The cmdlet
+    only reads; nothing on the firewall is changed. It needs an open connection from
+    Connect-SfosFirewall, or the connection parameters supplied directly.
 
 .PARAMETER NameLike
-    Filters by Name, substring match. Client-side only - see .DESCRIPTION.
-
-.PARAMETER Session
-A session object returned by Connect-SfosFirewall, or the name of a session
-registered with Connect-SfosFirewall -Name. Overrides the stored default
-connection context; any of -Firewall/-Port/-Username/-Password/
--SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+    Optional. Returns only categories whose name contains the given text anywhere. This is a
+    substring match, not a wildcard pattern, and is applied on the client. If omitted, the name
+    is not used to filter.
 
 .PARAMETER Firewall
-    Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. Host name or IP address of the firewall. If omitted, the value from the current
+    connection is used.
 
 .PARAMETER Port
-    Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. TCP port of the management API, usually 4444. If omitted, the value from the
+    current connection is used.
 
 .PARAMETER Username
-    Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. User name for the API login. The account needs read permission for application
+    filter categories. If omitted, the value from the current connection is used.
 
 .PARAMETER Password
-    Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. Password for the API login, as a SecureString. If omitted, the value from the
+    current connection is used.
 
 .PARAMETER SkipCertificateCheck
-    Skips SSL certificate validation for the API call.
+    Optional. Accepts the firewall certificate without validating it. Use this only for
+    appliances that still present a self-signed certificate. If omitted, the certificate is
+    validated.
+
+.PARAMETER Session
+    Optional. A session object from Connect-SfosFirewall, or the name of a session that was
+    registered with Connect-SfosFirewall -Name. Use it to address a specific firewall when you
+    work with more than one at a time. Any connection parameter you pass explicitly still takes
+    precedence. If omitted, the stored default connection is used.
 
 .PARAMETER AsXml
-    Returns the raw XML nodes instead of PowerShell-friendly objects.
+    Optional. Returns the raw XML elements sent by the firewall instead of PowerShell objects.
+    Useful when you need a field that the standard output does not show.
+
+.INPUTS
+    None. This cmdlet does not accept pipeline input.
 
 .OUTPUTS
-    PSCustomObject[] (default). System.Xml.XmlElement[] when -AsXml is specified.
+    System.Management.Automation.PSCustomObject. One object per category. A category with no
+    per-application QoS override returns an empty array for that list until
+    Add-SfosApplicationFilterCategoryMember has been used on it. Returns System.Xml.XmlElement
+    when -AsXml is used, and an empty array when no category matches.
 
 .EXAMPLE
-    # List all 26 application filter categories
     Get-SfosApplicationFilterCategory
 
+    Lists all 26 application filter categories.
+
 .EXAMPLE
-    # Find a category by name (client-side substring match)
     Get-SfosApplicationFilterCategory -NameLike 'Mobile'
 
-.NOTES
-    Minimum supported PowerShell version: 5.1
-    Measured live: server-side filtering by Name or Description both return all 26 rows
-    unfiltered - see the fragment header. ApplicationSettings (per-application QoS override
-    list) is @() for every category unless Add-SfosApplicationFilterCategoryMember has been
-    used on it.
+    Lists all categories whose name contains 'Mobile'.
 
 .LINK
     https://docs.sophos.com/nsg/sophos-firewall/22.0/API/PROTECT/Applications/ApplicationFilterCategory/ApplicationFilterCategory.html
@@ -2183,97 +2177,91 @@ function Get-SfosApplicationFilterCategory {
 
 <#
 .SYNOPSIS
-    Updates an ApplicationFilterCategory on the Sophos Firewall.
+    Updates an application filter category on a Sophos Firewall.
 
 .DESCRIPTION
-    Updates an existing ApplicationFilterCategory (PROTECT > Applications > Application
-    Filter) using the Sophos Firewall XML API. There is no create or delete operation for
-    this entity - the 26 categories are firmware-fixed - so -Name identifies an existing
-    category and cannot itself be changed [doc: "Category Name cannot be changed"].
+    Updates an existing application filter category (PROTECT > Applications > Application
+    Filter). There is no create or delete operation for this entity; the 26 categories are
+    fixed, so Name identifies an existing category and cannot itself be changed.
 
-    Reads the current object first and writes back every field, overriding only what the
-    caller passed (read-modify-write) - this entity replaces the whole object on
-    update, so an omitted ApplicationSettings list would otherwise silently clear every
-    per-application QoS override.
+    The cmdlet reads the current category first and writes back every field, overriding only
+    what the caller passed, because the firewall replaces the whole object on update.
 
-    -Description is measured to be a silent no-op on this firmware: the API answers 200 but
-    the value never changes on a following Get, reproduced even bundled with a QoSPolicy
-    change that DID persist in the same request. If the caller explicitly asks for a
-    Description change, this cmdlet re-reads the object afterwards and throws when the
-    change did not take effect, rather than reporting a success that did not happen -
-    the same treatment as Remove-SfosSSLBookmark's silent no-op delete.
+    Description cannot be changed on this firmware. The firewall answers success but the value
+    never changes; the cmdlet reads the object back afterwards and throws when a requested
+    Description change did not take effect. A category only accepts a QoS policy whose own
+    PolicyBasedOn is 'Application'; a policy based on 'FirewallRule' or 'User' is rejected.
 
 .PARAMETER Name
-    Name of the category to update [doc]. Identifies the object; cannot be changed.
+    Required. Name of the category to update. Identifies the object; cannot be changed.
 
 .PARAMETER QoSPolicy
-    Name of a QoSPolicy object to apply to the whole category, or 'None' to clear it [doc].
-    Measured: only accepted when the referenced QoSPolicy's own PolicyBasedOn is
-    'Application' - a QoSPolicy based on 'FirewallRule' or 'User' is rejected with 501
-    'Configuration parameters validation failed' (no field-level detail). Not restricted by
-    ValidateSet here because the set of eligible QoSPolicy names is data on the firewall
-    (Get-SfosQoSPolicy is not part of this module), not a fixed vendor enum.
+    Optional. Name of a QoS policy to apply to the whole category, or 'None' to clear it. Only
+    accepted when the referenced policy is based on Application.
 
 .PARAMETER BandwidthUsageType
-    'Individual', 'Shared', or an empty string to clear it [doc]. Measured: only takes effect
-    together with a QoSPolicy other than 'None' in the SAME request - sent alongside
-    QoSPolicy='None' it is silently ignored. Empty string is accepted (not a strict
-    ValidateSet) because every stock category's baseline value is the empty string.
+    Optional. Individual, Shared, or an empty string to clear it. Only takes effect together
+    with a QoSPolicy value other than 'None' in the same request; sent alongside QoSPolicy
+    'None' it is ignored.
 
 .PARAMETER Description
-    Free-text description [doc]. Measured to be a silent no-op on this firmware - see
-    .DESCRIPTION. Included because it is documented and the request shape is otherwise
-    correct; do not rely on it changing anything until Sophos fixes the firmware.
+    Optional. Free-text description. Sending a change has no effect on this firmware; the
+    cmdlet reads the object back and throws if the change did not take effect.
 
 .PARAMETER ApplicationSettings
-    Complete replacement list of per-application QoS overrides, each a PSCustomObject or
-    hashtable with Name (application name) and QoSPolicy properties [doc/measured]. Omit to
-    preserve the category's current list; pass an empty array to clear it (measured: an
-    update that omits the <ApplicationSettings> wrapper entirely clears any existing
-    overrides). Prefer Add-/Remove-SfosApplicationFilterCategoryMember for single-application
-    changes - they read the current list for you.
-
-.PARAMETER Session
-A session object returned by Connect-SfosFirewall, or the name of a session
-registered with Connect-SfosFirewall -Name. Overrides the stored default
-connection context; any of -Firewall/-Port/-Username/-Password/
--SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+    Optional. Complete replacement list of per-application QoS overrides, each an object with
+    Name and QoSPolicy properties. If omitted, the existing list is kept; passing an empty
+    array clears it. Prefer Add-/Remove-SfosApplicationFilterCategoryMember for single-
+    application changes; they read the current list for you.
 
 .PARAMETER Firewall
-    Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. Host name or IP address of the firewall. If omitted, the value from the current
+    connection is used.
 
 .PARAMETER Port
-    Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. TCP port of the management API, usually 4444. If omitted, the value from the
+    current connection is used.
 
 .PARAMETER Username
-    Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. User name for the API login. The account needs write permission for application
+    filter categories. If omitted, the value from the current connection is used.
 
 .PARAMETER Password
-    Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. Password for the API login, as a SecureString. If omitted, the value from the
+    current connection is used.
 
 .PARAMETER SkipCertificateCheck
-    Skips SSL certificate validation for the API call.
+    Optional. Accepts the firewall certificate without validating it. Use this only for
+    appliances that still present a self-signed certificate. If omitted, the certificate is
+    validated.
+
+.PARAMETER Session
+    Optional. A session object from Connect-SfosFirewall, or the name of a session that was
+    registered with Connect-SfosFirewall -Name. Use it to address a specific firewall when you
+    work with more than one at a time. Any connection parameter you pass explicitly still takes
+    precedence. If omitted, the stored default connection is used.
+
+.INPUTS
+    System.Management.Automation.PSCustomObject. Accepts the category name by property name.
 
 .OUTPUTS
-    None. Throws an exception if the update fails or if a requested Description change was
-    not confirmed on a following Get.
+    None. The cmdlet writes no output and raises an error if the firewall rejects the update,
+    or if a requested Description change was not confirmed on a following read.
 
 .EXAMPLE
-    # Clear any QoS assignment from a category (round-trips as a no-op if already None)
+    Set-SfosApplicationFilterCategory -Name 'Mobile Applications' -QoSPolicy 'None' -WhatIf
+
+    Shows what the call would change without sending it to the firewall.
+
+.EXAMPLE
     Set-SfosApplicationFilterCategory -Name 'Mobile Applications' -QoSPolicy 'None'
 
-.EXAMPLE
-    # Assign an Application-scoped QoS policy with a bandwidth usage type
-    Set-SfosApplicationFilterCategory -Name 'Mobile Applications' `
-        -QoSPolicy 'Streaming Video - Limit to SD Quality' -BandwidthUsageType Individual
+    Clears the QoS assignment of a category. The cmdlet asks for confirmation before it writes.
 
-.NOTES
-    Minimum supported PowerShell version: 5.1
-    Verified live against SFOS 22.0: QoSPolicy+BandwidthUsageType change on category 'Mobile
-    Applications' persisted and was reverted to the exact original baseline afterwards
-    (byte-identical full-category-list comparison). See the fragment header for the
-    QoSPolicy PolicyBasedOn constraint and the Description no-op finding.
+.EXAMPLE
+    Set-SfosApplicationFilterCategory -Name 'Mobile Applications' -QoSPolicy 'Streaming Video - Limit to SD Quality' -BandwidthUsageType Individual
+
+    Assigns an Application-scoped QoS policy with a bandwidth usage type.
 
 .LINK
     https://docs.sophos.com/nsg/sophos-firewall/22.0/API/PROTECT/Applications/ApplicationFilterCategory/operations/ApplicationCategory.html
@@ -2288,11 +2276,9 @@ function Set-SfosApplicationFilterCategory {
         [string]$Name,
 
         [string]$QoSPolicy,
-        # Not a strict ValidateSet: the baseline value on every stock category is the EMPTY
-        # string (measured), which is the value needed to revert a category to 'no per-app
-        # bandwidth grouping' after testing - a ValidateSet of just 'Individual'/'Shared'
-        # would make that revert impossible through this cmdlet. Validated in the body
-        # instead.
+        # Not a strict ValidateSet: the baseline value on every stock category is the empty
+        # string, which is also the value needed to clear a bandwidth grouping - a ValidateSet
+        # of just 'Individual'/'Shared' would make that impossible through this cmdlet.
         [string]$BandwidthUsageType,
         [string]$Description,
         [PSCustomObject[]]$ApplicationSettings,
@@ -2383,7 +2369,7 @@ function Set-SfosApplicationFilterCategory {
                 Where-Object -FilterScript { $_.Name -eq $Name })
 
             if ($confirmed.Count -eq 0 -or $confirmed[0].Description -ne $Description) {
-                throw "ApplicationFilterCategory '$Name' update reported success but the Description change was not confirmed on the firewall - this field is measured to be a silent no-op on this firmware (see module header). Requested '$Description', found '$($confirmed[0].Description)'."
+                throw "ApplicationFilterCategory '$Name' update reported success but the Description change was not confirmed on the firewall. Requested '$Description', found '$($confirmed[0].Description)'."
             }
         }
     }
@@ -2391,60 +2377,67 @@ function Set-SfosApplicationFilterCategory {
 
 <#
 .SYNOPSIS
-    Adds or updates a per-application QoS override inside an ApplicationFilterCategory.
+    Adds or updates a per-application QoS override inside an application filter category.
 
 .DESCRIPTION
-    Reads the current ApplicationFilterCategory, upserts one entry in its ApplicationSettings
-    list (updates QoSPolicy if -Application already has an override, otherwise adds a new
-    one), and writes the complete list back - this entity replaces the whole
-    ApplicationSettings subtree on update, so every other override would otherwise be lost.
+    Reads the current category, adds or updates one entry in its per-application QoS override
+    list (updates the QoS policy if the application already has an override, otherwise adds a
+    new entry), and writes the complete list back. The firewall replaces the whole override
+    list on update, so every other override would otherwise be lost.
 
 .PARAMETER Name
-    Name of the ApplicationFilterCategory to modify.
+    Required. Name of the category to modify.
 
 .PARAMETER Application
-    Name of the application to set a per-application QoS override for.
+    Required. Name of the application to set a per-application QoS override for.
 
 .PARAMETER QoSPolicy
-    Name of the QoSPolicy object to apply to this application. Same PolicyBasedOn='Application'
-    constraint as Set-SfosApplicationFilterCategory -QoSPolicy applies here - unconfirmed for
-    the per-application field specifically, since the live test used 'Streaming Video - Limit
-    to SD Quality' (PolicyBasedOn=Application) throughout.
-
-.PARAMETER Session
-A session object returned by Connect-SfosFirewall, or the name of a session
-registered with Connect-SfosFirewall -Name. Overrides the stored default
-connection context; any of -Firewall/-Port/-Username/-Password/
--SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+    Required. Name of the QoS policy to apply to this application. The policy must be based on
+    Application. The value 'None' is rejected; use Remove-SfosApplicationFilterCategoryMember
+    to remove an override instead.
 
 .PARAMETER Firewall
-    Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. Host name or IP address of the firewall. If omitted, the value from the current
+    connection is used.
 
 .PARAMETER Port
-    Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. TCP port of the management API, usually 4444. If omitted, the value from the
+    current connection is used.
 
 .PARAMETER Username
-    Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. User name for the API login. The account needs write permission for application
+    filter categories. If omitted, the value from the current connection is used.
 
 .PARAMETER Password
-    Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. Password for the API login, as a SecureString. If omitted, the value from the
+    current connection is used.
 
 .PARAMETER SkipCertificateCheck
-    Skips SSL certificate validation for the API call.
+    Optional. Accepts the firewall certificate without validating it. Use this only for
+    appliances that still present a self-signed certificate. If omitted, the certificate is
+    validated.
+
+.PARAMETER Session
+    Optional. A session object from Connect-SfosFirewall, or the name of a session that was
+    registered with Connect-SfosFirewall -Name. Use it to address a specific firewall when you
+    work with more than one at a time. Any connection parameter you pass explicitly still takes
+    precedence. If omitted, the stored default connection is used.
+
+.INPUTS
+    System.Management.Automation.PSCustomObject. Accepts the category name by property name.
 
 .OUTPUTS
-    None. Throws an exception if the update fails.
+    None. The cmdlet writes no output and raises an error if the firewall rejects the update.
+
+.EXAMPLE
+    Add-SfosApplicationFilterCategoryMember -Name 'Mobile Applications' -Application 'Instagram' -QoSPolicy 'Streaming Video - Limit to SD Quality' -WhatIf
+
+    Shows what the call would change without sending it to the firewall.
 
 .EXAMPLE
     Add-SfosApplicationFilterCategoryMember -Name 'Mobile Applications' -Application 'Instagram' -QoSPolicy 'Streaming Video - Limit to SD Quality'
 
-.NOTES
-    Minimum supported PowerShell version: 5.1
-    Verified live: added Application='Instagram' to category 'Mobile Applications', confirmed
-    via a following Get, then removed via Remove-SfosApplicationFilterCategoryMember and
-    confirmed the category returned to its exact original baseline (byte-identical
-    full-category-list comparison).
+    Adds a per-application QoS override. The cmdlet asks for confirmation before it writes.
 
 .LINK
     https://docs.sophos.com/nsg/sophos-firewall/22.0/API/PROTECT/Applications/ApplicationFilterCategory/operations/ApplicationCategory.html
@@ -2462,9 +2455,9 @@ function Add-SfosApplicationFilterCategoryMember {
         [string]$Application,
 
         [Parameter(Mandatory)]
-        # 'None' is refused client-side: the firewall answers 200 for a 'None' override but
-        # stores nothing (measured), so it would be a silent no-op. To drop an existing
-        # override, use Remove-SfosApplicationFilterCategoryMember instead.
+        # 'None' is refused client-side: the firewall answers success for a 'None' override
+        # but stores nothing, so it would be a silent no-op. To drop an existing override,
+        # use Remove-SfosApplicationFilterCategoryMember instead.
         [ValidateScript({
             if ($_ -eq 'None') {
                 throw "A per-application QoSPolicy of 'None' is not stored by the firewall (silent no-op). Use Remove-SfosApplicationFilterCategoryMember to remove an override."
@@ -2510,51 +2503,62 @@ function Add-SfosApplicationFilterCategoryMember {
 
 <#
 .SYNOPSIS
-    Removes a per-application QoS override from an ApplicationFilterCategory.
+    Removes a per-application QoS override from an application filter category.
 
 .DESCRIPTION
-    Reads the current ApplicationFilterCategory, removes the entry for -Application from its
-    ApplicationSettings list, and writes the remaining list back (or clears the wrapper
-    entirely if -Application was the last entry - measured to actually remove the subtree,
-    see the fragment header).
+    Reads the current category, removes the entry for the given application from its
+    per-application QoS override list, and writes the remaining list back.
 
 .PARAMETER Name
-    Name of the ApplicationFilterCategory to modify.
+    Required. Name of the category to modify.
 
 .PARAMETER Application
-    Name of the application whose per-application QoS override should be removed.
-
-.PARAMETER Session
-A session object returned by Connect-SfosFirewall, or the name of a session
-registered with Connect-SfosFirewall -Name. Overrides the stored default
-connection context; any of -Firewall/-Port/-Username/-Password/
--SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+    Required. Name of the application whose QoS override should be removed.
 
 .PARAMETER Firewall
-    Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. Host name or IP address of the firewall. If omitted, the value from the current
+    connection is used.
 
 .PARAMETER Port
-    Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. TCP port of the management API, usually 4444. If omitted, the value from the
+    current connection is used.
 
 .PARAMETER Username
-    Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. User name for the API login. The account needs write permission for application
+    filter categories. If omitted, the value from the current connection is used.
 
 .PARAMETER Password
-    Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. Password for the API login, as a SecureString. If omitted, the value from the
+    current connection is used.
 
 .PARAMETER SkipCertificateCheck
-    Skips SSL certificate validation for the API call.
+    Optional. Accepts the firewall certificate without validating it. Use this only for
+    appliances that still present a self-signed certificate. If omitted, the certificate is
+    validated.
+
+.PARAMETER Session
+    Optional. A session object from Connect-SfosFirewall, or the name of a session that was
+    registered with Connect-SfosFirewall -Name. Use it to address a specific firewall when you
+    work with more than one at a time. Any connection parameter you pass explicitly still takes
+    precedence. If omitted, the stored default connection is used.
+
+.INPUTS
+    System.Management.Automation.PSCustomObject. Accepts the category name by property name.
 
 .OUTPUTS
-    None. Throws an exception if the update fails or if -Application had no override.
+    None. The cmdlet writes no output and raises an error if the firewall rejects the update, or
+    if the application had no override.
+
+.EXAMPLE
+    Remove-SfosApplicationFilterCategoryMember -Name 'Mobile Applications' -Application 'Instagram' -WhatIf
+
+    Shows what the call would remove without sending it to the firewall.
 
 .EXAMPLE
     Remove-SfosApplicationFilterCategoryMember -Name 'Mobile Applications' -Application 'Instagram'
 
-.NOTES
-    Minimum supported PowerShell version: 5.1
-    Verified live - see Add-SfosApplicationFilterCategoryMember.
+    Removes the per-application QoS override. The cmdlet asks for confirmation before it
+    writes.
 
 .LINK
     https://docs.sophos.com/nsg/sophos-firewall/22.0/API/PROTECT/Applications/ApplicationFilterCategory/operations/ApplicationCategory.html
@@ -2624,63 +2628,74 @@ function Remove-SfosApplicationFilterCategoryMember {
 
 <#
 .SYNOPSIS
-    Retrieves ApplicationClassificationAssignment objects from the Sophos Firewall.
+    Retrieves application classification assignments from a Sophos Firewall.
 
 .DESCRIPTION
-    Queries the Sophos Firewall XML API for ApplicationClassificationAssignment objects
-    (PROTECT > Applications > Application Classification Assignment) - the Application ->
-    Classification mapping for every known application signature (520 rows on the lab
-    firewall). Server-side filtering is measured to be a no-op for both the "Application" and
-    "Classification" keys - a filtered Get still returns all rows. No <Filter> is sent;
-    -ApplicationLike and -ClassificationLike are applied entirely client-side.
+    Returns the application-to-classification mapping for every known application signature
+    (PROTECT > Applications > Application Classification Assignment). Server-side filtering has
+    no effect for this entity; a filtered request still returns every row, so ApplicationLike
+    and ClassificationLike are applied on the client. The cmdlet only reads; nothing on the
+    firewall is changed. It needs an open connection from Connect-SfosFirewall, or the
+    connection parameters supplied directly.
 
 .PARAMETER ApplicationLike
-    Filters by Application, substring match. Client-side only - see .DESCRIPTION.
+    Optional. Returns only rows whose application name contains the given text anywhere. This
+    is a substring match, not a wildcard pattern, and is applied on the client. If omitted, the
+    application name is not used to filter.
 
 .PARAMETER ClassificationLike
-    Filters by Classification, substring match. Client-side only - see .DESCRIPTION.
-
-.PARAMETER Session
-A session object returned by Connect-SfosFirewall, or the name of a session
-registered with Connect-SfosFirewall -Name. Overrides the stored default
-connection context; any of -Firewall/-Port/-Username/-Password/
--SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+    Optional. Returns only rows whose classification contains the given text anywhere. Applied
+    on the client. If omitted, the classification is not used to filter.
 
 .PARAMETER Firewall
-    Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. Host name or IP address of the firewall. If omitted, the value from the current
+    connection is used.
 
 .PARAMETER Port
-    Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. TCP port of the management API, usually 4444. If omitted, the value from the
+    current connection is used.
 
 .PARAMETER Username
-    Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. User name for the API login. The account needs read permission for application
+    classification assignments. If omitted, the value from the current connection is used.
 
 .PARAMETER Password
-    Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. Password for the API login, as a SecureString. If omitted, the value from the
+    current connection is used.
 
 .PARAMETER SkipCertificateCheck
-    Skips SSL certificate validation for the API call.
+    Optional. Accepts the firewall certificate without validating it. Use this only for
+    appliances that still present a self-signed certificate. If omitted, the certificate is
+    validated.
+
+.PARAMETER Session
+    Optional. A session object from Connect-SfosFirewall, or the name of a session that was
+    registered with Connect-SfosFirewall -Name. Use it to address a specific firewall when you
+    work with more than one at a time. Any connection parameter you pass explicitly still takes
+    precedence. If omitted, the stored default connection is used.
 
 .PARAMETER AsXml
-    Returns the raw XML nodes instead of PowerShell-friendly objects.
+    Optional. Returns the raw XML elements sent by the firewall instead of PowerShell objects.
+    Useful when you need a field that the standard output does not show.
+
+.INPUTS
+    None. This cmdlet does not accept pipeline input.
 
 .OUTPUTS
-    PSCustomObject[] (default). System.Xml.XmlElement[] when -AsXml is specified.
+    System.Management.Automation.PSCustomObject. One object per application, with the
+    properties Application and Classification. Returns System.Xml.XmlElement when -AsXml is
+    used, and an empty array when no row matches.
 
 .EXAMPLE
-    # All assignments (520 rows on the lab firewall)
     Get-SfosApplicationClassificationAssignment
 
+    Lists every application classification assignment on the firewall of the current
+    connection.
+
 .EXAMPLE
-    # One application by exact substring
     Get-SfosApplicationClassificationAssignment -ApplicationLike '1Password'
 
-.NOTES
-    Minimum supported PowerShell version: 5.1
-    Measured live: -ApplicationLike and -ClassificationLike are client-side only - see the
-    fragment header for the full server-side filtering measurement (both keys, both
-    criteria).
+    Lists all rows whose application name contains '1Password'.
 
 .LINK
     https://docs.sophos.com/nsg/sophos-firewall/22.0/API/PROTECT/Applications/ApplicationClassificationAssignment/ApplicationClassificationAssignment.html
@@ -2753,70 +2768,74 @@ function Get-SfosApplicationClassificationAssignment {
 
 <#
 .SYNOPSIS
-    Updates a single application's classification on the Sophos Firewall.
+    Updates a single application's classification on a Sophos Firewall.
 
 .DESCRIPTION
-    Updates one ApplicationClassificationAssignment (PROTECT > Applications > Application
-    Classification Assignment) using the Sophos Firewall XML API. Reads the assignment first
-    to give a precise "not found" error before calling the API (this entity is Application ->
-    Classification only, so there is nothing else to preserve). Pipeline-friendly by design -
-    `Get-SfosApplicationClassificationAssignment | Where-Object {...} | Set-...` issues one
-    API request per object.
+    Updates one application classification assignment. The cmdlet reads the assignment first
+    and throws a clear "not found" error if the application does not exist. It is
+    pipeline-friendly: Get-SfosApplicationClassificationAssignment | Where-Object {...} |
+    Set-SfosApplicationClassificationAssignment issues one request per object. To push many
+    reclassifications at once with a single request, use
+    Set-SfosApplicationClassificationAssignmentBatch instead.
 
-    For pushing many reclassifications at once with a single round trip, see
-    Set-SfosApplicationClassificationAssignmentBatch instead - see the fragment header for
-    why both cmdlets exist.
+    Only the classification value 'New' is confirmed to work on this firmware; there is no
+    fixed list of valid values.
 
 .PARAMETER Application
-    Name of the application to reclassify [doc]. Mandatory.
+    Required. Name of the application to reclassify.
 
 .PARAMETER Classification
-    New classification value [doc]. Mandatory. Measured: only 'New' (exact case) is confirmed
-    accepted on this firmware - every other value tried (see fragment header) is rejected
-    with 501. Not restricted by ValidateSet because no vendor enum is documented for this
-    field - see the fragment header for why inventing one would be unsafe.
-
-.PARAMETER Session
-A session object returned by Connect-SfosFirewall, or the name of a session
-registered with Connect-SfosFirewall -Name. Overrides the stored default
-connection context; any of -Firewall/-Port/-Username/-Password/
--SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+    Required. New classification value. Only 'New' is confirmed to work on this firmware.
 
 .PARAMETER Firewall
-    Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. Host name or IP address of the firewall. If omitted, the value from the current
+    connection is used.
 
 .PARAMETER Port
-    Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. TCP port of the management API, usually 4444. If omitted, the value from the
+    current connection is used.
 
 .PARAMETER Username
-    Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. User name for the API login. The account needs write permission for application
+    classification assignments. If omitted, the value from the current connection is used.
 
 .PARAMETER Password
-    Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. Password for the API login, as a SecureString. If omitted, the value from the
+    current connection is used.
 
 .PARAMETER SkipCertificateCheck
-    Skips SSL certificate validation for the API call.
+    Optional. Accepts the firewall certificate without validating it. Use this only for
+    appliances that still present a self-signed certificate. If omitted, the certificate is
+    validated.
+
+.PARAMETER Session
+    Optional. A session object from Connect-SfosFirewall, or the name of a session that was
+    registered with Connect-SfosFirewall -Name. Use it to address a specific firewall when you
+    work with more than one at a time. Any connection parameter you pass explicitly still takes
+    precedence. If omitted, the stored default connection is used.
+
+.INPUTS
+    System.Management.Automation.PSCustomObject. Accepts the application name by value or by
+    property name, for example from Get-SfosApplicationClassificationAssignment.
 
 .OUTPUTS
-    None. Throws an exception if the update fails.
+    None. The cmdlet writes no output and raises an error if the firewall rejects the update.
 
 .EXAMPLE
-    # No-op resend of the current (only confirmed-valid) classification value
+    Set-SfosApplicationClassificationAssignment -Application '10000ft Plans' -Classification 'New' -WhatIf
+
+    Shows what the call would change without sending it to the firewall.
+
+.EXAMPLE
     Set-SfosApplicationClassificationAssignment -Application '10000ft Plans' -Classification 'New'
 
-.EXAMPLE
-    # Reclassify every matching application from the pipeline
-    Get-SfosApplicationClassificationAssignment -ApplicationLike '10000ft' |
-        Set-SfosApplicationClassificationAssignment -Classification 'New'
+    Sets the classification of a single application. The cmdlet asks for confirmation before
+    it writes.
 
-.NOTES
-    Minimum supported PowerShell version: 5.1
-    Verified live: round trip on Application='10000ft Plans' (read 'New' -> write 'New' ->
-    read 'New' again, raw XML for the row identical before and after) and the not-found error
-    path (a made-up application name answers 501 naming
-    /ApplicationClassificationAssignment/Application in <InvalidParams> - reproduced here as
-    the pre-flight Get/throw so the caller gets a clear message instead of the raw API error).
+.EXAMPLE
+    Get-SfosApplicationClassificationAssignment -ApplicationLike '10000ft' | Set-SfosApplicationClassificationAssignment -Classification 'New'
+
+    Reclassifies every matching application through the pipeline.
 
 .LINK
     https://docs.sophos.com/nsg/sophos-firewall/22.0/API/PROTECT/Applications/ApplicationClassificationAssignment/operations/UpdateApplicationClassificationAssignment.html
@@ -2896,67 +2915,70 @@ function Set-SfosApplicationClassificationAssignment {
     Updates multiple applications' classifications in a single API request.
 
 .DESCRIPTION
-    Collects Application/Classification pairs from the pipeline (or -InputObject) and sends
-    them as one ApplicationClassificationBatchAssignment request (PROTECT > Applications >
-    Application Classification Batch Assignment) when the pipeline completes - one round trip
-    for the whole batch, instead of one per item like Set-SfosApplicationClassificationAssignment.
+    Collects Application/Classification pairs from the pipeline or -InputObject and sends them
+    as one batch request (PROTECT > Applications > Application Classification Batch
+    Assignment) when the pipeline completes, instead of one request per item like
+    Set-SfosApplicationClassificationAssignment.
 
-    The wire element names inside the batch are lower-case <app>/<class> - measured to differ
-    from the single-assignment operation's <Application>/<Classification> (see the fragment
-    header); this cmdlet builds the lower-case form and there is no parameter to override it.
-
-    A rejected batch (bad Classification value, or an application that does not exist) fails
-    for the WHOLE batch with a single 501 and an empty <InvalidParams/> - no per-item detail
-    is available from the API (measured). This cmdlet therefore cannot tell the caller which
-    entry was the problem; use Set-SfosApplicationClassificationAssignment for that.
+    A rejected batch, for example because of an invalid classification value or an application
+    that does not exist, fails for the whole batch with a single error and no detail about
+    which entry caused it. Use Set-SfosApplicationClassificationAssignment if you need to know
+    which entry failed. Only the classification value 'New' is confirmed to work on this
+    firmware.
 
 .PARAMETER InputObject
-    One or more objects with Application and Classification properties, typically from
-    Get-SfosApplicationClassificationAssignment.
-
-.PARAMETER Session
-A session object returned by Connect-SfosFirewall, or the name of a session
-registered with Connect-SfosFirewall -Name. Overrides the stored default
-connection context; any of -Firewall/-Port/-Username/-Password/
--SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+    Required. One or more objects with Application and Classification properties, typically
+    from Get-SfosApplicationClassificationAssignment.
 
 .PARAMETER Firewall
-    Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. Host name or IP address of the firewall. If omitted, the value from the current
+    connection is used.
 
 .PARAMETER Port
-    Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. TCP port of the management API, usually 4444. If omitted, the value from the
+    current connection is used.
 
 .PARAMETER Username
-    Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. User name for the API login. The account needs write permission for application
+    classification assignments. If omitted, the value from the current connection is used.
 
 .PARAMETER Password
-    Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. Password for the API login, as a SecureString. If omitted, the value from the
+    current connection is used.
 
 .PARAMETER SkipCertificateCheck
-    Skips SSL certificate validation for the API call.
+    Optional. Accepts the firewall certificate without validating it. Use this only for
+    appliances that still present a self-signed certificate. If omitted, the certificate is
+    validated.
+
+.PARAMETER Session
+    Optional. A session object from Connect-SfosFirewall, or the name of a session that was
+    registered with Connect-SfosFirewall -Name. Use it to address a specific firewall when you
+    work with more than one at a time. Any connection parameter you pass explicitly still takes
+    precedence. If omitted, the stored default connection is used.
+
+.INPUTS
+    System.Management.Automation.PSCustomObject. Accepts one or more objects with Application
+    and Classification properties from the pipeline.
 
 .OUTPUTS
-    None. Throws an exception if the batch update fails.
+    None. The cmdlet writes no output and raises an error if the firewall rejects the batch.
 
 .EXAMPLE
-    # No-op resend of two applications' current classification in one request
-    Get-SfosApplicationClassificationAssignment -ApplicationLike '10Web' |
-        Set-SfosApplicationClassificationAssignmentBatch
+    Get-SfosApplicationClassificationAssignment -ApplicationLike '10Web' | Set-SfosApplicationClassificationAssignmentBatch -WhatIf
+
+    Shows what the call would change without sending it to the firewall.
 
 .EXAMPLE
-    # Explicit pairs
-    @(
-        [PSCustomObject]@{ Application = '10Web'; Classification = 'New' }
-        [PSCustomObject]@{ Application = '1Password'; Classification = 'New' }
-    ) | Set-SfosApplicationClassificationAssignmentBatch
+    Get-SfosApplicationClassificationAssignment -ApplicationLike '10Web' | Set-SfosApplicationClassificationAssignmentBatch
 
-.NOTES
-    Minimum supported PowerShell version: 5.1
-    Verified live: a 2-entry batch (Applications '10Web' and '1Password', both -> 'New', the
-    only confirmed-valid value) answered a single 200; an upper-case
-    <Application>/<Classification> batch and a batch containing an unknown application name
-    both answered 501 with an empty <InvalidParams/> - see the fragment header.
+    Resends the current classification of the matching applications in one request. The
+    cmdlet asks for confirmation before it writes.
+
+.EXAMPLE
+    @([PSCustomObject]@{ Application = '10Web'; Classification = 'New' }, [PSCustomObject]@{ Application = '1Password'; Classification = 'New' }) | Set-SfosApplicationClassificationAssignmentBatch
+
+    Sets the classification of two named applications in one request.
 
 .LINK
     https://docs.sophos.com/nsg/sophos-firewall/22.0/API/PROTECT/Applications/AppClassificationBatchAssignment/AppClassificationBatchAssignment.html
@@ -3043,48 +3065,58 @@ function Set-SfosApplicationClassificationAssignmentBatch {
     Retrieves the device-wide application classification switch state.
 
 .DESCRIPTION
-    Queries the Sophos Firewall XML API for the ApplicationClassification singleton - an
-    undocumented entity found only by live probing (no operation page exists for it anywhere
-    in the Applications doc tree). Its single field <ACTION>On/Off</ACTION> controls whether
-    the firewall classifies newly discovered applications at all.
-
-.PARAMETER Session
-A session object returned by Connect-SfosFirewall, or the name of a session
-registered with Connect-SfosFirewall -Name. Overrides the stored default
-connection context; any of -Firewall/-Port/-Username/-Password/
--SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+    Returns the state of the application classification switch, which controls whether the
+    firewall classifies newly discovered applications at all. The cmdlet only reads; nothing on
+    the firewall is changed. It needs an open connection from Connect-SfosFirewall, or the
+    connection parameters supplied directly.
 
 .PARAMETER Firewall
-    Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. Host name or IP address of the firewall. If omitted, the value from the current
+    connection is used.
 
 .PARAMETER Port
-    Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. TCP port of the management API, usually 4444. If omitted, the value from the
+    current connection is used.
 
 .PARAMETER Username
-    Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. User name for the API login. The account needs read permission for application
+    settings. If omitted, the value from the current connection is used.
 
 .PARAMETER Password
-    Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. Password for the API login, as a SecureString. If omitted, the value from the
+    current connection is used.
 
 .PARAMETER SkipCertificateCheck
-    Skips SSL certificate validation for the API call.
+    Optional. Accepts the firewall certificate without validating it. Use this only for
+    appliances that still present a self-signed certificate. If omitted, the certificate is
+    validated.
+
+.PARAMETER Session
+    Optional. A session object from Connect-SfosFirewall, or the name of a session that was
+    registered with Connect-SfosFirewall -Name. Use it to address a specific firewall when you
+    work with more than one at a time. Any connection parameter you pass explicitly still takes
+    precedence. If omitted, the stored default connection is used.
 
 .PARAMETER AsXml
-    Returns the raw XML node instead of a PowerShell-friendly object.
+    Optional. Returns the raw XML element sent by the firewall instead of a PowerShell object.
+
+.INPUTS
+    None. This cmdlet does not accept pipeline input.
 
 .OUTPUTS
-    PSCustomObject (default). System.Xml.XmlElement when -AsXml is specified.
+    System.Management.Automation.PSCustomObject. An object with the property ACTION, either On
+    or Off. Returns System.Xml.XmlElement when -AsXml is used.
 
 .EXAMPLE
     Get-SfosApplicationClassification
 
-.NOTES
-    Minimum supported PowerShell version: 5.1
-    Verified live: reads <ACTION>On</ACTION> on the lab firewall. Unlike IPSSwitch/
-    IPSFullSignaturePack, the data field here is named <ACTION>, not <Status> - there is no
-    naming collision with the API status container at all, so no special-casing of the Core
-    status heuristic is needed (checked, not assumed - see fragment header).
+    Shows whether application classification is on or off.
+
+.EXAMPLE
+    Get-SfosApplicationClassification -AsXml
+
+    Returns the raw XML of the switch state, for example to check a field that the standard
+    output does not contain.
 
 .LINK
     https://docs.sophos.com/nsg/sophos-firewall/22.0/API/PROTECT/Applications/
@@ -3151,58 +3183,56 @@ function Get-SfosApplicationClassification {
     Switches device-wide application classification on or off.
 
 .DESCRIPTION
-    Updates the undocumented ApplicationClassification singleton - no operation page exists
-    for this entity, so operation="update" is used as the sole trusted verb,
-    and the change is confirmed with a following Get before returning.
-
-    This is a device-wide switch for the application classification engine, not an access
-    control - see the fragment header for the Baseline-first, last-step-of-the-session
-    handling this task applied to the one real toggle performed against the lab.
+    Updates the application classification switch, which controls whether the firewall
+    classifies newly discovered applications at all. The cmdlet confirms the change with a
+    following read before returning.
 
 .PARAMETER ACTION
-    'On' or 'Off' [measured - see fragment header; no documentation page exists for this
-    entity to confirm the value set against].
-
-.PARAMETER Session
-A session object returned by Connect-SfosFirewall, or the name of a session
-registered with Connect-SfosFirewall -Name. Overrides the stored default
-connection context; any of -Firewall/-Port/-Username/-Password/
--SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+    Required. On or Off.
 
 .PARAMETER Firewall
-    Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. Host name or IP address of the firewall. If omitted, the value from the current
+    connection is used.
 
 .PARAMETER Port
-    Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. TCP port of the management API, usually 4444. If omitted, the value from the
+    current connection is used.
 
 .PARAMETER Username
-    Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. User name for the API login. The account needs write permission for application
+    settings. If omitted, the value from the current connection is used.
 
 .PARAMETER Password
-    Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. Password for the API login, as a SecureString. If omitted, the value from the
+    current connection is used.
 
 .PARAMETER SkipCertificateCheck
-    Skips SSL certificate validation for the API call.
+    Optional. Accepts the firewall certificate without validating it. Use this only for
+    appliances that still present a self-signed certificate. If omitted, the certificate is
+    validated.
+
+.PARAMETER Session
+    Optional. A session object from Connect-SfosFirewall, or the name of a session that was
+    registered with Connect-SfosFirewall -Name. Use it to address a specific firewall when you
+    work with more than one at a time. Any connection parameter you pass explicitly still takes
+    precedence. If omitted, the stored default connection is used.
+
+.INPUTS
+    None. This cmdlet does not accept pipeline input.
 
 .OUTPUTS
-    None. Throws an exception if the update fails or cannot be confirmed.
+    None. The cmdlet writes no output and raises an error if the firewall rejects the update,
+    or if the change cannot be confirmed on a following read.
 
 .EXAMPLE
-    # No-op resend of the current value - safe, does not change device behaviour
+    Set-SfosApplicationClassification -ACTION On -WhatIf
+
+    Shows what the call would change without sending it to the firewall.
+
+.EXAMPLE
     Set-SfosApplicationClassification -ACTION On
 
-.NOTES
-    Minimum supported PowerShell version: 5.1
-    Verified live: a same-value resend of ACTION='On' with operation="update" answered a
-    clean 200 and a following Get still read 'On' (the documented precondition for this
-    task's real toggle test). An invalid ACTION='Bogus' answered 501 at
-    /Response/ApplicationClassification/Status[@code] with
-    <InvalidParams><Params>/ApplicationClassification/ACTION</Params></InvalidParams> - the
-    measured status XPath used by Assert-SfosApiReturnSuccess via -ObjectName
-    'ApplicationClassification'. The real Off->On toggle (this switch's only actual state
-    change tested) was run once, as the last step of the whole verification session - see the
-    task report for its result.
+    Switches application classification on. The cmdlet asks for confirmation before it writes.
 
 .LINK
     https://docs.sophos.com/nsg/sophos-firewall/22.0/API/PROTECT/Applications/

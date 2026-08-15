@@ -5,90 +5,49 @@
         Manages IP hosts, FQDN hosts, MAC hosts, host groups, services, and service groups on Sophos Firewall.
 
         .DESCRIPTION
-        PowerShell module for comprehensive management of Sophos XGS / SFOS 21.5+ firewall 
-        hosts and services via XML REST API.
-    
-        This module provides functions to create, read, update, and delete:
-        - IP Hosts (single IPs, networks, ranges, lists)
-        - IP Host Groups (with member management)
-        - FQDN Hosts and FQDN Host Groups (with member management)
-        - MAC Hosts
-        - Country Groups
-        - Services (TCP/UDP, IP protocols, ICMP/ICMPv6)
-        - Service Groups (with member management)
-    
-        All functions support pipeline input, filtering, and connection context management.
-        Use Connect-SfosFirewall once, then call functions without connection parameters.
+        Manages the network objects of a Sophos XGS / SFOS 22.0 firewall through the
+        management API: IP hosts, IP host groups, FQDN hosts, FQDN host groups, MAC hosts,
+        country groups, services, and service groups. Each object type has Get/New/Set/Remove
+        cmdlets, and every group or list-based type also has Export/Import and, where it has
+        members, Add-/Remove-Member cmdlets.
+
+        Connect once with Connect-SfosFirewall, then call the cmdlets in this module without
+        repeating the connection parameters.
 
         .EXAMPLE
-        # Connect to firewall and retrieve all IP hosts
-        Connect-SfosFirewall -Firewall "192.168.1.1" -Credential (Get-Credential) -SkipCertificateCheck
+        Connect-SfosFirewall -Firewall '192.0.2.1' -Credential (Get-Credential) -SkipCertificateCheck
         Get-SfosIPHost
 
-        .EXAMPLE
-        # Create a new IP host and add it to a host group
-        New-SfosIPHost -Name "WebServer01" -IPAddress "10.0.1.100" -HostType IP -Description "Production Web Server"
-        Add-SfosIPHostGroupMember -Name "WebServers" -Members "WebServer01"
+        Connects to the firewall and lists every IP host object.
 
         .EXAMPLE
-        # Find all hosts matching a pattern. All -*Like filters are substring
-        # matches, following the SFOS meaning of 'like' - not wildcard patterns.
-        Get-SfosIPHost -NameLike "Web" -IPAddressLike "10.0."
-        Get-SfosFQDNHost -FqdnLike ".example.com"
+        New-SfosIPHost -Name 'WebServer01' -IPAddress '10.0.1.100' -HostType IP -Description 'Production web server'
+        Add-SfosIPHostGroupMember -Name 'WebServers' -members 'WebServer01'
+
+        Creates an IP host object and adds it to an existing group.
 
         .EXAMPLE
-        # Create a TCP service and add to service group
-        New-SfosService -Name "CustomHTTPS" -Protocol TCP -DstPort 8443 -SrcPort "1:65535" -Description "Custom HTTPS Port"
-        Add-SfosServiceGroupMember -Name "WebServices" -Members "CustomHTTPS"
+        Get-SfosIPHost -NameLike 'Web' -IPAddressLike '10.0.'
+        Get-SfosFQDNHost -FqdnLike '.example.com'
+
+        Finds objects by a substring match. Every -*Like filter matches anywhere in the
+        value and is not a wildcard pattern.
 
         .EXAMPLE
-        # Create IP network and range hosts
-        New-SfosIPHost -Name "Office-Network" -HostType Network -IPAddress "192.168.10.0" -Subnet "255.255.255.0"
-        New-SfosIPHost -Name "DHCP-Range" -HostType IPRange -StartIPAddress "192.168.10.100" -EndIPAddress "192.168.10.200"
+        Get-SfosIPHost -NameLike 'OldServer' | Remove-SfosIPHost -WhatIf
+        Get-SfosService -NameLike 'Deprecated' | Remove-SfosService -WhatIf
 
-        .EXAMPLE
-        # Pipeline operations for bulk removal (with WhatIf safety)
-        Get-SfosIPHost -NameLike "OldServer" | Remove-SfosIPHost -WhatIf
-        Get-SfosService -NameLike "Deprecated" | Remove-SfosService -WhatIf
+        Previews a bulk removal through the pipeline before running it for real.
 
-        .EXAMPLE
-        # Work with service groups
-        $webServices = Get-SfosServiceGroup -NameLike "Web"
-        $webServices | ForEach-Object { $_.ServiceList }
-
-        .NOTES
-        Module Name: SophosFirewall.HostsAndServices
-        Author: Jan Weis
-        Homepage: https://www.it-explorations.de
-        Version: 1.0.0
-        PowerShell Version: 5.1+
-    
-        Dependencies:
-        - SophosFirewall.Core module (provides Connect-SfosFirewall, Invoke-SfosApi, etc.)
-    
-        API Compatibility:
-        - Sophos SFOS 21.5+
-        - Sophos XGS Firewall Series
-    
-        Total Functions: 53
-        - 6 IP Host functions (Get, New, Set, Remove, Export, Import)
-        - 8 IP Host Group functions (including Add/Remove members)
-        - 7 FQDN Host functions (including mass removal)
-        - 8 FQDN Host Group functions (including Add/Remove members)
-        - 6 MAC Host functions
-        - 4 Country Group functions
-        - 6 Service functions (supports TCP/UDP, IP protocols, ICMP/ICMPv6)
-        - 8 Service Group functions (including Add/Remove members)
-    
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
-    
+
         .LINK
         Connect-SfosFirewall
-    
+
         .LINK
         Get-SfosIPHost
-    
+
         .LINK
         Get-SfosService
 #>
@@ -100,74 +59,116 @@
 
 <#
         .SYNOPSIS
-        Retrieves IPHost objects from the Sophos Firewall.
+        Retrieves IP host objects from a Sophos Firewall.
 
         .DESCRIPTION
-        Queries the Sophos Firewall XML API for IPHost objects. By default the cmdlet returns PowerShell-friendly objects. Use -AsXml to return the raw XML nodes.
-    
-        Note: Sophos GET responses can be inconsistent regarding status elements. This cmdlet is designed to return an empty result when no records are found.
+        Returns the IP host objects that are defined on the firewall. An IP host object
+        stands for a single address, a network, an address range or a list of addresses,
+        and is used as source or destination in firewall rules and other policies. Use this
+        cmdlet to review the existing objects, to feed them into another cmdlet through the
+        pipeline, or to copy them to a second firewall. The cmdlet only reads; nothing on
+        the firewall is changed. It needs an open connection from Connect-SfosFirewall, or
+        the connection parameters supplied directly.
 
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
-
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        You can combine several filters. The firewall itself evaluates at most one of them,
+        so every filter you supply is applied again on the client. The result therefore
+        always matches all filters you gave.
 
         .PARAMETER NameLike
-        Optional name filter. In Sophos SFOS, 'like' behaves as a substring match (the supplied value may match anywhere in the object name). Sent to the firewall as the server-side filter.
+        Optional. Returns only objects whose name contains the given text anywhere. This is
+        a substring match, not a wildcard pattern; the characters * and ? are treated as
+        ordinary characters. If omitted, the name is not used to filter.
 
         .PARAMETER DescriptionLike
-        Optional description filter, matched as a substring anywhere in the value. The firewall does not support filtering on Description, so this filter is always applied client-side.
+        Optional. Returns only objects whose description contains the given text anywhere.
+        Applied on the client. If omitted, the description is not used to filter.
 
         .PARAMETER IPAddressLike
-        Optional IP address filter, matched as a substring anywhere in the value. Sent to the firewall as the server-side filter only when -NameLike is not specified (SFOS evaluates only one filter key per request); always re-applied client-side as well.
+        Optional. Returns only objects whose IP address contains the given text anywhere,
+        for example '192.168.10.' to match a whole subnet. If omitted, the address is not
+        used to filter.
 
         .PARAMETER HostTypeLike
-        Optional host type filter. Unlike the other '*Like' parameters, this is an exact match against one of the ValidateSet values, not a substring match. Applied client-side only.
+        Optional. Returns only objects of one host type. Unlike the other filters this is an
+        exact match. Valid values: IP, Network, IPRange, IPList, System Host. If omitted,
+        all host types are returned.
 
         .PARAMETER SubnetLike
-        Optional subnet filter, matched as a substring anywhere in the value. Applied client-side only.
+        Optional. Returns only objects whose subnet mask contains the given text anywhere,
+        for example '255.255.255.0'. Applies to objects of type Network. If omitted, the
+        subnet is not used to filter.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs read permission for the
+        host objects. If omitted, the value from the current connection is used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
 
         .PARAMETER AsXml
-        Returns raw XML nodes instead of PowerShell-friendly objects.
+        Optional. Returns the raw XML elements sent by the firewall instead of PowerShell
+        objects. Useful when you need a field that the standard output does not show.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        PSCustomObject (default). System.Xml.XmlElement when -AsXml is specified.
+        System.Management.Automation.PSCustomObject. One object per IP host, with the
+        properties Name, Description, IPFamily, HostType, IPAddress, Subnet, StartIPAddress,
+        EndIPAddress and ListOfIPAddresses. Returns System.Xml.XmlElement when -AsXml is
+        used, and an empty array when no object matches.
 
         .EXAMPLE
-        # Retrieve all objects
         Get-SfosIPHost
 
-        .EXAMPLE
-        # Filter by name (substring match)
-        Get-SfosIPHost -NameLike "Example"
+        Lists every IP host object on the firewall of the current connection.
 
         .EXAMPLE
-        # Return raw XML for troubleshooting
-        Get-SfosIPHost -NameLike "Example" -AsXml
+        Get-SfosIPHost -NameLike 'Branch' -HostTypeLike Network
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+        Lists all network objects whose name contains 'Branch'.
+
+        .EXAMPLE
+        Get-SfosIPHost -NameLike 'Server-01' -AsXml
+
+        Returns the raw XML of the matching objects, for example to check a field that the
+        standard output does not contain.
+
+        .EXAMPLE
+        Get-SfosIPHost -NameLike 'Branch' -Session 'fw2'
+
+        Reads the matching host objects from a second firewall that was registered earlier
+        with Connect-SfosFirewall -Name 'fw2'.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        New-SfosIPHost
+
+        .LINK
+        Set-SfosIPHost
 #>
 function Get-SfosIPHost {
     [CmdletBinding()]
@@ -313,107 +314,117 @@ Assert-SfosApiReturnSuccess -Xml $XmlResponse -ObjectName 'IPHost' -Action 'get'
 
 <#
         .SYNOPSIS
-        Creates a new IP host object on the Sophos Firewall.
+        Creates an IP host object on a Sophos Firewall.
 
         .DESCRIPTION
-        Creates an IP host object using the Sophos Firewall XML API. Supports four host types:
-        - IP: Single IP address
-        - Network: Network address with subnet mask
-        - IPRange: IP address range (start to end)
-        - IPList: Comma-separated list of IP addresses
-        
-        The cmdlet validates input and escapes XML special characters automatically.
+        Creates an IP host object of one of four types: a single address, a network with a
+        subnet mask, an address range, or a list of addresses. Use this cmdlet to define an
+        object once and reuse it as source or destination in firewall rules and other
+        policies. It needs an open connection from Connect-SfosFirewall, or the connection
+        parameters supplied directly, and an account with administrative permission.
 
         .PARAMETER Name
-        Name of the IP host object (1-50 characters, no commas).
-
-        .PARAMETER HostType
-        Type of IP host: 'IP', 'Network', 'IPRange', or 'IPList'.
-
-        .PARAMETER IPAddress
-        IP address (required for HostType 'IP' and 'Network').
-
-        .PARAMETER Subnet
-        Subnet mask (required for HostType 'Network'). Example: 255.255.255.0
-
-        .PARAMETER StartIPAddress
-        Starting IP address (required for HostType 'IPRange').
-
-        .PARAMETER EndIPAddress
-        Ending IP address (required for HostType 'IPRange').
-
-        .PARAMETER ListOfIPAddresses
-        Array of IP addresses (required for HostType 'IPList').
+        Required. Name of the new IP host object. 1 to 50 characters, must not contain a
+        comma.
 
         .PARAMETER IPFamily
-        IP address family: 'IPv4' or 'IPv6'. Default: 'IPv4'.
+        Optional. Address family of the object, IPv4 or IPv6. Defaults to IPv4.
 
         .PARAMETER Description
-        Optional description (max 255 characters).
+        Optional. Free-text description, up to 255 characters.
+
+        .PARAMETER HostType
+        Required. Type of the object: IP, Network, IPRange or IPList. Determines which of
+        the address parameters below is required.
+
+        .PARAMETER IPAddress
+        Required for HostType IP or Network. The IP address.
+
+        .PARAMETER Subnet
+        Required for HostType Network. The subnet mask, for example 255.255.255.0.
+
+        .PARAMETER StartIPAddress
+        Required for HostType IPRange. The first address of the range.
+
+        .PARAMETER EndIPAddress
+        Required for HostType IPRange. The last address of the range.
+
+        .PARAMETER ListOfIPAddresses
+        Required for HostType IPList. One or more IP addresses.
 
         .PARAMETER HostGroupList
-        Optional array of host group names to add this host to.
-
-        # Connection parameters (optional - use stored context if not provided)
-        
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. Names of existing IP host groups to add the new object to. If omitted, the
+        object is created without group membership.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, uses stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number. If omitted, uses stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, uses stored connection context.
+        Optional. User name for the API login. The account needs administrative permission.
+        If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, uses stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        None. Throws an exception if creation fails.
+        None. The cmdlet writes no output and throws an error if the firewall rejects the
+        creation.
 
         .EXAMPLE
-        # Create a single IP host
-        New-SfosIPHost -Name "WebServer01" -HostType IP -IPAddress "10.0.1.100" -Description "Production Web Server"
+        New-SfosIPHost -Name 'WebServer01' -HostType IP -IPAddress '10.0.1.100' -WhatIf
+
+        Shows what the call would create without sending it to the firewall.
 
         .EXAMPLE
-        # Create a network host
-        New-SfosIPHost -Name "Office-LAN" -HostType Network -IPAddress "192.168.10.0" -Subnet "255.255.255.0"
+        New-SfosIPHost -Name 'WebServer01' -HostType IP -IPAddress '10.0.1.100' -Description 'Production web server'
+
+        Creates a single-address IP host object.
 
         .EXAMPLE
-        # Create an IP range for DHCP pool
-        New-SfosIPHost -Name "DHCP-Pool" -HostType IPRange -StartIPAddress "192.168.10.100" -EndIPAddress "192.168.10.200"
+        New-SfosIPHost -Name 'Office-LAN' -HostType Network -IPAddress '192.168.10.0' -Subnet '255.255.255.0'
+
+        Creates a network object.
 
         .EXAMPLE
-        # Create an IP list with multiple addresses
-        New-SfosIPHost -Name "DMZ-Servers" -HostType IPList -ListOfIPAddresses @("10.1.1.10", "10.1.1.20", "10.1.1.30")
+        New-SfosIPHost -Name 'DHCP-Pool' -HostType IPRange -StartIPAddress '192.168.10.100' -EndIPAddress '192.168.10.200'
+
+        Creates an address range object.
 
         .EXAMPLE
-        # Create host and add to group
-        New-SfosIPHost -Name "DB-Server" -HostType IP -IPAddress "10.0.2.50" -HostGroupList @("DatabaseServers", "Production")
+        New-SfosIPHost -Name 'DMZ-Servers' -HostType IPList -ListOfIPAddresses '10.1.1.10', '10.1.1.20', '10.1.1.30'
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This function uses parameter sets to enforce correct parameter combinations.
+        Creates an object holding several individual addresses.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
-        
+
         .LINK
         Get-SfosIPHost
-        
+
         .LINK
         Set-SfosIPHost
-        
+
         .LINK
         Remove-SfosIPHost
 #>
@@ -580,86 +591,117 @@ function New-SfosIPHost {
 
 <#
         .SYNOPSIS
-        Updates an existing IPHost object on the Sophos Firewall.
+        Updates an IP host object on a Sophos Firewall.
 
         .DESCRIPTION
-        Updates a IPHost object using the Sophos Firewall XML API. You can supply the target object name directly or via the pipeline.
-
-        SFOS replaces the whole entity on update - any element not sent in the request is
-        cleared on the firewall. This cmdlet reads the current host first and keeps whatever
-        the caller does not explicitly pass (Description, IPFamily, HostGroupList). To clear
-        a field, pass it explicitly with an empty value.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
-
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Changes an existing IP host object. The cmdlet reads the current object first and
+        sends back a complete object, keeping every field the caller does not pass. Only the
+        fields you actually supply are changed; pass a field explicitly to clear it. It needs
+        an open connection from Connect-SfosFirewall, or the connection parameters supplied
+        directly, and an account with administrative permission.
 
         .PARAMETER Name
-        Name of the target object.
+        Required. Name of the object to update. Accepts pipeline input by value or by
+        property name, so the output of Get-SfosIPHost can be piped in directly.
 
         .PARAMETER IPFamily
-        IP address family: 'IPv4' or 'IPv6'. If omitted, the existing value on the firewall is kept.
+        Optional. Address family of the object, IPv4 or IPv6. If omitted, the current value
+        is kept.
 
         .PARAMETER Description
-        Optional description text. If omitted, the existing description is kept.
+        Optional. Free-text description, up to 255 characters. If omitted, the current value
+        is kept.
 
         .PARAMETER HostType
-        Type of the IP host: 'IP', 'Network', 'IPRange', or 'IPList'. Determines which of the
-        address parameters below is required.
+        Required. Type of the object: IP, Network, IPRange or IPList. Determines which of
+        the address parameters below is required.
 
         .PARAMETER IPAddress
-        IP address (required for HostType 'IP' and 'Network').
+        Optional. The IP address, for HostType IP or Network. If omitted, the current value
+        is kept.
 
         .PARAMETER Subnet
-        Subnet mask (required for HostType 'Network'). Example: 255.255.255.0
+        Optional. The subnet mask, for HostType Network, for example 255.255.255.0. If
+        omitted, the current value is kept.
 
         .PARAMETER StartIPAddress
-        Starting IP address (required for HostType 'IPRange').
+        Optional. The first address of the range, for HostType IPRange. If omitted, the
+        current value is kept.
 
         .PARAMETER EndIPAddress
-        Ending IP address (required for HostType 'IPRange').
+        Optional. The last address of the range, for HostType IPRange. If omitted, the
+        current value is kept.
 
         .PARAMETER ListOfIPAddresses
-        Array of IP addresses (required for HostType 'IPList').
+        Optional. One or more IP addresses, for HostType IPList. Accepts either an array of
+        addresses or the single comma-separated string that Get-SfosIPHost returns. If
+        omitted, the current value is kept.
 
         .PARAMETER HostGroupList
-        Optional array of host group names. If omitted, the existing group membership is kept.
+        Optional. Names of the IP host groups the object should belong to. Replaces the
+        current group membership. If omitted, the current membership is kept.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs administrative permission.
+        If omitted, the value from the current connection is used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        System.String or System.Management.Automation.PSCustomObject. Accepts the Name and
+        other properties, by property name, of an IP host object such as the ones returned
+        by Get-SfosIPHost.
 
         .OUTPUTS
-        PSCustomObject or API status information depending on implementation.
+        None. The cmdlet writes no output and throws an error if the firewall rejects the
+        update.
 
         .EXAMPLE
-        # Update an object by name (HostType and the matching address parameter are mandatory)
-        Set-SfosIPHost -Name "Example" -HostType IP -IPAddress "10.0.1.100" -Description "Updated web server"
+        Set-SfosIPHost -Name 'Example' -HostType IP -IPAddress '10.0.1.101' -WhatIf
+
+        Shows what the call would change without sending it to the firewall.
 
         .EXAMPLE
-        # Update using pipeline input
-        Get-SfosIPHost -NameLike "Example" | Set-SfosIPHost -HostType IP -IPAddress "10.0.1.101"
+        Set-SfosIPHost -Name 'Example' -HostType IP -IPAddress '10.0.1.101' -Description 'Updated web server'
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+        Changes the address and description of an existing object. HostType and the matching
+        address parameter are mandatory even when only the description changes.
+
+        .EXAMPLE
+        Get-SfosIPHost -NameLike 'Example' | Set-SfosIPHost -HostType IP -IPAddress '10.0.1.102'
+
+        Updates the matching object through the pipeline.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosIPHost
+
+        .LINK
+        New-SfosIPHost
 #>
 function Set-SfosIPHost {
     [CmdletBinding(SupportsShouldProcess)]
@@ -885,53 +927,68 @@ function Set-SfosIPHost {
 
 <#
         .SYNOPSIS
-        Removes a IPHost object from the Sophos Firewall.
+        Removes an IP host object from a Sophos Firewall.
 
         .DESCRIPTION
-        Removes a IPHost object using the Sophos Firewall XML API. This cmdlet supports ShouldProcess; use -WhatIf to preview the change.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
-
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Deletes an IP host object by name. It needs an open connection from
+        Connect-SfosFirewall, or the connection parameters supplied directly, and an account
+        with administrative permission. Use -WhatIf to preview the removal.
 
         .PARAMETER Name
-        Name of the target object.
+        Required. Name of the object to remove. Accepts pipeline input by value or by
+        property name, so the output of Get-SfosIPHost can be piped in directly.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs administrative permission.
+        If omitted, the value from the current connection is used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        System.String or System.Management.Automation.PSCustomObject. Accepts the Name of an
+        IP host object such as the ones returned by Get-SfosIPHost.
 
         .OUTPUTS
-        PSCustomObject or API status information depending on implementation.
+        None. The cmdlet writes no output and throws an error if the firewall rejects the
+        removal.
 
         .EXAMPLE
-        # Preview removal
-        Remove-SfosIPHost -Name "Example" -WhatIf
+        Remove-SfosIPHost -Name 'Example' -WhatIf
+
+        Shows what would be removed without sending the call to the firewall.
 
         .EXAMPLE
-        # Pipeline removal preview
-        Remove-SfosIPHost -Name "Example" -WhatIf
+        Get-SfosIPHost -NameLike 'OldServer' | Remove-SfosIPHost -WhatIf
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+        Previews the removal of every object whose name contains 'OldServer'.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosIPHost
 #>
 function Remove-SfosIPHost {
     [CmdletBinding(SupportsShouldProcess)]
@@ -992,59 +1049,76 @@ function Remove-SfosIPHost {
 
 <#
         .SYNOPSIS
-        Exports all IPHost objects to a CSV file.
+        Exports IP host objects from a Sophos Firewall to a file.
 
         .DESCRIPTION
-        Retrieves all IPHost objects from the Sophos Firewall and exports them to a CSV file at the specified path. If the file already exists, an error is thrown unless the -Overwrite switch is used.
+        Retrieves every IP host object from the firewall and writes it to a CSV or JSON file.
+        Use this cmdlet for backup, documentation, or as input for Import-SfosIPHosts on the
+        same or a different firewall. It needs an open connection from Connect-SfosFirewall,
+        or the connection parameters supplied directly.
 
         .PARAMETER FilePath
-        Full path to the output CSV file.
+        Required. Full path of the file to write.
 
         .PARAMETER Format
-        Export format: 'AsCSV' (default) or 'AsJSON'.
+        Optional. File format, AsCSV or AsJSON. Defaults to AsCSV.
 
         .PARAMETER Overwrite
-        Optional switch to overwrite the file if it already exists.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. Overwrites the file if it already exists. If omitted, the cmdlet throws an
+        error when the file exists.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, uses the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, uses the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, uses the stored connection context.
+        Optional. User name for the API login. The account needs read permission for the
+        host objects. If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, uses the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skip SSL/TLS certificate validation for self-signed certificates.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        None. The function writes the output to a CSV file.
+        None. The cmdlet writes the file and throws an error if the export fails.
 
         .EXAMPLE
-        # Export IP hosts to a CSV file
-        Export-SfosIPHosts -FilePath "C:\Exports\SophosIPHosts.csv"
+        Export-SfosIPHosts -FilePath 'C:\Exports\SophosIPHosts.csv'
+
+        Exports every IP host object to a CSV file.
 
         .EXAMPLE
-        # Export and overwrite existing file
-        Export-SfosIPHosts -FilePath "C:\Exports\SophosIPHosts.csv" -Overwrite
+        Export-SfosIPHosts -FilePath 'C:\Exports\SophosIPHosts.csv' -Overwrite
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This function depends on Get-SfosIPHost to retrieve the data.
+        Exports the objects again, replacing a file left over from a previous run.
+
+        .LINK
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
 
         .LINK
         Get-SfosIPHost
+
+        .LINK
+        Import-SfosIPHosts
 #>
 function Export-SfosIPHosts {
     [CmdletBinding()]
@@ -1116,52 +1190,70 @@ function Export-SfosIPHosts {
 
 <#
         .SYNOPSIS
-        Imports IPHost objects from a CSV file.
+        Imports IP host objects from a CSV file onto a Sophos Firewall.
 
         .DESCRIPTION
-        Reads IPHost objects from a specified CSV file and creates them on the Sophos Firewall using the New-SfosIPHost cmdlet. The CSV file must have the appropriate headers matching the IPHost properties.
+        Reads a CSV file written by Export-SfosIPHosts, or one with matching columns, and
+        creates an IP host object on the firewall for each row through New-SfosIPHost. Rows
+        without a name, rows whose name starts with '#', and rows with a missing or invalid
+        HostType or address field are skipped and reported. It needs an open connection from
+        Connect-SfosFirewall, or the connection parameters supplied directly, and an account
+        with administrative permission.
 
         .PARAMETER FilePath
-        Full path to the input CSV file.
+        Required. Full path of the CSV file to read.
 
         .PARAMETER Format
-        Import format: 'AsCSV' (default) or 'AsJSON'.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. The cmdlet always reads the file as CSV, whatever value is passed here.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, uses the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, uses the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, uses the stored connection context.
+        Optional. User name for the API login. The account needs administrative permission.
+        If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, uses the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skip SSL/TLS certificate validation for self-signed certificates.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        None. The function creates IPHost objects on the Sophos Firewall.
+        None. The cmdlet creates objects on the firewall and reports each success or failure
+        as an information message.
 
         .EXAMPLE
-        # Import IP hosts from a CSV file
-        Import-SfosIPHosts -FilePath "C:\Imports\SophosIPHosts.csv"
+        Import-SfosIPHosts -FilePath 'C:\Imports\SophosIPHosts.csv'
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This function depends on New-SfosIPHost to create the objects.
+        Creates an IP host object for every valid row in the file.
+
+        .LINK
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
 
         .LINK
         New-SfosIPHost
+
+        .LINK
+        Export-SfosIPHosts
 #>
 function Import-SfosIPHosts {
     [CmdletBinding()]
@@ -1291,65 +1383,94 @@ function Import-SfosIPHosts {
 
 <#
         .SYNOPSIS
-        Retrieves IPHostGroup objects from the Sophos Firewall.
+        Retrieves IP host group objects from a Sophos Firewall.
 
         .DESCRIPTION
-        Queries the Sophos Firewall XML API for IPHostGroup objects. By default the cmdlet returns PowerShell-friendly objects. Use -AsXml to return the raw XML nodes.
-    
-        Note: Sophos GET responses can be inconsistent regarding status elements. This cmdlet is designed to return an empty result when no records are found.
+        Returns the IP host groups that are defined on the firewall, including their member
+        list. An IP host group bundles several IP host objects under one name for use in
+        firewall rules and other policies. The cmdlet only reads; nothing on the firewall is
+        changed. It needs an open connection from Connect-SfosFirewall, or the connection
+        parameters supplied directly.
 
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
-
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        You can combine several filters. The firewall itself evaluates at most one of them,
+        so every filter you supply is applied again on the client. The result therefore
+        always matches all filters you gave.
 
         .PARAMETER NameLike
-        Optional name filter. In Sophos SFOS, 'like' behaves as a substring match (the supplied value may match anywhere in the object name). Sent to the firewall as the server-side filter.
+        Optional. Returns only objects whose name contains the given text anywhere. This is
+        a substring match, not a wildcard pattern. If omitted, the name is not used to
+        filter.
 
         .PARAMETER DescriptionLike
-        Optional description filter, matched as a substring anywhere in the value. The firewall does not support filtering on Description, so this filter is always applied client-side.
+        Optional. Returns only objects whose description contains the given text anywhere.
+        Applied on the client. If omitted, the description is not used to filter.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs read permission for the
+        host group objects. If omitted, the value from the current connection is used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
 
         .PARAMETER AsXml
-        Returns raw XML nodes instead of PowerShell-friendly objects.
+        Optional. Returns the raw XML elements sent by the firewall instead of PowerShell
+        objects.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        PSCustomObject (default). System.Xml.XmlElement when -AsXml is specified.
+        System.Management.Automation.PSCustomObject. One object per IP host group, with the
+        properties Name, IPFamily, Description and HostList. Returns System.Xml.XmlElement
+        when -AsXml is used, and an empty array when no object matches.
 
         .EXAMPLE
-        # Retrieve all objects
         Get-SfosIPHostGroup
 
-        .EXAMPLE
-        # Filter by name (substring match)
-        Get-SfosIPHostGroup -NameLike "Example"
+        Lists every IP host group on the firewall of the current connection.
 
         .EXAMPLE
-        # Return raw XML for troubleshooting
-        Get-SfosIPHostGroup -NameLike "Example" -AsXml
+        Get-SfosIPHostGroup -NameLike 'Web'
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+        Lists all groups whose name contains 'Web'.
+
+        .EXAMPLE
+        (Get-SfosIPHostGroup -NameLike 'Web').HostList
+
+        Shows the member list of the matching group or groups.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        New-SfosIPHostGroup
+
+        .LINK
+        Set-SfosIPHostGroup
+
+        .LINK
+        Add-SfosIPHostGroupMember
 #>
 function Get-SfosIPHostGroup {
     [CmdletBinding()]
@@ -1442,74 +1563,83 @@ Assert-SfosApiReturnSuccess -Xml $XmlResponse -ObjectName 'IPHostGroup' -Action 
 
 <#
         .SYNOPSIS
-        Creates a new IP host group on the Sophos Firewall.
+        Creates an IP host group on a Sophos Firewall.
 
         .DESCRIPTION
-        Creates an IP host group that can contain multiple IP host objects.
-        Use this to logically group related hosts for easier firewall rule management.
-        After creation, use Add-SfosIPHostGroupMember to add additional members.
+        Creates an IP host group, optionally with an initial set of members. Use a group to
+        refer to several IP host objects at once in firewall rules and other policies. It
+        needs an open connection from Connect-SfosFirewall, or the connection parameters
+        supplied directly, and an account with administrative permission.
 
         .PARAMETER Name
-        Name of the IP host group (1-50 characters, no commas).
+        Required. Name of the new group. 1 to 50 characters, must not contain a comma.
 
         .PARAMETER IPFamily
-        IP address family: 'IPv4' or 'IPv6'. Default: 'IPv4'.
+        Optional. Address family of the group, IPv4 or IPv6. Defaults to IPv4.
 
-        .PARAMETER Members
-        Array of IP host names to include in the group.
+        .PARAMETER members
+        Optional. Names of existing IP host objects to add as initial members. If omitted,
+        the group is created empty.
 
         .PARAMETER Description
-        Optional description (max 255 characters).
-
-        # Connection parameters (optional - use stored context if not provided)
-        
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. Free-text description, up to 255 characters.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, uses stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number. If omitted, uses stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, uses stored connection context.
+        Optional. User name for the API login. The account needs administrative permission.
+        If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, uses stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        None. Throws an exception if creation fails.
+        None. The cmdlet writes no output and throws an error if the firewall rejects the
+        creation.
 
         .EXAMPLE
-        # Create an empty host group
-        New-SfosIPHostGroup -Name "WebServers" -Description "Production web server farm"
+        New-SfosIPHostGroup -Name 'WebServers' -WhatIf
+
+        Shows what the call would create without sending it to the firewall.
 
         .EXAMPLE
-        # Create group with initial members
-        New-SfosIPHostGroup -Name "DatabaseServers" -Members @("DB-Primary", "DB-Secondary") -Description "Database cluster"
+        New-SfosIPHostGroup -Name 'WebServers' -Description 'Production web server farm'
+
+        Creates an empty group.
 
         .EXAMPLE
-        # Create group and add members separately
-        New-SfosIPHostGroup -Name "OfficeHosts" -Description "Office network devices"
-        Add-SfosIPHostGroupMember -Name "OfficeHosts" -Members @("Printer01", "Scanner01")
+        New-SfosIPHostGroup -Name 'DatabaseServers' -members 'DB-Primary', 'DB-Secondary' -Description 'Database cluster'
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
+        Creates a group with two initial members.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
-        
+
         .LINK
         Get-SfosIPHostGroup
-        
+
         .LINK
         Add-SfosIPHostGroupMember
 #>
@@ -1597,67 +1727,91 @@ function New-SfosIPHostGroup {
 
 <#
         .SYNOPSIS
-        Updates an existing IPHostGroup object on the Sophos Firewall.
+        Updates an IP host group on a Sophos Firewall.
 
         .DESCRIPTION
-        Updates a IPHostGroup object using the Sophos Firewall XML API. You can supply the target object name directly or via the pipeline (when supported by the function's parameters).
-
-        SFOS replaces the whole entity on update - any element not sent in the request is
-        cleared on the firewall. This cmdlet reads the current group first and keeps whatever
-        the caller does not explicitly pass (Description, IPFamily, Members). To clear a
-        field, pass it explicitly with an empty value.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
-
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Changes an existing IP host group. The cmdlet reads the current group first and
+        sends back a complete object, keeping every field the caller does not pass. Only the
+        fields you actually supply are changed; pass a field explicitly to clear it. It needs
+        an open connection from Connect-SfosFirewall, or the connection parameters supplied
+        directly, and an account with administrative permission.
 
         .PARAMETER Name
-        Name of the target object.
+        Required. Name of the group to update. Accepts pipeline input by value or by
+        property name, so the output of Get-SfosIPHostGroup can be piped in directly.
 
         .PARAMETER IPFamily
-        IP address family: 'IPv4' or 'IPv6'. If omitted, the existing value on the firewall is kept.
+        Optional. Address family of the group, IPv4 or IPv6. If omitted, the current value
+        is kept.
 
-        .PARAMETER Members
-        One or more member object names to include. If omitted, the existing members are kept.
+        .PARAMETER members
+        Optional. Names of the IP host objects the group should contain. Replaces the
+        current member list. If omitted, the current members are kept.
 
         .PARAMETER Description
-        Optional description text. If omitted, the existing description is kept.
+        Optional. Free-text description, up to 255 characters. If omitted, the current value
+        is kept.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs administrative permission.
+        If omitted, the value from the current connection is used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        System.String or System.Management.Automation.PSCustomObject. Accepts the Name and
+        other properties, by property name, of an IP host group object such as the ones
+        returned by Get-SfosIPHostGroup.
 
         .OUTPUTS
-        PSCustomObject or API status information depending on implementation.
+        None. The cmdlet writes no output and throws an error if the firewall rejects the
+        update.
 
         .EXAMPLE
-        # Update an object by name
-        Set-SfosIPHostGroup -Name "Example"
+        Set-SfosIPHostGroup -Name 'Example' -Description 'Updated group' -WhatIf
+
+        Shows what the call would change without sending it to the firewall.
 
         .EXAMPLE
-        # Update using pipeline input
-        Get-SfosIPHostGroup -NameLike "Example" | Set-SfosIPHostGroup
+        Set-SfosIPHostGroup -Name 'Example' -Description 'Updated group'
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+        Changes the description and keeps the current members.
+
+        .EXAMPLE
+        Get-SfosIPHostGroup -NameLike 'Example' | Set-SfosIPHostGroup -members 'Host1', 'Host2'
+
+        Replaces the member list of the matching group through the pipeline.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosIPHostGroup
+
+        .LINK
+        Add-SfosIPHostGroupMember
 #>
 function Set-SfosIPHostGroup {
     [CmdletBinding(SupportsShouldProcess)]
@@ -1791,53 +1945,69 @@ function Set-SfosIPHostGroup {
 
 <#
         .SYNOPSIS
-        Removes a IPHostGroup object from the Sophos Firewall.
+        Removes an IP host group from a Sophos Firewall.
 
         .DESCRIPTION
-        Removes a IPHostGroup object using the Sophos Firewall XML API. This cmdlet supports ShouldProcess; use -WhatIf to preview the change.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
-
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Deletes an IP host group by name. This does not delete the IP host objects that were
+        members of the group. It needs an open connection from Connect-SfosFirewall, or the
+        connection parameters supplied directly, and an account with administrative
+        permission. Use -WhatIf to preview the removal.
 
         .PARAMETER Name
-        Name of the target object.
+        Required. Name of the group to remove. Accepts pipeline input by value or by
+        property name, so the output of Get-SfosIPHostGroup can be piped in directly.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs administrative permission.
+        If omitted, the value from the current connection is used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        System.String or System.Management.Automation.PSCustomObject. Accepts the Name of an
+        IP host group object such as the ones returned by Get-SfosIPHostGroup.
 
         .OUTPUTS
-        PSCustomObject or API status information depending on implementation.
+        None. The cmdlet writes no output and throws an error if the firewall rejects the
+        removal.
 
         .EXAMPLE
-        # Preview removal
-        Remove-SfosIPHostGroup -Name "Example" -WhatIf
+        Remove-SfosIPHostGroup -Name 'Example' -WhatIf
+
+        Shows what would be removed without sending the call to the firewall.
 
         .EXAMPLE
-        # Pipeline removal preview
-        Remove-SfosIPHostGroup -Name "Example" -WhatIf
+        Get-SfosIPHostGroup -NameLike 'OldGroup' | Remove-SfosIPHostGroup -WhatIf
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+        Previews the removal of every group whose name contains 'OldGroup'.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosIPHostGroup
 #>
 function Remove-SfosIPHostGroup {
     [CmdletBinding(SupportsShouldProcess)]
@@ -1898,52 +2068,76 @@ function Remove-SfosIPHostGroup {
 
 <#
         .SYNOPSIS
-        Adds members to an existing IPHostGroup object on the Sophos Firewall.
+        Adds members to an IP host group on a Sophos Firewall.
 
         .DESCRIPTION
-        Adds members to a IPHostGroup object using the Sophos Firewall XML API. The cmdlet validates input where possible and escapes user input for XML safety.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
-
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Adds one or more IP host objects to an existing group, keeping the members that are
+        already there. The cmdlet reads the current group first and sends back the combined
+        member list, together with the current description and address family. It needs an
+        open connection from Connect-SfosFirewall, or the connection parameters supplied
+        directly, and an account with administrative permission.
 
         .PARAMETER Name
-        Name of the target object.
+        Required. Name of the group to add members to. Accepts pipeline input by value or by
+        property name.
 
-        .PARAMETER Members
-        One or more member object names to add.
+        .PARAMETER members
+        Required. Names of the IP host objects to add.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs administrative permission.
+        If omitted, the value from the current connection is used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        System.String or System.Management.Automation.PSCustomObject. Accepts the Name of an
+        IP host group object such as the ones returned by Get-SfosIPHostGroup.
 
         .OUTPUTS
-        PSCustomObject or API status information depending on implementation.
+        None. The cmdlet writes no output and throws an error if the firewall rejects the
+        update.
 
         .EXAMPLE
-        # Add members to an existing object
-        Add-SfosIPHostGroupMember -Name "Example" -Members "Host1","Host2"
+        Add-SfosIPHostGroupMember -Name 'Example' -members 'Host1', 'Host2' -WhatIf
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+        Shows what the call would change without sending it to the firewall.
+
+        .EXAMPLE
+        Add-SfosIPHostGroupMember -Name 'Example' -members 'Host1', 'Host2'
+
+        Adds two IP host objects to the group.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosIPHostGroup
+
+        .LINK
+        Remove-SfosIPHostGroupMember
 #>
 function Add-SfosIPHostGroupMember {
     [CmdletBinding(SupportsShouldProcess)]
@@ -2070,52 +2264,77 @@ if ($ipHostGroup.IPFamily) {
 
 <#
         .SYNOPSIS
-        Removes members from an existing IPHostGroup object on the Sophos Firewall.
+        Removes members from an IP host group on a Sophos Firewall.
 
         .DESCRIPTION
-        Removes members from a IPHostGroup object using the Sophos Firewall XML API. The cmdlet validates input where possible and escapes user input for XML safety.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
-
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Removes one or more IP host objects from an existing group, keeping every other
+        member. The cmdlet reads the current group first and sends back the reduced member
+        list, together with the current description and address family. Names that are not
+        currently members are ignored. It needs an open connection from Connect-SfosFirewall,
+        or the connection parameters supplied directly, and an account with administrative
+        permission.
 
         .PARAMETER Name
-        Name of the target object.
+        Required. Name of the group to remove members from. Accepts pipeline input by value
+        or by property name.
 
-        .PARAMETER Members
-        One or more member object names to remove.
+        .PARAMETER members
+        Required. Names of the IP host objects to remove.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs administrative permission.
+        If omitted, the value from the current connection is used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        System.String or System.Management.Automation.PSCustomObject. Accepts the Name of an
+        IP host group object such as the ones returned by Get-SfosIPHostGroup.
 
         .OUTPUTS
-        PSCustomObject or API status information depending on implementation.
+        None. The cmdlet writes no output and throws an error if the firewall rejects the
+        update.
 
         .EXAMPLE
-        # Remove members from an existing object
-        Remove-SfosIPHostGroupMember -Name "Example" -Members "Host1","Host2"
+        Remove-SfosIPHostGroupMember -Name 'Example' -members 'Host1', 'Host2' -WhatIf
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+        Shows what the call would change without sending it to the firewall.
+
+        .EXAMPLE
+        Remove-SfosIPHostGroupMember -Name 'Example' -members 'Host1', 'Host2'
+
+        Removes two IP host objects from the group.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosIPHostGroup
+
+        .LINK
+        Add-SfosIPHostGroupMember
 #>
 function Remove-SfosIPHostGroupMember {
     [CmdletBinding(SupportsShouldProcess)]
@@ -2253,72 +2472,79 @@ if ($ipHostGroup.IPFamily) {
 
 <#
         .SYNOPSIS
-        Exports IPHostGroup objects to a CSV or JSON file.
+        Exports IP host group objects from a Sophos Firewall to a file.
 
         .DESCRIPTION
-        Retrieves all IPHostGroup objects from the Sophos Firewall and exports them to a file in CSV or JSON format.
-        Group members are stored as JSON arrays within the file for proper handling of multiple members.
-        Useful for backup, documentation, or migration purposes.
+        Retrieves every IP host group from the firewall and writes it to a CSV or JSON file,
+        with the member list flattened to a comma-separated string. Use this cmdlet for
+        backup, documentation, or as input for Import-SfosIPHostGroups on the same or a
+        different firewall. It needs an open connection from Connect-SfosFirewall, or the
+        connection parameters supplied directly.
 
         .PARAMETER FilePath
-        Full path where the export file will be saved. The file extension should match the format (.csv for CSV, .json for JSON).
+        Required. Full path of the file to write.
 
         .PARAMETER Format
-        Export format: 'AsCSV' (default) or 'AsJSON'. CSV format stores member arrays as JSON strings. JSON format preserves nested structure.
+        Optional. File format, AsCSV or AsJSON. Defaults to AsCSV.
 
         .PARAMETER Overwrite
-        If specified, overwrite the file if it already exists. Without this switch, the function throws an error if the file exists.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. Overwrites the file if it already exists. If omitted, the cmdlet throws an
+        error when the file exists.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, uses the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, uses the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, uses the stored connection context.
+        Optional. User name for the API login. The account needs read permission for the
+        host group objects. If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, uses the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skip SSL/TLS certificate validation for self-signed certificates.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        PSCustomObject with properties:
-        - Operation: 'Export'
-        - ObjectType: 'IPHostGroup'
-        - Total: Number of objects exported
-        - Success: Number of successful exports
-        - Failed: Always 0 for export operations
-        - SuccessItems: Array of exported IPHostGroup names
-        - FailedItems: Empty array for export operations
+        System.Management.Automation.PSCustomObject. A summary with the properties
+        Operation, ObjectType, Total, Success, Failed, SuccessItems and FailedItems. The
+        cmdlet also throws an error if the export itself fails.
 
         .EXAMPLE
-        # Export all IP host groups to CSV
-        Export-SfosIPHostGroups -FilePath "C:\Exports\IPHostGroups.csv"
+        Export-SfosIPHostGroups -FilePath 'C:\Exports\IPHostGroups.csv'
+
+        Exports every IP host group to a CSV file.
 
         .EXAMPLE
-        # Export to JSON with overwrite
-        Export-SfosIPHostGroups -FilePath "C:\Exports\IPHostGroups.json" -Format AsJSON -Overwrite
+        Export-SfosIPHostGroups -FilePath 'C:\Exports\IPHostGroups.json' -Format AsJSON -Overwrite
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This function depends on Get-SfosIPHostGroup to retrieve the objects.
-        Group members are stored as JSON arrays within CSV fields for proper serialization.
+        Exports the groups to a JSON file, replacing a file left over from a previous run.
 
         .LINK
-        Import-SfosIPHostGroups
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
 
         .LINK
         Get-SfosIPHostGroup
+
+        .LINK
+        Import-SfosIPHostGroups
 #>
 function Export-SfosIPHostGroups {
     [CmdletBinding()]
@@ -2404,69 +2630,77 @@ function Export-SfosIPHostGroups {
 
 <#
         .SYNOPSIS
-        Imports IPHostGroup objects from a CSV or JSON file.
+        Imports IP host group objects from a file onto a Sophos Firewall.
 
         .DESCRIPTION
-        Reads IPHostGroup objects from a specified CSV or JSON file and creates them on the Sophos Firewall using the New-SfosIPHostGroup cmdlet.
-        The file must have the appropriate headers/structure. In CSV files, the HostList member list is a single comma-separated string.
+        Reads a CSV or JSON file written by Export-SfosIPHostGroups, or one with matching
+        structure, and creates an IP host group for each row through New-SfosIPHostGroup. In
+        a CSV file, the member list is a single comma-separated string, for example
+        'Host1,Host2'. It needs an open connection from Connect-SfosFirewall, or the
+        connection parameters supplied directly, and an account with administrative
+        permission.
 
         .PARAMETER FilePath
-        Full path to the input CSV or JSON file.
+        Required. Full path of the file to read.
 
         .PARAMETER Format
-        Import format: 'AsCSV' (default) or 'AsJSON'. Must match the file format.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. File format, AsCSV or AsJSON. Must match the file. Defaults to AsCSV.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, uses the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, uses the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, uses the stored connection context.
+        Optional. User name for the API login. The account needs administrative permission.
+        If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, uses the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skip SSL/TLS certificate validation for self-signed certificates.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        PSCustomObject with properties:
-        - Operation: 'Import'
-        - ObjectType: 'IPHostGroup'
-        - Total: Number of objects in import file
-        - Success: Number of successfully created objects
-        - Failed: Number of failed creations
-        - SuccessItems: Array of successfully imported IPHostGroup names
-        - FailedItems: Array of PSCustomObjects with Name and Error details for failed items
+        System.Management.Automation.PSCustomObject. A summary with the properties
+        Operation, ObjectType, Total, Success, Failed, SuccessItems and FailedItems. Each
+        entry in FailedItems carries the object Name and the error message.
 
         .EXAMPLE
-        # Import IP host groups from CSV
-        Import-SfosIPHostGroups -FilePath "C:\Imports\IPHostGroups.csv"
+        Import-SfosIPHostGroups -FilePath 'C:\Imports\IPHostGroups.csv'
+
+        Creates an IP host group for every row in the file.
 
         .EXAMPLE
-        # Import from JSON with explicit connection
-        $result = Import-SfosIPHostGroups -FilePath "C:\Imports\IPHostGroups.json" -Format AsJSON -Firewall "192.168.1.1"
+        $result = Import-SfosIPHostGroups -FilePath 'C:\Imports\IPHostGroups.json' -Format AsJSON
         $result | Format-Table
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This function depends on New-SfosIPHostGroup to create the objects.
-        Members in CSV files are a single comma-separated string, e.g. "Host1,Host2"
+        Imports from a JSON file and shows the summary.
 
         .LINK
-        Export-SfosIPHostGroups
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
 
         .LINK
         New-SfosIPHostGroup
+
+        .LINK
+        Export-SfosIPHostGroups
 #>
 function Import-SfosIPHostGroups {
     [CmdletBinding()]
@@ -2565,68 +2799,97 @@ function Import-SfosIPHostGroups {
 
 <#
         .SYNOPSIS
-        Retrieves FQDNHost objects from the Sophos Firewall.
+        Retrieves FQDN host objects from a Sophos Firewall.
 
         .DESCRIPTION
-        Queries the Sophos Firewall XML API for FQDNHost objects. By default the cmdlet returns PowerShell-friendly objects. Use -AsXml to return the raw XML nodes.
-    
-        Note: Sophos GET responses can be inconsistent regarding status elements. This cmdlet is designed to return an empty result when no records are found.
+        Returns the FQDN host objects that are defined on the firewall. An FQDN host object
+        stands for a domain name that the firewall resolves to its current IP addresses, and
+        is used as source or destination in firewall rules and other policies where the
+        address behind a name changes. The cmdlet only reads; nothing on the firewall is
+        changed. It needs an open connection from Connect-SfosFirewall, or the connection
+        parameters supplied directly.
 
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
-
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        You can combine several filters. The firewall itself evaluates at most one of them,
+        so every filter you supply is applied again on the client. The result therefore
+        always matches all filters you gave.
 
         .PARAMETER NameLike
-        Optional name filter. In Sophos SFOS, 'like' behaves as a substring match (the supplied value may match anywhere in the object name). Sent to the firewall as the server-side filter.
+        Optional. Returns only objects whose name contains the given text anywhere. This is
+        a substring match, not a wildcard pattern. If omitted, the name is not used to
+        filter.
 
         .PARAMETER FqdnLike
-        Optional FQDN filter, matched as a substring anywhere in the value. The firewall does not support filtering on FQDN, so this filter is always applied client-side.
+        Optional. Returns only objects whose domain name contains the given text anywhere.
+        Applied on the client. If omitted, the domain name is not used to filter.
 
         .PARAMETER DescriptionLike
-        Optional description filter, matched as a substring anywhere in the value. The firewall does not support filtering on Description, so this filter is always applied client-side.
+        Optional. Returns only objects whose description contains the given text anywhere.
+        Applied on the client. If omitted, the description is not used to filter.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs read permission for the
+        FQDN host objects. If omitted, the value from the current connection is used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
 
         .PARAMETER AsXml
-        Returns raw XML nodes instead of PowerShell-friendly objects.
+        Optional. Returns the raw XML elements sent by the firewall instead of PowerShell
+        objects.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        PSCustomObject (default). System.Xml.XmlElement when -AsXml is specified.
+        System.Management.Automation.PSCustomObject. One object per FQDN host, with the
+        properties Name, Description, FQDN and FQDNHostGroupList. Returns
+        System.Xml.XmlElement when -AsXml is used, and an empty array when no object
+        matches.
 
         .EXAMPLE
-        # Retrieve all objects
         Get-SfosFQDNHost
 
-        .EXAMPLE
-        # Filter by name (substring match)
-        Get-SfosFQDNHost -NameLike "Example"
+        Lists every FQDN host object on the firewall of the current connection.
 
         .EXAMPLE
-        # Return raw XML for troubleshooting
-        Get-SfosFQDNHost -NameLike "Example" -AsXml
+        Get-SfosFQDNHost -FqdnLike '.example.com'
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+        Lists all objects whose domain name contains '.example.com'.
+
+        .EXAMPLE
+        Get-SfosFQDNHost -NameLike 'Example' -AsXml
+
+        Returns the raw XML of the matching objects.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        New-SfosFQDNHost
+
+        .LINK
+        Set-SfosFQDNHost
 #>
 function Get-SfosFQDNHost {
     [CmdletBinding()]
@@ -2727,82 +2990,89 @@ Assert-SfosApiReturnSuccess -Xml $XmlResponse -ObjectName 'FQDNHost' -Action 'ge
 
 <#
         .SYNOPSIS
-        Creates a new FQDN (Fully Qualified Domain Name) host on the Sophos Firewall.
+        Creates an FQDN host object on a Sophos Firewall.
 
         .DESCRIPTION
-        Creates an FQDN host object for DNS-based host definitions. Useful for cloud services,
-        dynamic IPs, or SaaS applications where IP addresses change frequently.
-        The firewall resolves the FQDN to current IP addresses automatically.
+        Creates an FQDN host object for a domain name. The firewall resolves the name to its
+        current IP addresses on its own; use this for cloud services, dynamic addresses or
+        SaaS applications whose IP addresses change over time. It needs an open connection
+        from Connect-SfosFirewall, or the connection parameters supplied directly, and an
+        account with administrative permission.
 
         .PARAMETER Name
-        Name of the FQDN host object (1-50 characters, no commas).
+        Required. Name of the new FQDN host object. 1 to 50 characters, must not contain a
+        comma.
 
         .PARAMETER FQDN
-        Fully qualified domain name (max 255 characters).
-        Examples: 'mail.example.com', '*.cloudapp.azure.com', 'api.service.com'
+        Required. The domain name, up to 255 characters, for example 'mail.example.com' or
+        '*.cloudapp.azure.com'.
 
         .PARAMETER Description
-        Optional description (max 255 characters).
+        Optional. Free-text description, up to 255 characters.
 
         .PARAMETER HostGroup
-        Optional array of FQDN host group names to add this host to.
-
-        # Connection parameters (optional - use stored context if not provided)
-        
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. Names of existing FQDN host groups to add the new object to. If omitted,
+        the object is created without group membership.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, uses stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number. If omitted, uses stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, uses stored connection context.
+        Optional. User name for the API login. The account needs administrative permission.
+        If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, uses stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        None. Throws an exception if creation fails.
+        None. The cmdlet writes no output and throws an error if the firewall rejects the
+        creation.
 
         .EXAMPLE
-        # Create FQDN host for Office 365
-        New-SfosFQDNHost -Name "Office365-Outlook" -FQDN "outlook.office365.com" -Description "Microsoft Office 365 Outlook"
+        New-SfosFQDNHost -Name 'Office365-Outlook' -FQDN 'outlook.office365.com' -WhatIf
+
+        Shows what the call would create without sending it to the firewall.
 
         .EXAMPLE
-        # Create FQDN host with wildcard for Azure services
-        New-SfosFQDNHost -Name "Azure-WestEU" -FQDN "*.westeurope.cloudapp.azure.com"
+        New-SfosFQDNHost -Name 'Office365-Outlook' -FQDN 'outlook.office365.com' -Description 'Microsoft Office 365 Outlook'
+
+        Creates an FQDN host object.
 
         .EXAMPLE
-        # Create FQDN and add to group
-        New-SfosFQDNHost -Name "SalesforceAPI" -FQDN "api.salesforce.com" -HostGroup @("SaaSServices", "CriticalServices")
+        New-SfosFQDNHost -Name 'SalesforceAPI' -FQDN 'api.salesforce.com' -HostGroup 'SaaSServices', 'CriticalServices'
 
-        .EXAMPLE
-        # Create FQDN for internal service
-        New-SfosFQDNHost -Name "InternalDB" -FQDN "db.internal.corp" -Description "Internal database cluster"
-
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        FQDN resolution happens on the firewall, not at definition time.
+        Creates an object and adds it to two FQDN host groups.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
-        
+
         .LINK
         Get-SfosFQDNHost
-        
+
         .LINK
         Set-SfosFQDNHost
-        
+
         .LINK
         Remove-SfosFQDNHost
 #>
@@ -2903,62 +3173,90 @@ function New-SfosFQDNHost {
 
 <#
         .SYNOPSIS
-        Updates an existing FQDNHost object on the Sophos Firewall.
+        Updates an FQDN host object on a Sophos Firewall.
 
         .DESCRIPTION
-        Updates a FQDNHost object using the Sophos Firewall XML API. You can supply the target object name directly or via the pipeline (when supported by the function's parameters).
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
-
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Changes an existing FQDN host object. The cmdlet reads the current object first and
+        sends back a complete object, keeping every field the caller does not pass. Only the
+        fields you actually supply are changed; pass a field explicitly to clear it. It needs
+        an open connection from Connect-SfosFirewall, or the connection parameters supplied
+        directly, and an account with administrative permission.
 
         .PARAMETER Name
-        Name of the target object.
+        Required. Name of the object to update. Accepts pipeline input by value or by
+        property name, so the output of Get-SfosFQDNHost can be piped in directly.
 
         .PARAMETER FQDN
-        Parameter used by this cmdlet.
+        Required. The domain name, up to 255 characters.
 
         .PARAMETER Description
-        Optional description text.
+        Optional. Free-text description, up to 255 characters. If omitted, the current value
+        is kept.
 
         .PARAMETER HostGroup
-        Parameter used by this cmdlet.
+        Optional. Names of the FQDN host groups the object should belong to. Replaces the
+        current group membership. If omitted, the current membership is kept.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs administrative permission.
+        If omitted, the value from the current connection is used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        System.String or System.Management.Automation.PSCustomObject. Accepts the Name and
+        other properties, by property name, of an FQDN host object such as the ones returned
+        by Get-SfosFQDNHost.
 
         .OUTPUTS
-        PSCustomObject or API status information depending on implementation.
+        None. The cmdlet writes no output and throws an error if the firewall rejects the
+        update.
 
         .EXAMPLE
-        # Update an object by name
-        Set-SfosFQDNHost -Name "Example" -FQDN "www.example.com"
+        Set-SfosFQDNHost -Name 'Example' -FQDN 'www.example.com' -WhatIf
+
+        Shows what the call would change without sending it to the firewall.
 
         .EXAMPLE
-        # Update using pipeline input
-        Get-SfosFQDNHost -NameLike "Example" | Set-SfosFQDNHost
+        Set-SfosFQDNHost -Name 'Example' -FQDN 'www.example.com'
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+        Changes the domain name of an existing object.
+
+        .EXAMPLE
+        Get-SfosFQDNHost -NameLike 'Example' | Set-SfosFQDNHost -FQDN 'app.example.com'
+
+        Updates the matching object through the pipeline.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosFQDNHost
+
+        .LINK
+        New-SfosFQDNHost
 #>
 function Set-SfosFQDNHost {
     [CmdletBinding(SupportsShouldProcess)]
@@ -3099,53 +3397,71 @@ if ($existing.Count -eq 0) {
 
 <#
         .SYNOPSIS
-        Removes a FQDNHost object from the Sophos Firewall.
+        Removes an FQDN host object from a Sophos Firewall.
 
         .DESCRIPTION
-        Removes a FQDNHost object using the Sophos Firewall XML API. This cmdlet supports ShouldProcess; use -WhatIf to preview the change.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
-
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Deletes an FQDN host object by name. It needs an open connection from
+        Connect-SfosFirewall, or the connection parameters supplied directly, and an account
+        with administrative permission. Use -WhatIf to preview the removal.
 
         .PARAMETER Name
-        Name of the target object.
+        Required. Name of the object to remove. Accepts pipeline input by value or by
+        property name, so the output of Get-SfosFQDNHost can be piped in directly.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs administrative permission.
+        If omitted, the value from the current connection is used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        System.String or System.Management.Automation.PSCustomObject. Accepts the Name of an
+        FQDN host object such as the ones returned by Get-SfosFQDNHost.
 
         .OUTPUTS
-        PSCustomObject or API status information depending on implementation.
+        None. The cmdlet writes no output and throws an error if the firewall rejects the
+        removal.
 
         .EXAMPLE
-        # Preview removal
-        Remove-SfosFQDNHost -Name "Example" -WhatIf
+        Remove-SfosFQDNHost -Name 'Example' -WhatIf
+
+        Shows what would be removed without sending the call to the firewall.
 
         .EXAMPLE
-        # Pipeline removal preview
-        Remove-SfosFQDNHost -Name "Example" -WhatIf
+        Get-SfosFQDNHost -NameLike 'OldService' | Remove-SfosFQDNHost -WhatIf
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+        Previews the removal of every object whose name contains 'OldService'.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosFQDNHost
+
+        .LINK
+        Remove-SfosFQDNHostMass
 #>
 function Remove-SfosFQDNHost {
     [CmdletBinding(SupportsShouldProcess)]
@@ -3206,57 +3522,72 @@ function Remove-SfosFQDNHost {
 
 <#
         .SYNOPSIS
-        Removes multiple FQDNHost objects from the Sophos Firewall in a single request.
+        Removes several FQDN host objects from a Sophos Firewall in one request.
 
         .DESCRIPTION
-        Removes one or more FQDNHost objects using the Sophos Firewall XML API. All names are
-        sent in a single <Remove> request instead of one request per object; because of that,
-        the response can carry a status per removed object rather than a single overall status.
-        This cmdlet supports ShouldProcess; use -WhatIf to preview the change.
+        Deletes one or more FQDN host objects by name in a single call to the firewall,
+        instead of one call per object. It needs an open connection from
+        Connect-SfosFirewall, or the connection parameters supplied directly, and an account
+        with administrative permission. Use -WhatIf to preview the removal.
 
         .PARAMETER Names
-        One or more FQDNHost object names to remove.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Required. Names of the objects to remove. Accepts pipeline input by value or by
+        property name.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. User name for the API login. The account needs administrative permission.
+        If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        System.String. Accepts one or more FQDN host names, for example from the Name
+        property of Get-SfosFQDNHost.
 
         .OUTPUTS
-        None. Throws an exception if the request fails.
+        None. The cmdlet writes no output and throws an error if the firewall rejects the
+        removal.
 
         .EXAMPLE
-        # Preview removal of several objects in one request
-        Remove-SfosFQDNHostMass -Names "Host1", "Host2", "Host3" -WhatIf
+        Remove-SfosFQDNHostMass -Names 'Host1', 'Host2', 'Host3' -WhatIf
+
+        Shows what would be removed without sending the call to the firewall.
 
         .EXAMPLE
-        # Pipeline removal preview
-        (Get-SfosFQDNHost -NameLike "Old").Name | Remove-SfosFQDNHostMass -WhatIf
+        (Get-SfosFQDNHost -NameLike 'Old').Name | Remove-SfosFQDNHostMass -WhatIf
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
-        -- BETA -- Works but needs further testing
+        Previews the removal of every object whose name contains 'Old', in a single request.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosFQDNHost
+
+        .LINK
+        Remove-SfosFQDNHost
 #>
 function Remove-SfosFQDNHostMass {
     [CmdletBinding(SupportsShouldProcess)]
@@ -3321,70 +3652,78 @@ function Remove-SfosFQDNHostMass {
 
 <#
         .SYNOPSIS
-        Exports FQDNHost objects to a CSV or JSON file.
+        Exports FQDN host objects from a Sophos Firewall to a file.
 
         .DESCRIPTION
-        Retrieves all FQDNHost objects from the Sophos Firewall and exports them to a file in CSV or JSON format.
-        Useful for backup, documentation, or migration purposes.
+        Retrieves every FQDN host object from the firewall and writes it to a CSV or JSON
+        file. Use this cmdlet for backup, documentation, or as input for Import-SfosFQDNHosts
+        on the same or a different firewall. It needs an open connection from
+        Connect-SfosFirewall, or the connection parameters supplied directly.
 
         .PARAMETER FilePath
-        Full path where the export file will be saved. The file extension should match the format (.csv for CSV, .json for JSON).
+        Required. Full path of the file to write.
 
         .PARAMETER Format
-        Export format: 'AsCSV' (default) or 'AsJSON'. CSV format is human-readable and Excel-compatible. JSON format preserves data structure.
+        Optional. File format, AsCSV or AsJSON. Defaults to AsCSV.
 
         .PARAMETER Overwrite
-        If specified, overwrite the file if it already exists. Without this switch, the function throws an error if the file exists.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. Overwrites the file if it already exists. If omitted, the cmdlet throws an
+        error when the file exists.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, uses the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, uses the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, uses the stored connection context.
+        Optional. User name for the API login. The account needs read permission for the
+        FQDN host objects. If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, uses the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skip SSL/TLS certificate validation for self-signed certificates.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        PSCustomObject with properties:
-        - Operation: 'Export'
-        - ObjectType: 'FQDNHost'
-        - Total: Number of objects exported
-        - Success: Number of successful exports
-        - Failed: Always 0 for export operations
-        - SuccessItems: Array of exported FQDNHost names
-        - FailedItems: Empty array for export operations
+        System.Management.Automation.PSCustomObject. A summary with the properties
+        Operation, ObjectType, Total, Success, Failed, SuccessItems and FailedItems. The
+        cmdlet also throws an error if the export itself fails.
 
         .EXAMPLE
-        # Export all FQDN hosts to CSV
-        Export-SfosFQDNHosts -FilePath "C:\Exports\FQDNHosts.csv"
+        Export-SfosFQDNHosts -FilePath 'C:\Exports\FQDNHosts.csv'
+
+        Exports every FQDN host object to a CSV file.
 
         .EXAMPLE
-        # Export to JSON with overwrite
-        Export-SfosFQDNHosts -FilePath "C:\Exports\FQDNHosts.json" -Format AsJSON -Overwrite
+        Export-SfosFQDNHosts -FilePath 'C:\Exports\FQDNHosts.json' -Format AsJSON -Overwrite
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This function depends on Get-SfosFQDNHost to retrieve the objects.
+        Exports the objects to a JSON file, replacing a file left over from a previous run.
 
         .LINK
-        Import-SfosFQDNHosts
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
 
         .LINK
         Get-SfosFQDNHost
+
+        .LINK
+        Import-SfosFQDNHosts
 #>
 function Export-SfosFQDNHosts {
     [CmdletBinding()]
@@ -3471,69 +3810,77 @@ function Export-SfosFQDNHosts {
 
 <#
         .SYNOPSIS
-        Imports FQDNHost objects from a CSV or JSON file.
+        Imports FQDN host objects from a file onto a Sophos Firewall.
 
         .DESCRIPTION
-        Reads FQDNHost objects from a specified CSV or JSON file and creates them on the Sophos Firewall using the New-SfosFQDNHost cmdlet.
-        The file must have the appropriate headers/structure matching the FQDNHost properties (Name, FQDN, Description, FQDNHostGroupList).
-        FQDNHostGroupList is a single comma-separated string, e.g. "Group1,Group2".
+        Reads a CSV or JSON file written by Export-SfosFQDNHosts, or one with matching
+        structure, and creates an FQDN host object for each row through New-SfosFQDNHost. In
+        a CSV file, the group membership is a single comma-separated string, for example
+        'Group1,Group2'. It needs an open connection from Connect-SfosFirewall, or the
+        connection parameters supplied directly, and an account with administrative
+        permission.
 
         .PARAMETER FilePath
-        Full path to the input CSV or JSON file.
+        Required. Full path of the file to read.
 
         .PARAMETER Format
-        Import format: 'AsCSV' (default) or 'AsJSON'. Must match the file format.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. File format, AsCSV or AsJSON. Must match the file. Defaults to AsCSV.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, uses the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, uses the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, uses the stored connection context.
+        Optional. User name for the API login. The account needs administrative permission.
+        If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, uses the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skip SSL/TLS certificate validation for self-signed certificates.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        PSCustomObject with properties:
-        - Operation: 'Import'
-        - ObjectType: 'FQDNHost'
-        - Total: Number of objects in import file
-        - Success: Number of successfully created objects
-        - Failed: Number of failed creations
-        - SuccessItems: Array of successfully imported FQDNHost names
-        - FailedItems: Array of PSCustomObjects with Name and Error details for failed items
+        System.Management.Automation.PSCustomObject. A summary with the properties
+        Operation, ObjectType, Total, Success, Failed, SuccessItems and FailedItems. Each
+        entry in FailedItems carries the object Name and the error message.
 
         .EXAMPLE
-        # Import FQDN hosts from CSV
-        Import-SfosFQDNHosts -FilePath "C:\Imports\FQDNHosts.csv"
+        Import-SfosFQDNHosts -FilePath 'C:\Imports\FQDNHosts.csv'
+
+        Creates an FQDN host object for every row in the file.
 
         .EXAMPLE
-        # Import from JSON with explicit connection
-        $result = Import-SfosFQDNHosts -FilePath "C:\Imports\FQDNHosts.json" -Format AsJSON -Firewall "192.168.1.1"
+        $result = Import-SfosFQDNHosts -FilePath 'C:\Imports\FQDNHosts.json' -Format AsJSON
         $result | Format-Table
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This function depends on New-SfosFQDNHost to create the objects.
+        Imports from a JSON file and shows the summary.
 
         .LINK
-        Export-SfosFQDNHosts
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
 
         .LINK
         New-SfosFQDNHost
+
+        .LINK
+        Export-SfosFQDNHosts
 #>
 function Import-SfosFQDNHosts {
     [CmdletBinding()]
@@ -3635,65 +3982,86 @@ function Import-SfosFQDNHosts {
 
 <#
         .SYNOPSIS
-        Retrieves FQDNHostGroup objects from the Sophos Firewall.
+        Retrieves FQDN host group objects from a Sophos Firewall.
 
         .DESCRIPTION
-        Queries the Sophos Firewall XML API for FQDNHostGroup objects. By default the cmdlet returns PowerShell-friendly objects. Use -AsXml to return the raw XML nodes.
-    
-        Note: Sophos GET responses can be inconsistent regarding status elements. This cmdlet is designed to return an empty result when no records are found.
+        Returns the FQDN host groups that are defined on the firewall, including their
+        member list. An FQDN host group bundles several FQDN host objects under one name for
+        use in firewall rules and other policies. The cmdlet only reads; nothing on the
+        firewall is changed. It needs an open connection from Connect-SfosFirewall, or the
+        connection parameters supplied directly.
 
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
-
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        You can combine several filters. The firewall itself evaluates at most one of them,
+        so every filter you supply is applied again on the client. The result therefore
+        always matches all filters you gave.
 
         .PARAMETER NameLike
-        Optional name filter. In Sophos SFOS, 'like' behaves as a substring match (the supplied value may match anywhere in the object name). Sent to the firewall as the server-side filter.
+        Optional. Returns only objects whose name contains the given text anywhere. This is
+        a substring match, not a wildcard pattern. If omitted, the name is not used to
+        filter.
 
         .PARAMETER DescriptionLike
-        Optional description filter, matched as a substring anywhere in the value. The firewall does not support filtering on Description, so this filter is always applied client-side.
+        Optional. Returns only objects whose description contains the given text anywhere.
+        Applied on the client. If omitted, the description is not used to filter.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs read permission for the
+        FQDN host group objects. If omitted, the value from the current connection is used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
 
         .PARAMETER AsXml
-        Returns raw XML nodes instead of PowerShell-friendly objects.
+        Optional. Returns the raw XML elements sent by the firewall instead of PowerShell
+        objects.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        PSCustomObject (default). System.Xml.XmlElement when -AsXml is specified.
+        System.Management.Automation.PSCustomObject. One object per FQDN host group, with the
+        properties Name, Description and FQDNHostList. Returns System.Xml.XmlElement when
+        -AsXml is used, and an empty array when no object matches.
 
         .EXAMPLE
-        # Retrieve all objects
         Get-SfosFQDNHostGroup
 
-        .EXAMPLE
-        # Filter by name (substring match)
-        Get-SfosFQDNHostGroup -NameLike "Example"
+        Lists every FQDN host group on the firewall of the current connection.
 
         .EXAMPLE
-        # Return raw XML for troubleshooting
-        Get-SfosFQDNHostGroup -NameLike "Example" -AsXml
+        Get-SfosFQDNHostGroup -NameLike 'SaaS'
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+        Lists all groups whose name contains 'SaaS'.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        New-SfosFQDNHostGroup
+
+        .LINK
+        Add-SfosFQDNHostGroupMember
 #>
 function Get-SfosFQDNHostGroup {
     [CmdletBinding()]
@@ -3785,55 +4153,77 @@ Assert-SfosApiReturnSuccess -Xml $XmlResponse -ObjectName 'FQDNHostGroup' -Actio
 
 <#
         .SYNOPSIS
-        Creates a new FQDNHostGroup object on the Sophos Firewall.
+        Creates an FQDN host group on a Sophos Firewall.
 
         .DESCRIPTION
-        Creates a FQDNHostGroup object using the Sophos Firewall XML API. The cmdlet validates input where possible and escapes user input for XML safety.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
-
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Creates an FQDN host group, optionally with an initial set of members. Use a group to
+        refer to several FQDN host objects at once in firewall rules and other policies. It
+        needs an open connection from Connect-SfosFirewall, or the connection parameters
+        supplied directly, and an account with administrative permission.
 
         .PARAMETER Name
-        Name of the target object.
+        Required. Name of the new group. 1 to 50 characters, must not contain a comma.
 
-        .PARAMETER Members
-        One or more member object names to include.
+        .PARAMETER members
+        Optional. Names of existing FQDN host objects to add as initial members. If omitted,
+        the group is created empty.
 
         .PARAMETER Description
-        Optional description text.
+        Optional. Free-text description, up to 255 characters.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs administrative permission.
+        If omitted, the value from the current connection is used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        PSCustomObject or API status information depending on implementation.
+        None. The cmdlet writes no output and throws an error if the firewall rejects the
+        creation.
 
         .EXAMPLE
-        # Create a new object
-        New-SfosFQDNHostGroup -Name "Example"
+        New-SfosFQDNHostGroup -Name 'Example' -WhatIf
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+        Shows what the call would create without sending it to the firewall.
+
+        .EXAMPLE
+        New-SfosFQDNHostGroup -Name 'SaaSServices' -members 'Office365-Outlook', 'SalesforceAPI'
+
+        Creates a group with two initial members.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosFQDNHostGroup
+
+        .LINK
+        Add-SfosFQDNHostGroupMember
 #>
 function New-SfosFQDNHostGroup {
     [CmdletBinding(SupportsShouldProcess)]
@@ -3919,59 +4309,87 @@ function New-SfosFQDNHostGroup {
 
 <#
         .SYNOPSIS
-        Updates an existing FQDNHostGroup object on the Sophos Firewall.
+        Updates an FQDN host group on a Sophos Firewall.
 
         .DESCRIPTION
-        Updates a FQDNHostGroup object using the Sophos Firewall XML API. You can supply the target object name directly or via the pipeline (when supported by the function's parameters).
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
-
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Changes an existing FQDN host group. The cmdlet reads the current group first and
+        sends back a complete object, keeping every field the caller does not pass. Only the
+        fields you actually supply are changed; pass a field explicitly to clear it. It needs
+        an open connection from Connect-SfosFirewall, or the connection parameters supplied
+        directly, and an account with administrative permission.
 
         .PARAMETER Name
-        Name of the target object.
+        Required. Name of the group to update. Accepts pipeline input by value or by
+        property name, so the output of Get-SfosFQDNHostGroup can be piped in directly.
 
-        .PARAMETER Members
-        One or more member object names to include.
+        .PARAMETER members
+        Optional. Names of the FQDN host objects the group should contain. Replaces the
+        current member list. If omitted, the current members are kept.
 
         .PARAMETER Description
-        Optional description text.
+        Optional. Free-text description, up to 255 characters. If omitted, the current value
+        is kept.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs administrative permission.
+        If omitted, the value from the current connection is used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        System.String or System.Management.Automation.PSCustomObject. Accepts the Name and
+        other properties, by property name, of an FQDN host group object such as the ones
+        returned by Get-SfosFQDNHostGroup.
 
         .OUTPUTS
-        PSCustomObject or API status information depending on implementation.
+        None. The cmdlet writes no output and throws an error if the firewall rejects the
+        update.
 
         .EXAMPLE
-        # Update an object by name
-        Set-SfosFQDNHostGroup -Name "Example"
+        Set-SfosFQDNHostGroup -Name 'Example' -Description 'Updated group' -WhatIf
+
+        Shows what the call would change without sending it to the firewall.
 
         .EXAMPLE
-        # Update using pipeline input
-        Get-SfosFQDNHostGroup -NameLike "Example" | Set-SfosFQDNHostGroup
+        Set-SfosFQDNHostGroup -Name 'Example' -Description 'Updated group'
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+        Changes the description and keeps the current members.
+
+        .EXAMPLE
+        Get-SfosFQDNHostGroup -NameLike 'Example' | Set-SfosFQDNHostGroup -members 'Host1', 'Host2'
+
+        Replaces the member list of the matching group through the pipeline.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosFQDNHostGroup
+
+        .LINK
+        Add-SfosFQDNHostGroupMember
 #>
 function Set-SfosFQDNHostGroup {
     [CmdletBinding(SupportsShouldProcess)]
@@ -4095,53 +4513,69 @@ function Set-SfosFQDNHostGroup {
 
 <#
         .SYNOPSIS
-        Removes a FQDNHostGroup object from the Sophos Firewall.
+        Removes an FQDN host group from a Sophos Firewall.
 
         .DESCRIPTION
-        Removes a FQDNHostGroup object using the Sophos Firewall XML API. This cmdlet supports ShouldProcess; use -WhatIf to preview the change.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
-
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Deletes an FQDN host group by name. This does not delete the FQDN host objects that
+        were members of the group. It needs an open connection from Connect-SfosFirewall, or
+        the connection parameters supplied directly, and an account with administrative
+        permission. Use -WhatIf to preview the removal.
 
         .PARAMETER Name
-        Name of the target object.
+        Required. Name of the group to remove. Accepts pipeline input by value or by
+        property name, so the output of Get-SfosFQDNHostGroup can be piped in directly.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs administrative permission.
+        If omitted, the value from the current connection is used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        System.String or System.Management.Automation.PSCustomObject. Accepts the Name of an
+        FQDN host group object such as the ones returned by Get-SfosFQDNHostGroup.
 
         .OUTPUTS
-        PSCustomObject or API status information depending on implementation.
+        None. The cmdlet writes no output and throws an error if the firewall rejects the
+        removal.
 
         .EXAMPLE
-        # Preview removal
-        Remove-SfosFQDNHostGroup -Name "Example" -WhatIf
+        Remove-SfosFQDNHostGroup -Name 'Example' -WhatIf
+
+        Shows what would be removed without sending the call to the firewall.
 
         .EXAMPLE
-        # Pipeline removal preview
-        Remove-SfosFQDNHostGroup -Name "Example" -WhatIf
+        Get-SfosFQDNHostGroup -NameLike 'OldGroup' | Remove-SfosFQDNHostGroup -WhatIf
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+        Previews the removal of every group whose name contains 'OldGroup'.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosFQDNHostGroup
 #>
 function Remove-SfosFQDNHostGroup {
     [CmdletBinding(SupportsShouldProcess)]
@@ -4202,52 +4636,76 @@ function Remove-SfosFQDNHostGroup {
 
 <#
         .SYNOPSIS
-        Adds members to an existing FQDNHostGroup object on the Sophos Firewall.
+        Adds members to an FQDN host group on a Sophos Firewall.
 
         .DESCRIPTION
-        Adds members to a FQDNHostGroup object using the Sophos Firewall XML API. The cmdlet validates input where possible and escapes user input for XML safety.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
-
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Adds one or more FQDN host objects to an existing group, keeping the members that are
+        already there. The cmdlet reads the current group first and sends back the combined
+        member list, together with the current description. It needs an open connection from
+        Connect-SfosFirewall, or the connection parameters supplied directly, and an account
+        with administrative permission.
 
         .PARAMETER Name
-        Name of the target object.
+        Required. Name of the group to add members to. Accepts pipeline input by value or by
+        property name.
 
-        .PARAMETER Members
-        One or more member object names to add.
+        .PARAMETER members
+        Required. Names of the FQDN host objects to add.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs administrative permission.
+        If omitted, the value from the current connection is used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        System.String or System.Management.Automation.PSCustomObject. Accepts the Name of an
+        FQDN host group object such as the ones returned by Get-SfosFQDNHostGroup.
 
         .OUTPUTS
-        PSCustomObject or API status information depending on implementation.
+        None. The cmdlet writes no output and throws an error if the firewall rejects the
+        update.
 
         .EXAMPLE
-        # Add members to an existing object
-        Add-SfosFQDNHostGroupMember -Name "Example" -Members "Host1","Host2"
+        Add-SfosFQDNHostGroupMember -Name 'Example' -members 'Host1', 'Host2' -WhatIf
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+        Shows what the call would change without sending it to the firewall.
+
+        .EXAMPLE
+        Add-SfosFQDNHostGroupMember -Name 'Example' -members 'Host1', 'Host2'
+
+        Adds two FQDN host objects to the group.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosFQDNHostGroup
+
+        .LINK
+        Remove-SfosFQDNHostGroupMember
 #>
 function Add-SfosFQDNHostGroupMember {
     [CmdletBinding(SupportsShouldProcess)]
@@ -4359,52 +4817,76 @@ function Add-SfosFQDNHostGroupMember {
 
 <#
         .SYNOPSIS
-        Removes members from an existing FQDNHostGroup object on the Sophos Firewall.
+        Removes members from an FQDN host group on a Sophos Firewall.
 
         .DESCRIPTION
-        Removes members from a FQDNHostGroup object using the Sophos Firewall XML API. The cmdlet validates input where possible and escapes user input for XML safety.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
-
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Removes one or more FQDN host objects from an existing group, keeping every other
+        member. The cmdlet reads the current group first and sends back the reduced member
+        list, together with the current description. Names that are not currently members
+        are ignored. It needs an open connection from Connect-SfosFirewall, or the connection
+        parameters supplied directly, and an account with administrative permission.
 
         .PARAMETER Name
-        Name of the target object.
+        Required. Name of the group to remove members from. Accepts pipeline input by value
+        or by property name.
 
-        .PARAMETER Members
-        One or more member object names to remove.
+        .PARAMETER members
+        Required. Names of the FQDN host objects to remove.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs administrative permission.
+        If omitted, the value from the current connection is used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        System.String or System.Management.Automation.PSCustomObject. Accepts the Name of an
+        FQDN host group object such as the ones returned by Get-SfosFQDNHostGroup.
 
         .OUTPUTS
-        PSCustomObject or API status information depending on implementation.
+        None. The cmdlet writes no output and throws an error if the firewall rejects the
+        update.
 
         .EXAMPLE
-        # Remove members from an existing object
-        Remove-SfosFQDNHostGroupMember -Name "Example" -Members "Host1","Host2"
+        Remove-SfosFQDNHostGroupMember -Name 'Example' -members 'Host1', 'Host2' -WhatIf
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+        Shows what the call would change without sending it to the firewall.
+
+        .EXAMPLE
+        Remove-SfosFQDNHostGroupMember -Name 'Example' -members 'Host1', 'Host2'
+
+        Removes two FQDN host objects from the group.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosFQDNHostGroup
+
+        .LINK
+        Add-SfosFQDNHostGroupMember
 #>
 function Remove-SfosFQDNHostGroupMember {
     [CmdletBinding(SupportsShouldProcess)]
@@ -4520,72 +5002,79 @@ function Remove-SfosFQDNHostGroupMember {
 
 <#
         .SYNOPSIS
-        Exports FQDNHostGroup objects to a CSV or JSON file.
+        Exports FQDN host group objects from a Sophos Firewall to a file.
 
         .DESCRIPTION
-        Retrieves all FQDNHostGroup objects from the Sophos Firewall and exports them to a file in CSV or JSON format.
-        Group members are stored as JSON arrays within the file for proper handling of multiple members.
-        Useful for backup, documentation, or migration purposes.
+        Retrieves every FQDN host group from the firewall and writes it to a CSV or JSON
+        file, with the member list flattened to a comma-separated string. Use this cmdlet for
+        backup, documentation, or as input for Import-SfosFQDNHostGroups on the same or a
+        different firewall. It needs an open connection from Connect-SfosFirewall, or the
+        connection parameters supplied directly.
 
         .PARAMETER FilePath
-        Full path where the export file will be saved. The file extension should match the format (.csv for CSV, .json for JSON).
+        Required. Full path of the file to write.
 
         .PARAMETER Format
-        Export format: 'AsCSV' (default) or 'AsJSON'. CSV format stores member arrays as JSON strings. JSON format preserves nested structure.
+        Optional. File format, AsCSV or AsJSON. Defaults to AsCSV.
 
         .PARAMETER Overwrite
-        If specified, overwrite the file if it already exists. Without this switch, the function throws an error if the file exists.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. Overwrites the file if it already exists. If omitted, the cmdlet throws an
+        error when the file exists.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, uses the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, uses the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, uses the stored connection context.
+        Optional. User name for the API login. The account needs read permission for the
+        FQDN host group objects. If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, uses the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skip SSL/TLS certificate validation for self-signed certificates.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        PSCustomObject with properties:
-        - Operation: 'Export'
-        - ObjectType: 'FQDNHostGroup'
-        - Total: Number of objects exported
-        - Success: Number of successful exports
-        - Failed: Always 0 for export operations
-        - SuccessItems: Array of exported FQDNHostGroup names
-        - FailedItems: Empty array for export operations
+        System.Management.Automation.PSCustomObject. A summary with the properties
+        Operation, ObjectType, Total, Success, Failed, SuccessItems and FailedItems. The
+        cmdlet also throws an error if the export itself fails.
 
         .EXAMPLE
-        # Export all FQDN host groups to CSV
-        Export-SfosFQDNHostGroups -FilePath "C:\Exports\FQDNHostGroups.csv"
+        Export-SfosFQDNHostGroups -FilePath 'C:\Exports\FQDNHostGroups.csv'
+
+        Exports every FQDN host group to a CSV file.
 
         .EXAMPLE
-        # Export to JSON with overwrite
-        Export-SfosFQDNHostGroups -FilePath "C:\Exports\FQDNHostGroups.json" -Format AsJSON -Overwrite
+        Export-SfosFQDNHostGroups -FilePath 'C:\Exports\FQDNHostGroups.json' -Format AsJSON -Overwrite
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This function depends on Get-SfosFQDNHostGroup to retrieve the objects.
-        Group members are stored as JSON arrays within CSV fields for proper serialization.
+        Exports the groups to a JSON file, replacing a file left over from a previous run.
 
         .LINK
-        Import-SfosFQDNHostGroups
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
 
         .LINK
         Get-SfosFQDNHostGroup
+
+        .LINK
+        Import-SfosFQDNHostGroups
 #>
 function Export-SfosFQDNHostGroups {
     [CmdletBinding()]
@@ -4676,69 +5165,76 @@ function Export-SfosFQDNHostGroups {
 
 <#
         .SYNOPSIS
-        Imports FQDNHostGroup objects from a CSV or JSON file.
+        Imports FQDN host group objects from a file onto a Sophos Firewall.
 
         .DESCRIPTION
-        Reads FQDNHostGroup objects from a specified CSV or JSON file and creates them on the Sophos Firewall using the New-SfosFQDNHostGroup cmdlet.
-        The file must have the appropriate headers/structure. Members are expected as JSON arrays in CSV fields.
+        Reads a CSV or JSON file written by Export-SfosFQDNHostGroups, or one with matching
+        structure, and creates an FQDN host group for each row through New-SfosFQDNHostGroup.
+        In a CSV file, the member list is a JSON array, for example ["Host1","Host2"]. It
+        needs an open connection from Connect-SfosFirewall, or the connection parameters
+        supplied directly, and an account with administrative permission.
 
         .PARAMETER FilePath
-        Full path to the input CSV or JSON file.
+        Required. Full path of the file to read.
 
         .PARAMETER Format
-        Import format: 'AsCSV' (default) or 'AsJSON'. Must match the file format.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. File format, AsCSV or AsJSON. Must match the file. Defaults to AsCSV.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, uses the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, uses the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, uses the stored connection context.
+        Optional. User name for the API login. The account needs administrative permission.
+        If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, uses the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skip SSL/TLS certificate validation for self-signed certificates.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        PSCustomObject with properties:
-        - Operation: 'Import'
-        - ObjectType: 'FQDNHostGroup'
-        - Total: Number of objects in import file
-        - Success: Number of successfully created objects
-        - Failed: Number of failed creations
-        - SuccessItems: Array of successfully imported FQDNHostGroup names
-        - FailedItems: Array of PSCustomObjects with Name and Error details for failed items
+        System.Management.Automation.PSCustomObject. A summary with the properties
+        Operation, ObjectType, Total, Success, Failed, SuccessItems and FailedItems. Each
+        entry in FailedItems carries the object Name and the error message.
 
         .EXAMPLE
-        # Import FQDN host groups from CSV
-        Import-SfosFQDNHostGroups -FilePath "C:\Imports\FQDNHostGroups.csv"
+        Import-SfosFQDNHostGroups -FilePath 'C:\Imports\FQDNHostGroups.csv'
+
+        Creates an FQDN host group for every row in the file.
 
         .EXAMPLE
-        # Import from JSON with explicit connection
-        $result = Import-SfosFQDNHostGroups -FilePath "C:\Imports\FQDNHostGroups.json" -Format AsJSON -Firewall "192.168.1.1"
+        $result = Import-SfosFQDNHostGroups -FilePath 'C:\Imports\FQDNHostGroups.json' -Format AsJSON
         $result | Format-Table
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This function depends on New-SfosFQDNHostGroup to create the objects.
-        Members in CSV files should be JSON arrays: ["Host1","Host2"]
+        Imports from a JSON file and shows the summary.
 
         .LINK
-        Export-SfosFQDNHostGroups
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
 
         .LINK
         New-SfosFQDNHostGroup
+
+        .LINK
+        Export-SfosFQDNHostGroups
 #>
 function Import-SfosFQDNHostGroups {
     [CmdletBinding()]
@@ -4845,68 +5341,92 @@ function Import-SfosFQDNHostGroups {
 
 <#
         .SYNOPSIS
-        Retrieves MACHost objects from the Sophos Firewall.
+        Retrieves MAC host objects from a Sophos Firewall.
 
         .DESCRIPTION
-        Queries the Sophos Firewall XML API for MACHost objects. By default the cmdlet returns PowerShell-friendly objects. Use -AsXml to return the raw XML nodes.
-    
-        Note: Sophos GET responses can be inconsistent regarding status elements. This cmdlet is designed to return an empty result when no records are found.
+        Returns the MAC host objects that are defined on the firewall. A MAC host object
+        identifies a device by its hardware address instead of an IP address, and is used as
+        source or destination in firewall rules and other policies where the address should
+        not depend on IP assignment. The cmdlet only reads; nothing on the firewall is
+        changed. It needs an open connection from Connect-SfosFirewall, or the connection
+        parameters supplied directly.
 
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
-
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        You can combine several filters. The firewall itself evaluates at most one of them,
+        so every filter you supply is applied again on the client. The result therefore
+        always matches all filters you gave.
 
         .PARAMETER NameLike
-        Optional name filter. In Sophos SFOS, 'like' behaves as a substring match (the supplied value may match anywhere in the object name). Sent to the firewall as the server-side filter.
+        Optional. Returns only objects whose name contains the given text anywhere. This is
+        a substring match, not a wildcard pattern. If omitted, the name is not used to
+        filter.
 
         .PARAMETER MACAddressLike
-        Optional MAC address filter, matched as a substring anywhere in the value. The firewall does not support filtering on MACAddress, so this filter is always applied client-side.
+        Optional. Returns only objects whose MAC address contains the given text anywhere.
+        Applied on the client. If omitted, the address is not used to filter.
 
         .PARAMETER DescriptionLike
-        Optional description filter, matched as a substring anywhere in the value. The firewall does not support filtering on Description, so this filter is always applied client-side.
+        Optional. Returns only objects whose description contains the given text anywhere.
+        Applied on the client. If omitted, the description is not used to filter.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs read permission for the
+        MAC host objects. If omitted, the value from the current connection is used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
 
         .PARAMETER AsXml
-        Returns raw XML nodes instead of PowerShell-friendly objects.
+        Optional. Returns the raw XML elements sent by the firewall instead of PowerShell
+        objects.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        PSCustomObject (default). System.Xml.XmlElement when -AsXml is specified.
+        System.Management.Automation.PSCustomObject. One object per MAC host, with the
+        properties Name, Type, MACAddress, MACList and Description. Returns
+        System.Xml.XmlElement when -AsXml is used, and an empty array when no object
+        matches.
 
         .EXAMPLE
-        # Retrieve all objects
         Get-SfosMACHost
 
-        .EXAMPLE
-        # Filter by name (substring match)
-        Get-SfosMACHost -NameLike "Example"
+        Lists every MAC host object on the firewall of the current connection.
 
         .EXAMPLE
-        # Return raw XML for troubleshooting
-        Get-SfosMACHost -NameLike "Example" -AsXml
+        Get-SfosMACHost -NameLike 'Laptop'
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+        Lists all objects whose name contains 'Laptop'.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        New-SfosMACHost
+
+        .LINK
+        Set-SfosMACHost
 #>
 function Get-SfosMACHost {
     [CmdletBinding()]
@@ -5004,85 +5524,86 @@ Assert-SfosApiReturnSuccess -Xml $XmlResponse -ObjectName 'MACHost' -Action 'get
 
 <#
         .SYNOPSIS
-        Creates a new MAC address host on the Sophos Firewall.
+        Creates a MAC host object on a Sophos Firewall.
 
         .DESCRIPTION
-        Creates a MAC host object for Layer 2 device identification. Useful for:
-        - Device-based firewall rules (regardless of IP)
-        - Guest network management
-        - IoT device control
-        - BYOD policies
-        
-        Supports single MAC addresses or comma-separated lists for multiple MACs.
+        Creates a MAC host object that identifies one or more devices by their hardware
+        address. Use this for device-based firewall rules, guest network management, IoT
+        device control or BYOD policies where the rule should not depend on IP assignment.
+        It needs an open connection from Connect-SfosFirewall, or the connection parameters
+        supplied directly, and an account with administrative permission.
 
         .PARAMETER Name
-        Name of the MAC host object (1-60 characters, no commas).
+        Required. Name of the new MAC host object. 1 to 60 characters, must not contain a
+        comma.
 
         .PARAMETER MACAddress
-        MAC address in standard format. Examples:
-        - Single: '00:11:22:33:44:55'
-        - Multiple: '00:11:22:33:44:55,AA:BB:CC:DD:EE:FF'
-        Formats supported: colon-separated, hyphen-separated, or no separators.
+        Required. One MAC address, or several separated by commas, for example
+        '00:11:22:33:44:55' or '00:11:22:33:44:55,AA:BB:CC:DD:EE:FF'. Colon-separated,
+        hyphen-separated and unseparated notation are all accepted.
 
         .PARAMETER Description
-        Optional description (max 255 characters).
-
-        # Connection parameters (optional - use stored context if not provided)
-        
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. Free-text description, up to 255 characters.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, uses stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number. If omitted, uses stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, uses stored connection context.
+        Optional. User name for the API login. The account needs administrative permission.
+        If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, uses stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        None. Throws an exception if creation fails.
+        None. The cmdlet writes no output and throws an error if the firewall rejects the
+        creation.
 
         .EXAMPLE
-        # Create MAC host for a specific device
-        New-SfosMACHost -Name "CEO-Laptop" -MACAddress "00:11:22:33:44:55" -Description "Executive laptop"
+        New-SfosMACHost -Name 'CEO-Laptop' -MACAddress '00:11:22:33:44:55' -WhatIf
+
+        Shows what the call would create without sending it to the firewall.
 
         .EXAMPLE
-        # Create MAC host for IoT device
-        New-SfosMACHost -Name "SecurityCamera-01" -MACAddress "AA:BB:CC:DD:EE:FF"
+        New-SfosMACHost -Name 'CEO-Laptop' -MACAddress '00:11:22:33:44:55' -Description 'Executive laptop'
+
+        Creates a MAC host object for a single device.
 
         .EXAMPLE
-        # Create MAC host with multiple addresses (device with multiple NICs)
-        New-SfosMACHost -Name "Server-Dual-NIC" -MACAddress "00:11:22:33:44:55,00:11:22:33:44:66" -Description "Server with 2 network cards"
+        New-SfosMACHost -Name 'Server-Dual-NIC' -MACAddress '00:11:22:33:44:55,00:11:22:33:44:66' -Description 'Server with two network cards'
 
-        .EXAMPLE
-        # Create MAC host for guest device
-        New-SfosMACHost -Name "Guest-iPhone" -MACAddress "12:34:56:78:9A:BC" -Description "Visitor device"
-
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        MAC addresses are case-insensitive.
+        Creates a MAC host object covering two addresses of the same device.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
-        
+
         .LINK
         Get-SfosMACHost
-        
+
         .LINK
         Set-SfosMACHost
-        
+
         .LINK
         Remove-SfosMACHost
 #>
@@ -5177,66 +5698,88 @@ function New-SfosMACHost {
 
 <#
         .SYNOPSIS
-        Updates an existing MACHost object on the Sophos Firewall.
+        Updates a MAC host object on a Sophos Firewall.
 
         .DESCRIPTION
-        Updates a MACHost object using the Sophos Firewall XML API. You can supply the target object name directly or via the pipeline.
-
-        SFOS replaces the whole entity on update - any element not sent in the request is
-        cleared on the firewall. This cmdlet reads the current object first and keeps the
-        existing description unless the caller explicitly passes one. To clear the
-        description, pass it explicitly with an empty value.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
-
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Changes an existing MAC host object. The cmdlet reads the current object first and
+        sends back a complete object, keeping the current description unless the caller
+        passes one. Pass an empty description explicitly to clear it. It needs an open
+        connection from Connect-SfosFirewall, or the connection parameters supplied directly,
+        and an account with administrative permission.
 
         .PARAMETER Name
-        Name of the target object.
+        Required. Name of the object to update. Accepts pipeline input by value or by
+        property name, so the output of Get-SfosMACHost can be piped in directly.
 
         .PARAMETER MACAddress
-        MAC address in standard format, or a comma-separated list of MAC addresses. Examples:
-        - Single: '00:11:22:33:44:55'
-        - Multiple: '00:11:22:33:44:55,AA:BB:CC:DD:EE:FF'
+        Required. One MAC address, or several separated by commas, replacing the current
+        address or address list, for example '00:11:22:33:44:55' or
+        '00:11:22:33:44:55,AA:BB:CC:DD:EE:FF'.
 
         .PARAMETER Description
-        Optional description text. If omitted, the existing description is kept.
+        Optional. Free-text description, up to 255 characters. If omitted, the current value
+        is kept.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs administrative permission.
+        If omitted, the value from the current connection is used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        System.String or System.Management.Automation.PSCustomObject. Accepts the Name and
+        MACAddress, by property name, of a MAC host object such as the ones returned by
+        Get-SfosMACHost.
 
         .OUTPUTS
-        PSCustomObject or API status information depending on implementation.
+        None. The cmdlet writes no output and throws an error if the firewall rejects the
+        update.
 
         .EXAMPLE
-        # Update an object by name
-        Set-SfosMACHost -Name "Example" -MACAddress "00:11:22:33:44:55"
+        Set-SfosMACHost -Name 'Example' -MACAddress '00:11:22:33:44:55' -WhatIf
+
+        Shows what the call would change without sending it to the firewall.
 
         .EXAMPLE
-        # Update using pipeline input (Get-SfosMACHost returns a MACAddress property)
-        Get-SfosMACHost -NameLike "Example" | Set-SfosMACHost
+        Set-SfosMACHost -Name 'Example' -MACAddress '00:11:22:33:44:55'
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+        Changes the address of an existing object.
+
+        .EXAMPLE
+        Get-SfosMACHost -NameLike 'Example' | Set-SfosMACHost
+
+        Rewrites the matching object through the pipeline, unchanged.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosMACHost
+
+        .LINK
+        New-SfosMACHost
 #>
 function Set-SfosMACHost {
     [CmdletBinding(SupportsShouldProcess)]
@@ -5358,53 +5901,68 @@ if ($existing.Count -eq 0) {
 
 <#
         .SYNOPSIS
-        Removes a MACHost object from the Sophos Firewall.
+        Removes a MAC host object from a Sophos Firewall.
 
         .DESCRIPTION
-        Removes a MACHost object using the Sophos Firewall XML API. This cmdlet supports ShouldProcess; use -WhatIf to preview the change.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
-
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Deletes a MAC host object by name. It needs an open connection from
+        Connect-SfosFirewall, or the connection parameters supplied directly, and an account
+        with administrative permission. Use -WhatIf to preview the removal.
 
         .PARAMETER Name
-        Name of the target object.
+        Required. Name of the object to remove. Accepts pipeline input by value or by
+        property name, so the output of Get-SfosMACHost can be piped in directly.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs administrative permission.
+        If omitted, the value from the current connection is used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        System.String or System.Management.Automation.PSCustomObject. Accepts the Name of a
+        MAC host object such as the ones returned by Get-SfosMACHost.
 
         .OUTPUTS
-        PSCustomObject or API status information depending on implementation.
+        None. The cmdlet writes no output and throws an error if the firewall rejects the
+        removal.
 
         .EXAMPLE
-        # Preview removal
-        Remove-SfosMACHost -Name "Example" -WhatIf
+        Remove-SfosMACHost -Name 'Example' -WhatIf
+
+        Shows what would be removed without sending the call to the firewall.
 
         .EXAMPLE
-        # Pipeline removal preview
-        Remove-SfosMACHost -Name "Example" -WhatIf
+        Get-SfosMACHost -NameLike 'OldDevice' | Remove-SfosMACHost -WhatIf
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+        Previews the removal of every object whose name contains 'OldDevice'.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosMACHost
 #>
 function Remove-SfosMACHost {
     [CmdletBinding(SupportsShouldProcess)]
@@ -5465,70 +6023,80 @@ function Remove-SfosMACHost {
 
 <#
         .SYNOPSIS
-        Exports MACHost objects to a CSV or JSON file.
+        Exports MAC host objects from a Sophos Firewall to a file.
 
         .DESCRIPTION
-        Retrieves all MACHost objects from the Sophos Firewall and exports them to a file in CSV or JSON format.
-        Useful for backup, documentation, or migration purposes.
+        Retrieves every MAC host object from the firewall and writes it to a CSV or JSON
+        file, with a single-address object and a multi-address object both flattened to the
+        same comma-separated MACAddress column that New-SfosMACHost expects. Use this cmdlet
+        for backup, documentation, or as input for Import-SfosMACHosts on the same or a
+        different firewall. It needs an open connection from Connect-SfosFirewall, or the
+        connection parameters supplied directly.
 
         .PARAMETER FilePath
-        Full path where the export file will be saved. The file extension should match the format (.csv for CSV, .json for JSON).
+        Required. Full path of the file to write.
 
         .PARAMETER Format
-        Export format: 'AsCSV' (default) or 'AsJSON'. CSV format is human-readable and Excel-compatible. JSON format preserves data structure.
+        Optional. File format, AsCSV or AsJSON. Defaults to AsCSV.
 
         .PARAMETER Overwrite
-        If specified, overwrite the file if it already exists. Without this switch, the function throws an error if the file exists.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. Overwrites the file if it already exists. If omitted, the cmdlet throws an
+        error when the file exists.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, uses the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, uses the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, uses the stored connection context.
+        Optional. User name for the API login. The account needs read permission for the
+        MAC host objects. If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, uses the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skip SSL/TLS certificate validation for self-signed certificates.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        PSCustomObject with properties:
-        - Operation: 'Export'
-        - ObjectType: 'MACHost'
-        - Total: Number of objects exported
-        - Success: Number of successful exports
-        - Failed: Always 0 for export operations
-        - SuccessItems: Array of exported MACHost names
-        - FailedItems: Empty array for export operations
+        System.Management.Automation.PSCustomObject. A summary with the properties
+        Operation, ObjectType, Total, Success, Failed, SuccessItems and FailedItems. The
+        cmdlet also throws an error if the export itself fails.
 
         .EXAMPLE
-        # Export all MAC hosts to CSV
-        Export-SfosMACHosts -FilePath "C:\Exports\MACHosts.csv"
+        Export-SfosMACHosts -FilePath 'C:\Exports\MACHosts.csv'
+
+        Exports every MAC host object to a CSV file.
 
         .EXAMPLE
-        # Export to JSON with overwrite
-        Export-SfosMACHosts -FilePath "C:\Exports\MACHosts.json" -Format AsJSON -Overwrite
+        Export-SfosMACHosts -FilePath 'C:\Exports\MACHosts.json' -Format AsJSON -Overwrite
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This function depends on Get-SfosMACHost to retrieve the objects.
+        Exports the objects to a JSON file, replacing a file left over from a previous run.
 
         .LINK
-        Import-SfosMACHosts
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
 
         .LINK
         Get-SfosMACHost
+
+        .LINK
+        Import-SfosMACHosts
 #>
 function Export-SfosMACHosts {
     [CmdletBinding()]
@@ -5618,69 +6186,76 @@ function Export-SfosMACHosts {
 
 <#
         .SYNOPSIS
-        Imports MACHost objects from a CSV or JSON file.
+        Imports MAC host objects from a file onto a Sophos Firewall.
 
         .DESCRIPTION
-        Reads MACHost objects from a specified CSV or JSON file and creates them on the Sophos Firewall using the New-SfosMACHost cmdlet.
-        The file must have the appropriate headers/structure matching the MACHost properties (Name, MACAddress, Description).
-        MACAddress holds a single address or a comma-separated list, matching the New-SfosMACHost parameter of the same name.
+        Reads a CSV or JSON file written by Export-SfosMACHosts, or one with matching
+        structure, and creates a MAC host object for each row through New-SfosMACHost. The
+        MACAddress column holds a single address or a comma-separated list. It needs an open
+        connection from Connect-SfosFirewall, or the connection parameters supplied directly,
+        and an account with administrative permission.
 
         .PARAMETER FilePath
-        Full path to the input CSV or JSON file.
+        Required. Full path of the file to read.
 
         .PARAMETER Format
-        Import format: 'AsCSV' (default) or 'AsJSON'. Must match the file format.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. File format, AsCSV or AsJSON. Must match the file. Defaults to AsCSV.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, uses the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, uses the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, uses the stored connection context.
+        Optional. User name for the API login. The account needs administrative permission.
+        If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, uses the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skip SSL/TLS certificate validation for self-signed certificates.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        PSCustomObject with properties:
-        - Operation: 'Import'
-        - ObjectType: 'MACHost'
-        - Total: Number of objects in import file
-        - Success: Number of successfully created objects
-        - Failed: Number of failed creations
-        - SuccessItems: Array of successfully imported MACHost names
-        - FailedItems: Array of PSCustomObjects with Name and Error details for failed items
+        System.Management.Automation.PSCustomObject. A summary with the properties
+        Operation, ObjectType, Total, Success, Failed, SuccessItems and FailedItems. Each
+        entry in FailedItems carries the object Name and the error message.
 
         .EXAMPLE
-        # Import MAC hosts from CSV
-        Import-SfosMACHosts -FilePath "C:\Imports\MACHosts.csv"
+        Import-SfosMACHosts -FilePath 'C:\Imports\MACHosts.csv'
+
+        Creates a MAC host object for every row in the file.
 
         .EXAMPLE
-        # Import from JSON with explicit connection
-        $result = Import-SfosMACHosts -FilePath "C:\Imports\MACHosts.json" -Format AsJSON -Firewall "192.168.1.1"
+        $result = Import-SfosMACHosts -FilePath 'C:\Imports\MACHosts.json' -Format AsJSON
         $result | Format-Table
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This function depends on New-SfosMACHost to create the objects.
+        Imports from a JSON file and shows the summary.
 
         .LINK
-        Export-SfosMACHosts
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
 
         .LINK
         New-SfosMACHost
+
+        .LINK
+        Export-SfosMACHosts
 #>
 function Import-SfosMACHosts {
     [CmdletBinding()]
@@ -5777,65 +6352,88 @@ function Import-SfosMACHosts {
 
 <#
         .SYNOPSIS
-        Retrieves CountryGroup objects from the Sophos Firewall.
+        Retrieves country group objects from a Sophos Firewall.
 
         .DESCRIPTION
-        Queries the Sophos Firewall XML API for CountryGroup objects. By default the cmdlet returns PowerShell-friendly objects. Use -AsXml to return the raw XML nodes.
-    
-        Note: Sophos GET responses can be inconsistent regarding status elements. This cmdlet is designed to return an empty result when no records are found.
+        Returns the country groups that are defined on the firewall. A country group bundles
+        one or more countries, matched by the firewall's Geo-IP database, for use in firewall
+        rules and other policies, for example to restrict access by geography. The cmdlet
+        only reads; nothing on the firewall is changed. It needs an open connection from
+        Connect-SfosFirewall, or the connection parameters supplied directly.
 
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
-
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        You can combine several filters. The firewall itself evaluates at most one of them,
+        so every filter you supply is applied again on the client. The result therefore
+        always matches all filters you gave.
 
         .PARAMETER NameLike
-        Optional name filter. In Sophos SFOS, 'like' behaves as a substring match (the supplied value may match anywhere in the object name). Sent to the firewall as the server-side filter.
+        Optional. Returns only objects whose name contains the given text anywhere. This is
+        a substring match, not a wildcard pattern. If omitted, the name is not used to
+        filter.
 
         .PARAMETER DescriptionLike
-        Optional description filter, matched as a substring anywhere in the value. The firewall does not support filtering on Description, so this filter is always applied client-side.
+        Optional. Returns only objects whose description contains the given text anywhere.
+        Applied on the client. If omitted, the description is not used to filter.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs read permission for the
+        country group objects. If omitted, the value from the current connection is used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
 
         .PARAMETER AsXml
-        Returns raw XML nodes instead of PowerShell-friendly objects.
+        Optional. Returns the raw XML elements sent by the firewall instead of PowerShell
+        objects.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        PSCustomObject (default). System.Xml.XmlElement when -AsXml is specified.
+        System.Management.Automation.PSCustomObject. One object per country group, with the
+        properties Name, Description and Countries. The Countries property holds the group's
+        member list, named after the underlying CountryList element. Returns
+        System.Xml.XmlElement when -AsXml is used, and an empty array when no object
+        matches.
 
         .EXAMPLE
-        # Retrieve all objects
         Get-SfosCountryGroup
 
-        .EXAMPLE
-        # Filter by name (substring match)
-        Get-SfosCountryGroup -NameLike "Example"
+        Lists every country group on the firewall of the current connection.
 
         .EXAMPLE
-        # Return raw XML for troubleshooting
-        Get-SfosCountryGroup -NameLike "Example" -AsXml
+        (Get-SfosCountryGroup -NameLike 'Blocklist').Countries
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+        Shows the member countries of the matching group or groups.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        New-SfosCountryGroup
+
+        .LINK
+        Set-SfosCountryGroup
 #>
 function Get-SfosCountryGroup {
     [CmdletBinding()]
@@ -5927,88 +6525,85 @@ Assert-SfosApiReturnSuccess -Xml $XmlResponse -ObjectName 'CountryGroup' -Action
 
 <#
         .SYNOPSIS
-        Creates a new country-based host group on the Sophos Firewall.
+        Creates a country group on a Sophos Firewall.
 
         .DESCRIPTION
-        Creates a country group using Geo-IP databases. Useful for:
-        - Geographic access restrictions (block/allow by country)
-        - Compliance requirements (GDPR, data sovereignty)
-        - Threat mitigation (block high-risk regions)
-        - License enforcement (region-specific services)
-        
-        The firewall uses its Geo-IP database to match IP addresses to countries.
+        Creates a country group backed by the firewall's Geo-IP database. Use a country
+        group for geographic access restrictions, compliance requirements or blocking
+        high-risk regions in firewall rules and other policies. It needs an open connection
+        from Connect-SfosFirewall, or the connection parameters supplied directly, and an
+        account with administrative permission.
 
         .PARAMETER Name
-        Name of the country group (1-50 characters, no commas).
+        Required. Name of the new group. 1 to 50 characters, must not contain a comma.
 
-        .PARAMETER Countries
-        Array of country names as the firewall spells them, for example 'China' or
-        'North Korea'. ISO 3166-1 alpha-2 codes such as 'CN' are rejected with
-        code 501. Use Get-SfosCountryGroup on an existing group to see the exact
-        spelling. The API documentation does not specify the format.
-        Examples: 'United States', 'Germany', 'United Kingdom', 'China'
-        Use Get-SfosCountryGroup to see available country codes.
+        .PARAMETER countries
+        Optional. Country names as the firewall spells them, for example 'Germany' or
+        'United Kingdom'. Use Get-SfosCountryGroup on an existing group to see the exact
+        spelling the firewall expects. If omitted, the group is created empty.
 
         .PARAMETER Description
-        Optional description (max 255 characters).
-
-        # Connection parameters (optional - use stored context if not provided)
-        
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. Free-text description, up to 255 characters.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, uses stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number. If omitted, uses stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, uses stored connection context.
+        Optional. User name for the API login. The account needs administrative permission.
+        If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, uses stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        None. Throws an exception if creation fails.
+        None. The cmdlet writes no output and throws an error if the firewall rejects the
+        creation.
 
         .EXAMPLE
-        # Create group for European countries
-        New-SfosCountryGroup -Name "EU-Countries" -Countries @('DE', 'FR', 'IT', 'ES', 'NL') -Description "European Union member states"
+        New-SfosCountryGroup -Name 'EU-Countries' -WhatIf
+
+        Shows what the call would create without sending it to the firewall.
 
         .EXAMPLE
-        # Create group to block high-risk countries
-        New-SfosCountryGroup -Name "BlockList-Countries" -Countries @('CN', 'RU', 'KP') -Description "Countries to block for security"
+        New-SfosCountryGroup -Name 'EU-Countries' -countries 'Germany', 'France', 'Italy', 'Spain', 'Netherlands' -Description 'European Union member states'
+
+        Creates a group covering several countries.
 
         .EXAMPLE
-        # Create group for US regions
-        New-SfosCountryGroup -Name "North-America" -Countries @('US', 'CA', 'MX') -Description "North American countries"
+        New-SfosCountryGroup -Name 'Germany-Only' -countries 'Germany' -Description 'German IP addresses only'
 
-        .EXAMPLE
-        # Create single-country group
-        New-SfosCountryGroup -Name "Germany-Only" -Countries @('DE') -Description "German IP addresses only"
-
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        Requires up-to-date Geo-IP database on firewall.
-        Country codes are case-sensitive (use uppercase).
+        Creates a single-country group.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
-        
+
         .LINK
         Get-SfosCountryGroup
-        
+
         .LINK
         Set-SfosCountryGroup
-        
+
         .LINK
         Remove-SfosCountryGroup
 #>
@@ -6100,60 +6695,87 @@ function New-SfosCountryGroup {
 
 <#
         .SYNOPSIS
-        Updates an existing CountryGroup object on the Sophos Firewall.
+        Updates a country group on a Sophos Firewall.
 
         .DESCRIPTION
-        Updates a CountryGroup object using the Sophos Firewall XML API. You can supply the target object name directly or via the pipeline (when supported by the function's parameters).
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
-
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Changes an existing country group. The cmdlet reads the current group first and
+        sends back a complete object, keeping the current description unless the caller
+        passes one. It needs an open connection from Connect-SfosFirewall, or the connection
+        parameters supplied directly, and an account with administrative permission.
 
         .PARAMETER Name
-        Name of the target object.
+        Required. Name of the group to update. Accepts pipeline input by value or by
+        property name, so the output of Get-SfosCountryGroup can be piped in directly.
 
-        .PARAMETER Countries
-        Country names as the firewall spells them, for example 'China' or 'Germany'.
-        ISO 3166-1 alpha-2 codes such as 'CN' are rejected with code 501.
+        .PARAMETER countries
+        Required. Country names as the firewall spells them, for example 'Germany' or
+        'United Kingdom', replacing the current member list.
 
         .PARAMETER Description
-        Optional description text.
+        Optional. Free-text description, up to 255 characters. If omitted, the current value
+        is kept.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs administrative permission.
+        If omitted, the value from the current connection is used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        System.String or System.Management.Automation.PSCustomObject. Accepts the Name and
+        other properties, by property name, of a country group object such as the ones
+        returned by Get-SfosCountryGroup.
 
         .OUTPUTS
-        PSCustomObject or API status information depending on implementation.
+        None. The cmdlet writes no output and throws an error if the firewall rejects the
+        update.
 
         .EXAMPLE
-        # Update an object by name
-        Set-SfosCountryGroup -Name "Example" -countries @('China', 'North Korea')
+        Set-SfosCountryGroup -Name 'Example' -countries 'Germany', 'France' -WhatIf
+
+        Shows what the call would change without sending it to the firewall.
 
         .EXAMPLE
-        # Update using pipeline input
-        Get-SfosCountryGroup -NameLike "Example" | Set-SfosCountryGroup
+        Set-SfosCountryGroup -Name 'Example' -countries 'Germany', 'France'
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+        Replaces the member list of an existing group.
+
+        .EXAMPLE
+        Get-SfosCountryGroup -NameLike 'Example' | Set-SfosCountryGroup
+
+        Rewrites the matching group through the pipeline, keeping its current members and
+        description.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosCountryGroup
+
+        .LINK
+        New-SfosCountryGroup
 #>
 function Set-SfosCountryGroup {
     [CmdletBinding(SupportsShouldProcess)]
@@ -6274,53 +6896,68 @@ if ($existing.Count -eq 0) {
 
 <#
         .SYNOPSIS
-        Removes a CountryGroup object from the Sophos Firewall.
+        Removes a country group from a Sophos Firewall.
 
         .DESCRIPTION
-        Removes a CountryGroup object using the Sophos Firewall XML API. This cmdlet supports ShouldProcess; use -WhatIf to preview the change.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
-
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Deletes a country group by name. It needs an open connection from
+        Connect-SfosFirewall, or the connection parameters supplied directly, and an account
+        with administrative permission. Use -WhatIf to preview the removal.
 
         .PARAMETER Name
-        Name of the target object.
+        Required. Name of the group to remove. Accepts pipeline input by value or by
+        property name, so the output of Get-SfosCountryGroup can be piped in directly.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs administrative permission.
+        If omitted, the value from the current connection is used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        System.String or System.Management.Automation.PSCustomObject. Accepts the Name of a
+        country group object such as the ones returned by Get-SfosCountryGroup.
 
         .OUTPUTS
-        PSCustomObject or API status information depending on implementation.
+        None. The cmdlet writes no output and throws an error if the firewall rejects the
+        removal.
 
         .EXAMPLE
-        # Preview removal
-        Remove-SfosCountryGroup -Name "Example" -WhatIf
+        Remove-SfosCountryGroup -Name 'Example' -WhatIf
+
+        Shows what would be removed without sending the call to the firewall.
 
         .EXAMPLE
-        # Pipeline removal preview
-        Remove-SfosCountryGroup -Name "Example" -WhatIf
+        Get-SfosCountryGroup -NameLike 'OldGroup' | Remove-SfosCountryGroup -WhatIf
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+        Previews the removal of every group whose name contains 'OldGroup'.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosCountryGroup
 #>
 function Remove-SfosCountryGroup {
     [CmdletBinding(SupportsShouldProcess)]
@@ -6387,119 +7024,117 @@ function Remove-SfosCountryGroup {
 
 <#
         .SYNOPSIS
-        Retrieves service definitions from the Sophos Firewall.
+        Retrieves service objects from a Sophos Firewall.
 
         .DESCRIPTION
-        Queries the Sophos Firewall XML API for service objects. Returns PowerShell-friendly 
-        objects by default, or raw XML nodes with -AsXml.
-        
-        Supports multiple filter parameters:
-        - Server-side filters: NameLike, DescriptionLike, TypeLike (faster)
-        - Client-side filters: ProtocolLike, SourcePortLike, DestinationPortLike (more flexible)
-        
-        Returns empty result when no services match the criteria.
+        Returns the service objects that are defined on the firewall. A service object
+        stands for a TCP or UDP port or port range, an IP protocol, or an ICMP or ICMPv6
+        type and code, and is used in firewall rules to define the traffic a rule matches.
+        The cmdlet only reads; nothing on the firewall is changed. It needs an open
+        connection from Connect-SfosFirewall, or the connection parameters supplied
+        directly.
+
+        Returns the service's ICMP type as text, for example 'Echo', while New-SfosService
+        and Set-SfosService expect the numeric code. A value read with this cmdlet cannot be
+        passed straight into New-SfosService for an ICMP service.
+
+        You can combine several filters. NameLike, DescriptionLike and TypeLike are sent to
+        the firewall, but it evaluates at most one of them, so every filter you supply is
+        applied again on the client. ProtocolLike, SourcePortLike and DestinationPortLike are
+        always applied on the client. The result always matches all filters you gave.
 
         .PARAMETER NameLike
-        Filter by service name (substring match). Server-side filter.
+        Optional. Returns only objects whose name contains the given text anywhere. This is
+        a substring match, not a wildcard pattern. If omitted, the name is not used to
+        filter.
 
         .PARAMETER DescriptionLike
-        Filter by description (substring match). Server-side filter.
+        Optional. Returns only objects whose description contains the given text anywhere.
+        If omitted, the description is not used to filter.
 
         .PARAMETER TypeLike
-        Filter by service type. Valid values: 'TCPorUDP', 'IP', 'ICMP', 'ICMPv6'. Server-side filter.
+        Optional. Returns only objects of one service type. Valid values: TCPorUDP, IP,
+        ICMP, ICMPv6. If omitted, all service types are returned.
 
         .PARAMETER ProtocolLike
-        Filter by protocol (e.g., 'TCP', 'UDP'). Client-side filter using wildcards.
+        Optional. Returns only TCP or UDP services whose protocol contains the given text
+        anywhere, for example 'TCP'. Applied on the client. If omitted, the protocol is not
+        used to filter.
 
         .PARAMETER SourcePortLike
-        Filter by source port or range. Client-side filter using wildcards.
+        Optional. Returns only TCP or UDP services whose source port contains the given text
+        anywhere. Applied on the client. If omitted, the source port is not used to filter.
 
         .PARAMETER DestinationPortLike
-        Filter by destination port or range. Client-side filter using wildcards.
-
-        # Connection parameters (optional - use stored context if not provided)
-        
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. Returns only TCP or UDP services whose destination port contains the given
+        text anywhere. Applied on the client. If omitted, the destination port is not used
+        to filter.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, uses stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number. If omitted, uses stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, uses stored connection context.
+        Optional. User name for the API login. The account needs read permission for the
+        service objects. If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, uses stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
 
-        # Output parameters
-        
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
         .PARAMETER AsXml
-        Returns raw XML nodes instead of PowerShell objects.
+        Optional. Returns the raw XML elements sent by the firewall instead of PowerShell
+        objects.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        PSCustomObject with properties: Name, Description, Type, ServiceDetails
-        System.Xml.XmlElement when -AsXml is specified.
+        System.Management.Automation.PSCustomObject. One object per service, with the
+        properties Name, Description, Type and ServiceDetails. ServiceDetails holds the
+        type-specific fields (for example SourcePort/DestinationPort/Protocol for a TCP or
+        UDP service). Returns System.Xml.XmlElement when -AsXml is used, and an empty array
+        when no object matches.
 
         .EXAMPLE
-        # Retrieve all services
         Get-SfosService
 
-        .EXAMPLE
-        # Find services by name pattern
-        Get-SfosService -NameLike "HTTP"
+        Lists every service object on the firewall of the current connection.
 
         .EXAMPLE
-        # Find all TCP services
-        Get-SfosService -TypeLike "TCPorUDP" -ProtocolLike "TCP"
+        Get-SfosService -NameLike 'HTTP'
+
+        Lists all services whose name contains 'HTTP'.
 
         .EXAMPLE
-        # Find services using specific port
-        Get-SfosService -DestinationPortLike "443"
+        Get-SfosService -TypeLike TCPorUDP -DestinationPortLike '443'
 
-        .EXAMPLE
-        # Find services in port range
-        Get-SfosService -DestinationPortLike "8"
-
-        .EXAMPLE
-        # Get service details as XML
-        Get-SfosService -NameLike "HTTPS" -AsXml
-
-        .EXAMPLE
-        # Find all ICMP services
-        Get-SfosService -TypeLike "ICMP"
-
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        Client-side filters retrieve all services first, then filter locally.
+        Lists all TCP or UDP services whose destination port contains '443'.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
-        
+
         .LINK
         New-SfosService
-        
+
         .LINK
         Set-SfosService
-        
-        .LINK
-        Remove-SfosService
-
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
-
-        .LINK
-        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
 #>
 function Get-SfosService {
     [CmdletBinding()]
@@ -6657,125 +7292,123 @@ function Get-SfosService {
 
 <#
         .SYNOPSIS
-        Creates a new service definition on the Sophos Firewall.
+        Creates a service object on a Sophos Firewall.
 
         .DESCRIPTION
-        Creates a service object for TCP/UDP ports, IP protocols, ICMP, or ICMPv6.
-        Services are used in firewall rules to define allowed/blocked traffic.
-        
-        Supports four parameter sets:
-        - TCPUDP: TCP or UDP services with port numbers/ranges
-        - IP: IP protocol numbers (e.g., GRE, ESP, OSPF)
-        - ICMP: ICMP types and codes for IPv4
-        - ICMPv6: ICMPv6 types and codes for IPv6
+        Creates a service object for a TCP or UDP port or port range, an IP protocol, or an
+        ICMP or ICMPv6 type and code. Use a service object in firewall rules to define the
+        traffic the rule matches. The parameters below fall into four groups, one per service
+        type; supply the group that matches -Type. It needs an open connection from
+        Connect-SfosFirewall, or the connection parameters supplied directly, and an account
+        with administrative permission.
 
         .PARAMETER Name
-        Name of the service (1-50 characters, no commas).
-
-        .PARAMETER Type
-        Service type: 'TCPorUDP', 'IP', 'ICMP', or 'ICMPv6'. Default: 'TCPorUDP'.
-
-        .PARAMETER Protocol
-        Protocol for TCP/UDP services: 'TCP' or 'UDP'. Required for TCPUDP parameter set.
-
-        .PARAMETER DstPort
-        Destination port or port range. Examples: '443', '8080-8090', '1024:65535'.
-        Required for TCPUDP parameter set.
-
-        .PARAMETER SrcPort
-        Source port or port range. Default: '1:65535' (all ports).
-
-        .PARAMETER ProtocolName
-        IP protocol name (e.g., 'GRE', 'ESP', 'OSPFIGP'). Required for IP parameter set.
-
-        .PARAMETER ICMPType
-        ICMP type(s) for IPv4. Valid values: -1, 0, 3, 4, 5, 8, 11-18, 30-40.
-        Use -1 for 'any'. Required for ICMP parameter set.
-
-        .PARAMETER ICMPCode
-        ICMP code(s). Valid values: -1 (any), 0-15. Optional for ICMP parameter set.
-
-        .PARAMETER ICMPv6Type
-        ICMPv6 type(s) for IPv6. Valid values: -1, 0-4, 100-101, 128-158, 200-201.
-        Required for ICMPv6 parameter set.
-
-        .PARAMETER ICMPv6Code
-        ICMPv6 code(s). Valid values: -1 (any), 0-15. Optional for ICMPv6 parameter set.
+        Required. Name of the new service. 1 to 50 characters, must not contain a comma.
 
         .PARAMETER Description
-        Optional description (max 255 characters).
+        Optional. Free-text description, up to 255 characters.
 
-        # Connection parameters (optional - use stored context if not provided)
-        
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        .PARAMETER Type
+        Optional. Service type for the TCP/UDP group, TCPorUDP, IP, ICMP or ICMPv6. Defaults
+        to TCPorUDP. For the IP, ICMP and ICMPv6 groups the type follows from the parameters
+        supplied and does not need to be set here.
+
+        .PARAMETER Protocol
+        Required for a TCP or UDP service. The protocol, TCP or UDP.
+
+        .PARAMETER DstPort
+        Required for a TCP or UDP service. The destination port or port range, for example
+        '443' or '8080-8090'.
+
+        .PARAMETER SrcPort
+        Optional. The source port or port range, for a TCP or UDP service. Defaults to
+        '1:65535' (all ports).
+
+        .PARAMETER ProtocolName
+        Required for an IP protocol service. The protocol name, for example 'GRE', 'ESP' or
+        'OSPFIGP'.
+
+        .PARAMETER ICMPType
+        Required for an ICMP service. One or more ICMP types. Use -1 for any type.
+
+        .PARAMETER ICMPCode
+        Optional. One or more ICMP codes, for an ICMP service. Use -1 for any code. If
+        omitted, the service is created with code -1 (any code).
+
+        .PARAMETER ICMPv6Type
+        Required for an ICMPv6 service. One or more ICMPv6 types. Use -1 for any type.
+
+        .PARAMETER ICMPv6Code
+        Optional. One or more ICMPv6 codes, for an ICMPv6 service. Use -1 for any code. If
+        omitted, the service is created with code -1 (any code).
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, uses stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number. If omitted, uses stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, uses stored connection context.
+        Optional. User name for the API login. The account needs administrative permission.
+        If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, uses stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        None. Throws an exception if creation fails.
+        None. The cmdlet writes no output and throws an error if the firewall rejects the
+        creation.
 
         .EXAMPLE
-        # Create a TCP service for custom HTTPS port
-        New-SfosService -Name "HTTPS-Custom" -Protocol TCP -DstPort 8443 -Description "Custom HTTPS port"
+        New-SfosService -Name 'HTTPS-Custom' -Protocol TCP -DstPort 8443 -WhatIf
+
+        Shows what the call would create without sending it to the firewall.
 
         .EXAMPLE
-        # Create a UDP service for DNS
-        New-SfosService -Name "DNS-Custom" -Protocol UDP -DstPort 53 -SrcPort "1024:65535"
+        New-SfosService -Name 'HTTPS-Custom' -Protocol TCP -DstPort 8443 -Description 'Custom HTTPS port'
+
+        Creates a TCP service for a single port.
 
         .EXAMPLE
-        # Create a service with port range
-        New-SfosService -Name "WebPorts" -Protocol TCP -DstPort "8080-8090" -Description "Web application ports"
+        New-SfosService -Name 'GRE-Protocol' -ProtocolName 'GRE' -Description 'Generic Routing Encapsulation'
+
+        Creates an IP protocol service.
 
         .EXAMPLE
-        # Create an IP protocol service (GRE for VPN)
-        New-SfosService -Name "GRE-Protocol" -ProtocolName "GRE" -Description "Generic Routing Encapsulation"
+        New-SfosService -Name 'ICMP-Echo' -ICMPType '8' -ICMPCode '0' -Description 'Ping requests'
 
-        .EXAMPLE
-        # Create ICMP echo service (ping). -Type belongs to the TCPUDP parameter set only;
-        # ICMPType/-ICMPCode select the ICMP parameter set on their own.
-        New-SfosService -Name "ICMP-Echo" -ICMPType "8" -ICMPCode "0" -Description "Ping requests"
-
-        .EXAMPLE
-        # Create ICMPv6 service. -Type belongs to the TCPUDP parameter set only;
-        # -ICMPv6Type selects the ICMPv6 parameter set on its own.
-        New-SfosService -Name "ICMPv6-EchoRequest" -ICMPv6Type "128" -Description "IPv6 ping"
-
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        Uses parameter sets to enforce correct parameter combinations.
+        Creates an ICMP service. -ICMPType selects the ICMP group on its own; -Type is not
+        needed here.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
-        
+
         .LINK
         Get-SfosService
-        
+
         .LINK
         Set-SfosService
-        
+
         .LINK
         Remove-SfosService
-        
-        .LINK
-        New-SfosServiceGroup
 #>
 function New-SfosService {
     [CmdletBinding(DefaultParameterSetName = 'TCPUDP', SupportsShouldProcess)]
@@ -6886,98 +7519,112 @@ function New-SfosService {
 
 <#
         .SYNOPSIS
-        Updates an existing service definition on the Sophos Firewall.
+        Updates a service object on a Sophos Firewall.
 
         .DESCRIPTION
-        Updates a service object for TCP/UDP ports, IP protocols, ICMP, or ICMPv6.
-
-        SFOS replaces the whole entity on update - any element not sent in the request is
-        cleared on the firewall. This cmdlet reads the current service first and keeps
-        whatever the caller does not explicitly pass (Description, and for the TCPUDP
-        parameter set also SrcPort and, for ICMP/ICMPv6, the Code value). To clear a field,
-        pass it explicitly with an empty value.
-
-        Supports four parameter sets:
-        - TCPUDP: TCP or UDP services with port numbers/ranges
-        - IP: IP protocol numbers (e.g., GRE, ESP, OSPF)
-        - ICMP: ICMP types and codes for IPv4
-        - ICMPv6: ICMPv6 types and codes for IPv6
+        Changes an existing service object. The cmdlet reads the current object first and
+        sends back a complete object, keeping every field the caller does not pass -
+        Description, Type, and whichever detail fields belong to the current type. Only the
+        fields you actually supply are changed. It needs an open connection from
+        Connect-SfosFirewall, or the connection parameters supplied directly, and an account
+        with administrative permission.
 
         .PARAMETER Name
-        Name of the service to update (1-50 characters, no commas).
-
-        .PARAMETER Type
-        Service type: 'TCPorUDP', 'IP', 'ICMP', or 'ICMPv6'. Default: 'TCPorUDP'.
-
-        .PARAMETER Protocol
-        Protocol for TCP/UDP services: 'TCP' or 'UDP'. Required for TCPUDP parameter set.
-
-        .PARAMETER DstPort
-        Destination port or port range. Examples: '443', '8080-8090', '1024:65535'.
-        Required for TCPUDP parameter set.
-
-        .PARAMETER SrcPort
-        Source port or port range. If omitted, the existing source port on the firewall is
-        kept; the parameter default is only used when no matching value is found.
-
-        .PARAMETER ProtocolName
-        IP protocol name (e.g., 'GRE', 'ESP', 'OSPFIGP'). Required for IP parameter set.
-
-        .PARAMETER ICMPType
-        ICMP type(s) for IPv4. Valid values: -1, 0, 3, 4, 5, 8, 11-18, 30-40.
-        Use -1 for 'any'. Required for ICMP parameter set.
-
-        .PARAMETER ICMPCode
-        ICMP code(s). Valid values: -1 (any), 0-15. If omitted, the existing ICMP code on the
-        firewall is kept.
-
-        .PARAMETER ICMPv6Type
-        ICMPv6 type(s) for IPv6. Valid values: -1, 0-4, 100-101, 128-158, 200-201.
-        Required for ICMPv6 parameter set.
-
-        .PARAMETER ICMPv6Code
-        ICMPv6 code(s). Valid values: -1 (any), 0-15. If omitted, the existing ICMPv6 code on
-        the firewall is kept.
+        Required. Name of the service to update. Accepts pipeline input by value or by
+        property name, so the output of Get-SfosService can be piped in directly.
 
         .PARAMETER Description
-        Optional description (max 255 characters). If omitted, the existing description is kept.
+        Optional. Free-text description, up to 255 characters. If omitted, the current value
+        is kept.
 
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        .PARAMETER Type
+        Optional. Service type, TCPorUDP, IP, ICMP or ICMPv6. If omitted, the current type is
+        kept.
+
+        .PARAMETER Protocol
+        Optional. The protocol, TCP or UDP, for a TCPorUDP service. If omitted, the current
+        value is kept.
+
+        .PARAMETER DstPort
+        Optional. The destination port or port range, for a TCPorUDP service. If omitted,
+        the current value is kept.
+
+        .PARAMETER SrcPort
+        Optional. The source port or port range, for a TCPorUDP service. If omitted, the
+        current value is kept.
+
+        .PARAMETER ProtocolName
+        Optional. The protocol name, for an IP service. If omitted, the current value is
+        kept.
+
+        .PARAMETER ICMPType
+        Optional. One or more ICMP types, for an ICMP service. If omitted, the current value
+        is kept.
+
+        .PARAMETER ICMPCode
+        Optional. One or more ICMP codes, for an ICMP service. If omitted, the current value
+        is kept.
+
+        .PARAMETER ICMPv6Type
+        Optional. One or more ICMPv6 types, for an ICMPv6 service. If omitted, the current
+        value is kept.
+
+        .PARAMETER ICMPv6Code
+        Optional. One or more ICMPv6 codes, for an ICMPv6 service. If omitted, the current
+        value is kept.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, uses stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number. If omitted, uses stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, uses stored connection context.
+        Optional. User name for the API login. The account needs administrative permission.
+        If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, uses stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        System.String or System.Management.Automation.PSCustomObject. Accepts the Name and
+        other properties, by property name, of a service object such as the ones returned by
+        Get-SfosService.
 
         .OUTPUTS
-        None. Throws an exception if the update fails.
+        None. The cmdlet writes no output and throws an error if the firewall rejects the
+        update.
 
         .EXAMPLE
-        # Change the destination port of an existing TCP service, keeping its source port
-        Set-SfosService -Name "HTTPS-Custom" -Protocol TCP -DstPort 8444
+        Set-SfosService -Name 'HTTPS-Custom' -DstPort 8444 -WhatIf
+
+        Shows what the call would change without sending it to the firewall.
 
         .EXAMPLE
-        # Update description of an ICMP service, keeping its existing type/code
-        Set-SfosService -Name "ICMP-Echo" -ICMPType "8" -Description "Ping requests (updated)"
+        Set-SfosService -Name 'HTTPS-Custom' -DstPort 8444
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        Uses parameter sets to enforce correct parameter combinations.
+        Changes the destination port of an existing TCP or UDP service, keeping its protocol
+        and source port.
+
+        .EXAMPLE
+        Set-SfosService -Name 'ICMP-Echo' -Description 'Ping requests, updated'
+
+        Changes the description of an existing ICMP service, keeping its type and code.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
@@ -7138,53 +7785,68 @@ function Set-SfosService {
 
 <#
         .SYNOPSIS
-        Removes a Service object from the Sophos Firewall.
+        Removes a service object from a Sophos Firewall.
 
         .DESCRIPTION
-        Removes a Service object using the Sophos Firewall XML API. This cmdlet supports ShouldProcess; use -WhatIf to preview the change.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
-
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Deletes a service object by name. It needs an open connection from
+        Connect-SfosFirewall, or the connection parameters supplied directly, and an account
+        with administrative permission. Use -WhatIf to preview the removal.
 
         .PARAMETER Name
-        Name of the target object.
+        Required. Name of the object to remove. Accepts pipeline input by value or by
+        property name, so the output of Get-SfosService can be piped in directly.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs administrative permission.
+        If omitted, the value from the current connection is used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        System.String or System.Management.Automation.PSCustomObject. Accepts the Name of a
+        service object such as the ones returned by Get-SfosService.
 
         .OUTPUTS
-        PSCustomObject or API status information depending on implementation.
+        None. The cmdlet writes no output and throws an error if the firewall rejects the
+        removal.
 
         .EXAMPLE
-        # Preview removal
-        Remove-SfosService -Name "Example" -WhatIf
+        Remove-SfosService -Name 'Example' -WhatIf
+
+        Shows what would be removed without sending the call to the firewall.
 
         .EXAMPLE
-        # Pipeline removal preview
-        Remove-SfosService -Name "Example" -WhatIf
+        Get-SfosService -NameLike 'Deprecated' | Remove-SfosService -WhatIf
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+        Previews the removal of every object whose name contains 'Deprecated'.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosService
 #>
 function Remove-SfosService {
     [CmdletBinding(SupportsShouldProcess)]
@@ -7246,70 +7908,82 @@ function Remove-SfosService {
 
 <#
         .SYNOPSIS
-        Exports Service objects to a CSV or JSON file.
+        Exports service objects from a Sophos Firewall to a file.
 
         .DESCRIPTION
-        Retrieves all Service objects from the Sophos Firewall and exports them to a file in CSV or JSON format.
-        Useful for backup, documentation, or migration purposes. Services include TCP/UDP, IP protocols, ICMP, and ICMPv6 definitions.
+        Retrieves every service object from the firewall and writes it to a CSV or JSON
+        file, with the nested ServiceDetails flattened into columns that match the
+        New-SfosService parameter names for the object's type. Only the first detail entry
+        of a service is exported; New-SfosService can only create one detail entry per call,
+        so a service with more than one cannot round-trip through Import-SfosServices in any
+        case. Use this cmdlet for backup, documentation, or as input for Import-SfosServices
+        on the same or a different firewall. It needs an open connection from
+        Connect-SfosFirewall, or the connection parameters supplied directly.
 
         .PARAMETER FilePath
-        Full path where the export file will be saved. The file extension should match the format (.csv for CSV, .json for JSON).
+        Required. Full path of the file to write.
 
         .PARAMETER Format
-        Export format: 'AsCSV' (default) or 'AsJSON'. CSV format is human-readable and Excel-compatible. JSON format preserves data structure.
+        Optional. File format, AsCSV or AsJSON. Defaults to AsCSV.
 
         .PARAMETER Overwrite
-        If specified, overwrite the file if it already exists. Without this switch, the function throws an error if the file exists.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. Overwrites the file if it already exists. If omitted, the cmdlet throws an
+        error when the file exists.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, uses the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, uses the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, uses the stored connection context.
+        Optional. User name for the API login. The account needs read permission for the
+        service objects. If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, uses the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skip SSL/TLS certificate validation for self-signed certificates.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        PSCustomObject with properties:
-        - Operation: 'Export'
-        - ObjectType: 'Service'
-        - Total: Number of objects exported
-        - Success: Number of successful exports
-        - Failed: Always 0 for export operations
-        - SuccessItems: Array of exported Service names
-        - FailedItems: Empty array for export operations
+        System.Management.Automation.PSCustomObject. A summary with the properties
+        Operation, ObjectType, Total, Success, Failed, SuccessItems and FailedItems. The
+        cmdlet also throws an error if the export itself fails.
 
         .EXAMPLE
-        # Export all services to CSV
-        Export-SfosServices -FilePath "C:\Exports\Services.csv"
+        Export-SfosServices -FilePath 'C:\Exports\Services.csv'
+
+        Exports every service object to a CSV file.
 
         .EXAMPLE
-        # Export to JSON with overwrite
-        Export-SfosServices -FilePath "C:\Exports\Services.json" -Format AsJSON -Overwrite
+        Export-SfosServices -FilePath 'C:\Exports\Services.json' -Format AsJSON -Overwrite
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This function depends on Get-SfosService to retrieve the objects.
+        Exports the objects to a JSON file, replacing a file left over from a previous run.
 
         .LINK
-        Import-SfosServices
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
 
         .LINK
         Get-SfosService
+
+        .LINK
+        Import-SfosServices
 #>
 function Export-SfosServices {
     [CmdletBinding()]
@@ -7412,75 +8086,85 @@ function Export-SfosServices {
 
 <#
         .SYNOPSIS
-        Imports Service objects from a CSV or JSON file.
+        Imports service objects from a file onto a Sophos Firewall.
 
         .DESCRIPTION
-        Reads Service objects from a specified CSV or JSON file and creates them on the Sophos Firewall using the New-SfosService cmdlet.
-        The file must have flat columns matching the Type of the service: Name, Description, Type,
-        Protocol/SrcPort/DstPort (TCPorUDP), ProtocolName (IP), ICMPType/ICMPCode (ICMP), ICMPv6Type/ICMPv6Code (ICMPv6).
+        Reads a CSV or JSON file written by Export-SfosServices, or one with matching flat
+        columns, and creates a service object for each row through New-SfosService. The
+        columns are Name, Description, Type, and then Protocol/SrcPort/DstPort for a
+        TCPorUDP row, ProtocolName for an IP row, or ICMPType/ICMPCode and
+        ICMPv6Type/ICMPv6Code for the ICMP families.
 
-        LIMITATION: Get-SfosService (and therefore Export-SfosServices) returns ICMPType/ICMPv6Type as text
-        (e.g. 'Echo'), while New-SfosService requires the numeric code via ValidateSet (e.g. '8'). There is no
-        reliable mapping between the two, so ICMP and ICMPv6 services cannot be round-tripped automatically.
-        Rows with Type 'ICMP' or 'ICMPv6' are reported as failed items; recreate those services manually with
-        New-SfosService. TCPorUDP and IP services import without restriction.
+        A row of Type ICMP or ICMPv6 is always reported as a failed item and no object is
+        created for it: Get-SfosService returns the ICMP type as text (for example 'Echo'),
+        while New-SfosService requires the numeric code, so the two sides cannot be matched
+        automatically. Recreate those services with New-SfosService directly. TCPorUDP and
+        IP rows import without this restriction. The cmdlet needs an open connection from
+        Connect-SfosFirewall, or the connection parameters supplied directly, and an account
+        with administrative permission.
 
         .PARAMETER FilePath
-        Full path to the input CSV or JSON file.
+        Required. Full path of the file to read.
 
         .PARAMETER Format
-        Import format: 'AsCSV' (default) or 'AsJSON'. Must match the file format.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. File format, AsCSV or AsJSON. Must match the file. Defaults to AsCSV.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, uses the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, uses the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, uses the stored connection context.
+        Optional. User name for the API login. The account needs administrative permission.
+        If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, uses the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skip SSL/TLS certificate validation for self-signed certificates.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        PSCustomObject with properties:
-        - Operation: 'Import'
-        - ObjectType: 'Service'
-        - Total: Number of objects in import file
-        - Success: Number of successfully created objects
-        - Failed: Number of failed creations
-        - SuccessItems: Array of successfully imported Service names
-        - FailedItems: Array of PSCustomObjects with Name and Error details for failed items
+        System.Management.Automation.PSCustomObject. A summary with the properties
+        Operation, ObjectType, Total, Success, Failed, SuccessItems and FailedItems. Each
+        entry in FailedItems carries the object Name and the error message.
 
         .EXAMPLE
-        # Import services from CSV
-        Import-SfosServices -FilePath "C:\Imports\Services.csv"
+        Import-SfosServices -FilePath 'C:\Imports\Services.csv'
+
+        Creates a service object for every row in the file that Type allows.
 
         .EXAMPLE
-        # Import from JSON with explicit connection
-        $result = Import-SfosServices -FilePath "C:\Imports\Services.json" -Format AsJSON -Firewall "192.168.1.1"
+        $result = Import-SfosServices -FilePath 'C:\Imports\Services.json' -Format AsJSON
         $result | Format-Table
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This function depends on New-SfosService to create the objects.
+        Imports from a JSON file and shows the summary, including any ICMP or ICMPv6 rows
+        that were reported as failed.
 
         .LINK
-        Export-SfosServices
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
 
         .LINK
         New-SfosService
+
+        .LINK
+        Export-SfosServices
 #>
 function Import-SfosServices {
     [CmdletBinding()]
@@ -7609,65 +8293,86 @@ function Import-SfosServices {
 
 <#
         .SYNOPSIS
-        Retrieves ServiceGroup objects from the Sophos Firewall.
+        Retrieves service group objects from a Sophos Firewall.
 
         .DESCRIPTION
-        Queries the Sophos Firewall XML API for ServiceGroup objects. By default the cmdlet returns PowerShell-friendly objects. Use -AsXml to return the raw XML nodes.
-    
-        Note: Sophos GET responses can be inconsistent regarding status elements. This cmdlet is designed to return an empty result when no records are found.
+        Returns the service groups that are defined on the firewall. A service group bundles
+        several service objects under one name for use in firewall rules and other policies.
+        The cmdlet only reads; nothing on the firewall is changed. It needs an open
+        connection from Connect-SfosFirewall, or the connection parameters supplied
+        directly.
 
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
-
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        You can combine several filters. The firewall itself evaluates at most one of them,
+        so every filter you supply is applied again on the client. The result therefore
+        always matches all filters you gave.
 
         .PARAMETER NameLike
-        Optional name filter. In Sophos SFOS, 'like' behaves as a substring match (the supplied value may match anywhere in the object name). Sent to the firewall as the server-side filter.
+        Optional. Returns only objects whose name contains the given text anywhere. This is
+        a substring match, not a wildcard pattern. If omitted, the name is not used to
+        filter.
 
         .PARAMETER DescriptionLike
-        Optional description filter, matched as a substring anywhere in the value. The firewall does not support filtering on Description, so this filter is always applied client-side.
+        Optional. Returns only objects whose description contains the given text anywhere.
+        Applied on the client. If omitted, the description is not used to filter.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs read permission for the
+        service group objects. If omitted, the value from the current connection is used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
 
         .PARAMETER AsXml
-        Returns raw XML nodes instead of PowerShell-friendly objects.
+        Optional. Returns the raw XML elements sent by the firewall instead of PowerShell
+        objects.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        PSCustomObject (default). System.Xml.XmlElement when -AsXml is specified.
+        System.Management.Automation.PSCustomObject. One object per service group, with the
+        properties Name, Description and ServiceList. Returns System.Xml.XmlElement when
+        -AsXml is used, and an empty array when no object matches.
 
         .EXAMPLE
-        # Retrieve all objects
         Get-SfosServiceGroup
 
-        .EXAMPLE
-        # Filter by name (substring match)
-        Get-SfosServiceGroup -NameLike "Example"
+        Lists every service group on the firewall of the current connection.
 
         .EXAMPLE
-        # Return raw XML for troubleshooting
-        Get-SfosServiceGroup -NameLike "Example" -AsXml
+        Get-SfosServiceGroup -NameLike 'Web'
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+        Lists all groups whose name contains 'Web'.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        New-SfosServiceGroup
+
+        .LINK
+        Add-SfosServiceGroupMember
 #>
 function Get-SfosServiceGroup {
     [CmdletBinding()]
@@ -7752,94 +8457,79 @@ Assert-SfosApiReturnSuccess -Xml $XmlResponse -ObjectName 'ServiceGroup' -Action
 
 <#
         .SYNOPSIS
-        Creates a new service group on the Sophos Firewall.
+        Creates a service group on a Sophos Firewall.
 
         .DESCRIPTION
-        Creates a service group to logically organize multiple service definitions.
-        Use service groups in firewall rules to:
-        - Simplify rule management (one group instead of many services)
-        - Standardize application access (e.g., "WebServices" group)
-        - Reduce rule count and improve readability
-        
-        After creation, use Add-SfosServiceGroupMember to add additional services.
+        Creates a service group with an initial set of member services. Use a group to refer
+        to several service objects at once in firewall rules and other policies. The firewall
+        requires at least one member at creation, unlike an IP host group or an FQDN host
+        group, which may be created empty. It needs an open connection from
+        Connect-SfosFirewall, or the connection parameters supplied directly, and an account
+        with administrative permission.
 
         .PARAMETER Name
-        Name of the service group (1-50 characters, no commas).
+        Required. Name of the new group. 1 to 50 characters, must not contain a comma.
 
-        .PARAMETER Members
-        Array of service names to include in the group.
-        Services must already exist on the firewall.
+        .PARAMETER members
+        Required. Names of existing service objects to add as members. At least one is
+        required.
 
         .PARAMETER Description
-        Optional description (max 255 characters).
-
-        # Connection parameters (optional - use stored context if not provided)
-        
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. Free-text description, up to 255 characters.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, uses stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number. If omitted, uses stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, uses stored connection context.
+        Optional. User name for the API login. The account needs administrative permission.
+        If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, uses stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        None. Throws an exception if creation fails.
+        None. The cmdlet writes no output and throws an error if the firewall rejects the
+        creation.
 
         .EXAMPLE
-        # Create service group for web services
-        New-SfosServiceGroup -Name "WebServices" -Members @('HTTP', 'HTTPS') -Description "Standard web traffic"
+        New-SfosServiceGroup -Name 'WebServices' -members 'HTTP', 'HTTPS' -WhatIf
+
+        Shows what the call would create without sending it to the firewall.
 
         .EXAMPLE
-        # Create service group for Microsoft services
-        New-SfosServiceGroup -Name "Microsoft365" -Members @('HTTPS', 'SMTP', 'IMAPS') -Description "Office 365 services"
+        New-SfosServiceGroup -Name 'WebServices' -members 'HTTP', 'HTTPS' -Description 'Standard web traffic'
 
-        .EXAMPLE
-        # Start with one member and add more later. A ServiceGroup cannot be created empty:
-        # the API marks its member list mandatory, unlike IPHostGroup or FQDNHostGroup.
-        New-SfosServiceGroup -Name "CustomApps" -Members @('CustomHTTPS') -Description "Custom application ports"
-        Add-SfosServiceGroupMember -Name "CustomApps" -Members @('AppPort-8080')
-
-        .EXAMPLE
-        # Create service group for database services
-        New-SfosServiceGroup -Name "DatabaseServices" -Members @('MSSQL', 'MySQL', 'PostgreSQL') -Description "Database access ports"
-
-        .EXAMPLE
-        # Create service group for remote access
-        New-SfosServiceGroup -Name "RemoteAccess" -Members @('RDP', 'SSH', 'VNC') -Description "Remote desktop protocols"
-
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        All member services must exist before creating the group.
+        Creates a group with two member services.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
-        
+
         .LINK
         Get-SfosServiceGroup
-        
-        .LINK
-        Set-SfosServiceGroup
-        
+
         .LINK
         Add-SfosServiceGroupMember
-        
-        .LINK
-        Remove-SfosServiceGroup
 #>
 function New-SfosServiceGroup {
     [CmdletBinding(SupportsShouldProcess)]
@@ -7937,59 +8627,87 @@ function New-SfosServiceGroup {
 
 <#
         .SYNOPSIS
-        Updates an existing ServiceGroup object on the Sophos Firewall.
+        Updates a service group on a Sophos Firewall.
 
         .DESCRIPTION
-        Updates a ServiceGroup object using the Sophos Firewall XML API. You can supply the target object name directly or via the pipeline (when supported by the function's parameters).
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
-
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Changes an existing service group. The cmdlet reads the current group first and
+        sends back a complete object, keeping the current description unless the caller
+        passes one. It needs an open connection from Connect-SfosFirewall, or the connection
+        parameters supplied directly, and an account with administrative permission.
 
         .PARAMETER Name
-        Name of the target object.
+        Required. Name of the group to update. Accepts pipeline input by value or by
+        property name, so the output of Get-SfosServiceGroup can be piped in directly.
 
-        .PARAMETER Members
-        One or more member object names to include.
+        .PARAMETER members
+        Required. Names of the service objects the group should contain, replacing the
+        current member list.
 
         .PARAMETER Description
-        Optional description text.
+        Optional. Free-text description, up to 255 characters. If omitted, the current value
+        is kept.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs administrative permission.
+        If omitted, the value from the current connection is used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        System.String or System.Management.Automation.PSCustomObject. Accepts the Name and
+        other properties, by property name, of a service group object such as the ones
+        returned by Get-SfosServiceGroup.
 
         .OUTPUTS
-        PSCustomObject or API status information depending on implementation.
+        None. The cmdlet writes no output and throws an error if the firewall rejects the
+        update.
 
         .EXAMPLE
-        # Update an object by name
-        Set-SfosServiceGroup -Name "Example" -members @('HTTP', 'HTTPS')
+        Set-SfosServiceGroup -Name 'Example' -members 'HTTP', 'HTTPS' -WhatIf
+
+        Shows what the call would change without sending it to the firewall.
 
         .EXAMPLE
-        # Update using pipeline input
-        Get-SfosServiceGroup -NameLike "Example" | Set-SfosServiceGroup
+        Set-SfosServiceGroup -Name 'Example' -members 'HTTP', 'HTTPS'
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+        Replaces the member list of an existing group.
+
+        .EXAMPLE
+        Get-SfosServiceGroup -NameLike 'Example' | Set-SfosServiceGroup
+
+        Rewrites the matching group through the pipeline, using its current member list and
+        description.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosServiceGroup
+
+        .LINK
+        Add-SfosServiceGroupMember
 #>
 function Set-SfosServiceGroup {
     [CmdletBinding(SupportsShouldProcess)]
@@ -8116,53 +8834,69 @@ if ($existing.Count -eq 0) {
 
 <#
         .SYNOPSIS
-        Removes a ServiceGroup object from the Sophos Firewall.
+        Removes a service group from a Sophos Firewall.
 
         .DESCRIPTION
-        Removes a ServiceGroup object using the Sophos Firewall XML API. This cmdlet supports ShouldProcess; use -WhatIf to preview the change.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
-
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Deletes a service group by name. This does not delete the service objects that were
+        members of the group. It needs an open connection from Connect-SfosFirewall, or the
+        connection parameters supplied directly, and an account with administrative
+        permission. Use -WhatIf to preview the removal.
 
         .PARAMETER Name
-        Name of the target object.
+        Required. Name of the group to remove. Accepts pipeline input by value or by
+        property name, so the output of Get-SfosServiceGroup can be piped in directly.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs administrative permission.
+        If omitted, the value from the current connection is used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        System.String or System.Management.Automation.PSCustomObject. Accepts the Name of a
+        service group object such as the ones returned by Get-SfosServiceGroup.
 
         .OUTPUTS
-        PSCustomObject or API status information depending on implementation.
+        None. The cmdlet writes no output and throws an error if the firewall rejects the
+        removal.
 
         .EXAMPLE
-        # Preview removal
-        Remove-SfosServiceGroup -Name "Example" -WhatIf
+        Remove-SfosServiceGroup -Name 'Example' -WhatIf
+
+        Shows what would be removed without sending the call to the firewall.
 
         .EXAMPLE
-        # Pipeline removal preview
-        Remove-SfosServiceGroup -Name "Example" -WhatIf
+        Get-SfosServiceGroup -NameLike 'OldGroup' | Remove-SfosServiceGroup -WhatIf
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+        Previews the removal of every group whose name contains 'OldGroup'.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosServiceGroup
 #>
 function Remove-SfosServiceGroup {
     [CmdletBinding(SupportsShouldProcess)]
@@ -8222,52 +8956,76 @@ function Remove-SfosServiceGroup {
 
 <#
         .SYNOPSIS
-        Adds members to a ServiceGroup on the Sophos Firewall.
+        Adds members to a service group on a Sophos Firewall.
 
         .DESCRIPTION
-        Adds one or more members to a ServiceGroup using the Sophos Firewall XML API.
+        Adds one or more service objects to an existing group, keeping the members that are
+        already there. The cmdlet reads the current group first and sends back the combined
+        member list, together with the current description. It needs an open connection from
+        Connect-SfosFirewall, or the connection parameters supplied directly, and an account
+        with administrative permission.
 
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        .PARAMETER Name
+        Required. Name of the group to add members to. Accepts pipeline input by value or by
+        property name. The alias ServiceGroupName is also accepted.
+
+        .PARAMETER members
+        Required. Names of the service objects to add.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. User name for the API login. The account needs administrative permission.
+        If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER ServiceGroupName
-        Name of the target ServiceGroup.
-
-        .PARAMETER Members
-        One or more member object names to add.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        System.String or System.Management.Automation.PSCustomObject. Accepts the Name of a
+        service group object such as the ones returned by Get-SfosServiceGroup.
 
         .OUTPUTS
-        PSCustomObject or API status information depending on implementation.
+        None. The cmdlet writes no output and throws an error if the firewall rejects the
+        update.
 
         .EXAMPLE
-        # Add members to a ServiceGroup
-        Add-SfosServiceGroupMember -Name "ExampleGroup" -Members "Service1", "Service2"
+        Add-SfosServiceGroupMember -Name 'ExampleGroup' -members 'Service1', 'Service2' -WhatIf
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+        Shows what the call would change without sending it to the firewall.
+
+        .EXAMPLE
+        Add-SfosServiceGroupMember -Name 'ExampleGroup' -members 'Service1', 'Service2'
+
+        Adds two service objects to the group.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosServiceGroup
+
+        .LINK
+        Remove-SfosServiceGroupMember
 #>
 function Add-SfosServiceGroupMember {
     [CmdletBinding(SupportsShouldProcess)]
@@ -8375,54 +9133,81 @@ function Add-SfosServiceGroupMember {
     }
 }
 
-<#      
+<#
         .SYNOPSIS
-        Removes members from a ServiceGroup on the Sophos Firewall.
+        Removes members from a service group on a Sophos Firewall.
 
         .DESCRIPTION
-        Removes one or more members from a ServiceGroup using the Sophos Firewall XML API.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
-
-        .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
-
-        .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Removes one or more service objects from an existing group, keeping every other
+        member. The cmdlet reads the current group first and sends back the reduced member
+        list, together with the current description. Names that are not currently members
+        are ignored. The firewall does not allow a service group to end up with no members;
+        removing the last remaining members throws an error instead, and the group has to be
+        deleted with Remove-SfosServiceGroup. It needs an open connection from
+        Connect-SfosFirewall, or the connection parameters supplied directly, and an account
+        with administrative permission.
 
         .PARAMETER Name
-        Name of the target ServiceGroup.
+        Required. Name of the group to remove members from. Accepts pipeline input by value
+        or by property name.
 
-        .PARAMETER Members
-        One or more member object names to remove.
+        .PARAMETER members
+        Required. Names of the service objects to remove.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs administrative permission.
+        If omitted, the value from the current connection is used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        System.String or System.Management.Automation.PSCustomObject. Accepts the Name of a
+        service group object such as the ones returned by Get-SfosServiceGroup.
 
         .OUTPUTS
-        PSCustomObject or API status information depending on implementation.
+        None. The cmdlet writes no output and throws an error if the firewall rejects the
+        update.
 
         .EXAMPLE
-        # Remove members from a ServiceGroup
-        Remove-SfosServiceGroupMember -Name "ExampleGroup" -Members "Service1", "Service2"
+        Remove-SfosServiceGroupMember -Name 'ExampleGroup' -members 'Service1', 'Service2' -WhatIf
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for user input.
+        Shows what the call would change without sending it to the firewall.
+
+        .EXAMPLE
+        Remove-SfosServiceGroupMember -Name 'ExampleGroup' -members 'Service1', 'Service2'
+
+        Removes two service objects from the group.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosServiceGroup
+
+        .LINK
+        Add-SfosServiceGroupMember
 #>
 function Remove-SfosServiceGroupMember {
     [CmdletBinding(SupportsShouldProcess)]
@@ -8542,72 +9327,79 @@ function Remove-SfosServiceGroupMember {
 
 <#
         .SYNOPSIS
-        Exports ServiceGroup objects to a CSV or JSON file.
+        Exports service group objects from a Sophos Firewall to a file.
 
         .DESCRIPTION
-        Retrieves all ServiceGroup objects from the Sophos Firewall and exports them to a file in CSV or JSON format.
-        Group members are stored as JSON arrays within the file for proper handling of multiple members.
-        Useful for backup, documentation, or migration purposes.
+        Retrieves every service group from the firewall and writes it to a CSV or JSON file,
+        with the member list flattened to a comma-separated string. Use this cmdlet for
+        backup, documentation, or as input for Import-SfosServiceGroups on the same or a
+        different firewall. It needs an open connection from Connect-SfosFirewall, or the
+        connection parameters supplied directly.
 
         .PARAMETER FilePath
-        Full path where the export file will be saved. The file extension should match the format (.csv for CSV, .json for JSON).
+        Required. Full path of the file to write.
 
         .PARAMETER Format
-        Export format: 'AsCSV' (default) or 'AsJSON'. CSV format stores member arrays as JSON strings. JSON format preserves nested structure.
+        Optional. File format, AsCSV or AsJSON. Defaults to AsCSV.
 
         .PARAMETER Overwrite
-        If specified, overwrite the file if it already exists. Without this switch, the function throws an error if the file exists.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. Overwrites the file if it already exists. If omitted, the cmdlet throws an
+        error when the file exists.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, uses the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, uses the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, uses the stored connection context.
+        Optional. User name for the API login. The account needs read permission for the
+        service group objects. If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, uses the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skip SSL/TLS certificate validation for self-signed certificates.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        PSCustomObject with properties:
-        - Operation: 'Export'
-        - ObjectType: 'ServiceGroup'
-        - Total: Number of objects exported
-        - Success: Number of successful exports
-        - Failed: Always 0 for export operations
-        - SuccessItems: Array of exported ServiceGroup names
-        - FailedItems: Empty array for export operations
+        System.Management.Automation.PSCustomObject. A summary with the properties
+        Operation, ObjectType, Total, Success, Failed, SuccessItems and FailedItems. The
+        cmdlet also throws an error if the export itself fails.
 
         .EXAMPLE
-        # Export all service groups to CSV
-        Export-SfosServiceGroups -FilePath "C:\Exports\ServiceGroups.csv"
+        Export-SfosServiceGroups -FilePath 'C:\Exports\ServiceGroups.csv'
+
+        Exports every service group to a CSV file.
 
         .EXAMPLE
-        # Export to JSON with overwrite
-        Export-SfosServiceGroups -FilePath "C:\Exports\ServiceGroups.json" -Format AsJSON -Overwrite
+        Export-SfosServiceGroups -FilePath 'C:\Exports\ServiceGroups.json' -Format AsJSON -Overwrite
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This function depends on Get-SfosServiceGroup to retrieve the objects.
-        Group members are stored as JSON arrays within CSV fields for proper serialization.
+        Exports the groups to a JSON file, replacing a file left over from a previous run.
 
         .LINK
-        Import-SfosServiceGroups
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
 
         .LINK
         Get-SfosServiceGroup
+
+        .LINK
+        Import-SfosServiceGroups
 #>
 function Export-SfosServiceGroups {
     [CmdletBinding()]
@@ -8693,69 +9485,77 @@ function Export-SfosServiceGroups {
 
 <#
         .SYNOPSIS
-        Imports ServiceGroup objects from a CSV or JSON file.
+        Imports service group objects from a file onto a Sophos Firewall.
 
         .DESCRIPTION
-        Reads ServiceGroup objects from a specified CSV or JSON file and creates them on the Sophos Firewall using the New-SfosServiceGroup cmdlet.
-        The file must have the appropriate headers/structure. In CSV files, the ServiceList member list is a single comma-separated string.
+        Reads a CSV or JSON file written by Export-SfosServiceGroups, or one with matching
+        structure, and creates a service group for each row through New-SfosServiceGroup. In
+        a CSV file, the member list is a single comma-separated string, for example
+        'Service1,Service2'. It needs an open connection from Connect-SfosFirewall, or the
+        connection parameters supplied directly, and an account with administrative
+        permission.
 
         .PARAMETER FilePath
-        Full path to the input CSV or JSON file.
+        Required. Full path of the file to read.
 
         .PARAMETER Format
-        Import format: 'AsCSV' (default) or 'AsJSON'. Must match the file format.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. File format, AsCSV or AsJSON. Must match the file. Defaults to AsCSV.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, uses the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, uses the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, uses the stored connection context.
+        Optional. User name for the API login. The account needs administrative permission.
+        If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, uses the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skip SSL/TLS certificate validation for self-signed certificates.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        PSCustomObject with properties:
-        - Operation: 'Import'
-        - ObjectType: 'ServiceGroup'
-        - Total: Number of objects in import file
-        - Success: Number of successfully created objects
-        - Failed: Number of failed creations
-        - SuccessItems: Array of successfully imported ServiceGroup names
-        - FailedItems: Array of PSCustomObjects with Name and Error details for failed items
+        System.Management.Automation.PSCustomObject. A summary with the properties
+        Operation, ObjectType, Total, Success, Failed, SuccessItems and FailedItems. Each
+        entry in FailedItems carries the object Name and the error message.
 
         .EXAMPLE
-        # Import service groups from CSV
-        Import-SfosServiceGroups -FilePath "C:\Imports\ServiceGroups.csv"
+        Import-SfosServiceGroups -FilePath 'C:\Imports\ServiceGroups.csv'
+
+        Creates a service group for every row in the file.
 
         .EXAMPLE
-        # Import from JSON with explicit connection
-        $result = Import-SfosServiceGroups -FilePath "C:\Imports\ServiceGroups.json" -Format AsJSON -Firewall "192.168.1.1"
+        $result = Import-SfosServiceGroups -FilePath 'C:\Imports\ServiceGroups.json' -Format AsJSON
         $result | Format-Table
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This function depends on New-SfosServiceGroup to create the objects.
-        Members in CSV files are a single comma-separated string, e.g. "Service1,Service2"
+        Imports from a JSON file and shows the summary.
 
         .LINK
-        Export-SfosServiceGroups
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
 
         .LINK
         New-SfosServiceGroup
+
+        .LINK
+        Export-SfosServiceGroups
 #>
 function Import-SfosServiceGroups {
     [CmdletBinding()]

@@ -1,25 +1,16 @@
-#requires -Version 5.1
+﻿#requires -Version 5.1
 <#
-.SYNOPSIS
-    Core helper functions for Sophos Firewall API modules.
+    SophosFirewall.Core
+    ====================
+    PowerShell module that carries the transport layer for every Sophos Firewall (SFOS)
+    domain module: connection and session state, HTTP(S) communication, the XML request
+    envelope, XML escaping, and evaluation of the API response status. It has no knowledge
+    of firewall entities such as hosts, services or rules; that lives in the domain modules
+    that depend on this one.
 
-.DESCRIPTION
-    Provides shared functionality for all Sophos Firewall PowerShell modules including:
-    - Session management (Connect/Disconnect)
-    - API communication (Invoke-SfosApi)
-    - Response parsing and validation
-    - XML escaping for security
-    - Parameter resolution from session context
+    Total Functions: 8 - see README.md for the full cmdlet table.
 
-.NOTES
-    Module Name: SophosFirewall.Core
-    Author: Jan Weis
-    Homepage: https://www.it-explorations.de
-    Version: 1.3.0
-    Total Functions: 8
-    PowerShell Version: 5.1+
-    
-.LINK
+    API reference:
     https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
 #>
 
@@ -47,27 +38,36 @@ $script:CertCallbackLock = [object]::new()
 
 <#
 .SYNOPSIS
-    Escapes XML special characters in text strings.
+    Escapes XML special characters in a text string.
 
 .DESCRIPTION
-    Converts special characters to XML-safe entities to prevent injection attacks
-    and ensure proper XML formatting.
+    Replaces the five XML special characters (&, <, >, ", ') with their entity form, so the
+    text can be interpolated into request XML without breaking the document or letting the
+    value inject extra elements. Every domain module passes every value it interpolates into
+    XML through this cmdlet first, without exception - names, descriptions, filter values,
+    member names.
 
 .PARAMETER Text
-    The text string to escape.
+    Required. The text to escape. Accepts pipeline input. An empty string is allowed.
+
+.INPUTS
+    System.String. Text can be piped in.
 
 .OUTPUTS
-    System.String. The XML-escaped string.
+    System.String. The XML-escaped text.
 
 .EXAMPLE
-    # Escape a value before interpolating it into request XML.
-    # Returns: Smith &amp; Sons
-    ConvertTo-SfosXmlEscaped -Text "Smith & Sons"
+    ConvertTo-SfosXmlEscaped -Text 'Smith & Sons'
 
-    # Angle brackets are deliberately absent from this example: PowerShell's help renderer
-    # treats raw < > in an .EXAMPLE as markup and silently drops them together with the rest
-    # of the line, so an example containing them reaches the reader mutilated. The cmdlet
-    # escapes them all the same - see .DESCRIPTION.
+    Returns 'Smith &amp; Sons'.
+
+.EXAMPLE
+    'Smith & Sons', 'A "B" C' | ConvertTo-SfosXmlEscaped
+
+    Escapes each piped-in string in turn.
+
+.LINK
+    https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
 #>
 function ConvertTo-SfosXmlEscaped {
     [CmdletBinding()]
@@ -93,13 +93,13 @@ function ConvertTo-SfosXmlEscaped {
     Throws when an API response reports a failed login. Internal helper, not exported.
 
 .DESCRIPTION
-    SFOS reports authentication outside the entity status: a lowercase <status> element
-    directly under <Login>, with no code attribute, in an otherwise empty HTTP 200 body.
-    Because it matches neither status path, an unchecked response looks like "no records"
-    to Get-* and like success to every write operation.
+    A failed login is reported outside the entity status: a lowercase status element
+    directly under Login, with no code attribute, in an otherwise empty HTTP 200 body. Left
+    unchecked, such a response looks like "no records" to a Get and like success to every
+    write.
 
 .PARAMETER Content
-    Raw response body.
+    Required. Raw response body to check.
 #>
 function Assert-SfosApiLoginSuccess {
     [CmdletBinding()]
@@ -135,59 +135,89 @@ function Assert-SfosApiLoginSuccess {
 
 <#
 .SYNOPSIS
-    Invokes a Sophos Firewall API request.
+    Sends a request to the Sophos Firewall XML API and returns the raw response.
+
 .DESCRIPTION
-    Sends an XML request to the Sophos Firewall API endpoint and returns the response.
+    Wraps the caller-supplied inner XML in the API request envelope, together with the
+    login credentials, and posts it to the firewall's API endpoint. Domain modules use this
+    cmdlet for every read and write; it is the only place in the module suite that opens an
+    HTTP(S) connection. The response is returned unparsed; use Get-SfosApiStatus or
+    Assert-SfosApiReturnSuccess to evaluate it.
+
+    Call this cmdlet directly only for troubleshooting or for XML the shipped domain modules
+    do not yet cover. Pass either the individual connection parameters, or -Session to reuse
+    a connection from Connect-SfosFirewall.
+
 .PARAMETER Firewall
-    The Sophos Firewall hostname or IP address.
+    Required in the default parameter set. Host name or IP address of the firewall.
+
 .PARAMETER Port
-    The management/API port number (default: 4444).
+    Optional. TCP port of the management API. Default 4444.
+
 .PARAMETER Username
-    The username for authentication (protected via XML-escaping).
+    Required in the default parameter set. User name for the API login, as plain text.
+
 .PARAMETER Password
-    The password for authentication (as SecureString for security).
+    Required in the default parameter set. Password for the API login, as a SecureString.
+
 .PARAMETER InnerXml
-    The inner XML content of the API request.
+    Required. The request body without the surrounding Request/Login envelope, for example
+    '<Get><IPHost></IPHost></Get>'.
+
 .PARAMETER ApiVersion
-    Optional APIVersion attribute for the <Request> element (for example '2200.1').
-    When omitted, the firewall processes the request using its own current schema
-    version, which is what keeps one module compatible with several firmware levels.
+    Optional. APIVersion attribute for the Request element, for example '2200.1'. If
+    omitted, the firewall processes the request using its own current schema version, which
+    keeps one module compatible with several firmware levels.
+
 .PARAMETER TimeoutSec
-    Maximum time in seconds to wait for the HTTP response. Passed straight through to
-    Invoke-WebRequest's own -TimeoutSec, which exists unchanged on both PS 5.1 and PS 7+, so
-    no version branching is needed here. Default 30. Pass 0 to omit the parameter entirely
-    and fall back to Invoke-WebRequest's own default instead. Without an enforced limit an
-    unreachable host used to block for the operating system's own default (around 21
-    seconds under Windows) with no way for a caller to shorten it.
+    Optional. Maximum time in seconds to wait for the HTTP response. Default 30. Pass 0 to
+    fall back to the default of the underlying web request instead of enforcing a limit.
+
 .PARAMETER SkipCertificateCheck
-    Skips SSL certificate validation for self-signed certificates. Part of the 'Explicit'
-    parameter set; when calling with -Session, the session's own SkipCertificateCheck value
-    is used instead.
+    Optional. Accepts the firewall certificate without validating it. Use this only for
+    appliances that still present a self-signed certificate. Belongs to the default
+    parameter set; when calling with -Session, the session's own value is used instead.
+
 .PARAMETER Session
-    A registered session name or a session object returned by Connect-SfosFirewall. Resolves
-    Firewall, Port, Username, Password and SkipCertificateCheck from it instead of from the
-    individual connection parameters, for raw multi-session XML work. Mandatory in this
-    parameter set; the 'Explicit' set (Firewall/Port/Username/Password/SkipCertificateCheck)
-    remains the default and is unchanged.
+    Required when used instead of the individual connection parameters. A session object
+    from Connect-SfosFirewall, or the name of a session that was registered with
+    Connect-SfosFirewall -Name. Firewall, Port, Username, Password and
+    SkipCertificateCheck are all taken from it.
+
+.INPUTS
+    None. This cmdlet does not accept pipeline input.
+
 .OUTPUTS
-    The response from the API as a WebResponseObject.
+    Microsoft.PowerShell.Commands.WebResponseObject. The unparsed HTTP response from the
+    firewall.
+
 .EXAMPLE
-    # -Username is a plain string; only -Password is a SecureString. Passing a SecureString
-    # for the user name converts it to the text "System.Security.SecureString" and the login
-    # fails. The inner XML is shown entity-encoded because PowerShell's help renderer drops
-    # raw angle brackets from examples - pass it with real < and >.
     $securePw = Read-Host -AsSecureString
-    $inner = "&lt;Get&gt;&lt;IPHost&gt;&lt;/IPHost&gt;&lt;/Get&gt;"
-    Invoke-SfosApi -Firewall "firewall.example.com" -Port 4444 -Username "admin" -Password $securePw -InnerXml $inner -SkipCertificateCheck
+    $inner = '<Get><IPHost></IPHost></Get>'
+    Invoke-SfosApi -Firewall 'firewall.example.com' -Port 4444 -Username 'admin' -Password $securePw -InnerXml $inner -SkipCertificateCheck
+
+    Sends a raw Get request and returns the unparsed response.
+
 .EXAMPLE
-    # Fail fast against a host that might be unreachable, instead of waiting out the
-    # operating system's own default timeout.
-    Invoke-SfosApi -Firewall "firewall.example.com" -Username "admin" -Password $securePw -InnerXml $inner -TimeoutSec 5
+    Invoke-SfosApi -Firewall 'firewall.example.com' -Username 'admin' -Password $securePw -InnerXml $inner -TimeoutSec 5
+
+    Fails fast against a host that might be unreachable, instead of waiting out the
+    operating system's own default timeout.
+
 .EXAMPLE
-    # Raw multi-session call against a registered session instead of individual connection
-    # parameters. 'fw2' has to be registered first, e.g. via
-    # Connect-SfosFirewall -Firewall "fw2.example.test" -Credential $cred -Name 'fw2' -NoDefault
     Invoke-SfosApi -Session 'fw2' -InnerXml $inner
+
+    Sends a raw request against a session that was registered earlier with
+    Connect-SfosFirewall -Firewall 'fw2.example.test' -Credential $cred -Name 'fw2'.
+
+.LINK
+    https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+.LINK
+    Get-SfosApiStatus
+
+.LINK
+    Assert-SfosApiReturnSuccess
 #>
 function Invoke-SfosApi {
     [CmdletBinding(DefaultParameterSetName = 'Explicit')]
@@ -359,23 +389,40 @@ function Invoke-SfosApi {
 
 <#
 .SYNOPSIS
-    Extracts status information from API XML response.
+    Extracts the status information from a Sophos Firewall API response.
 
 .DESCRIPTION
-    Parses the XML response to find status codes and messages.
-    Looks in /Response/ObjectName/Status or /Response/Status.
+    Reads one or more status elements from a parsed API response and returns their code and
+    message. Looks first under /Response/ObjectName/Status when -ObjectName is given, then
+    falls back to /Response/Status. Assert-SfosApiReturnSuccess uses this cmdlet internally;
+    call it directly when troubleshooting a response, to see every status the firewall
+    actually returned.
 
 .PARAMETER Xml
-    The XML response from the API.
+    Required. The parsed XML response from the firewall.
 
 .PARAMETER ObjectName
-    Optional object name to search for specific status node.
+    Optional. Name of the entity element to look under for the status, for example 'Zone'.
+    If omitted, only the top-level /Response/Status is checked.
+
+.INPUTS
+    None. This cmdlet does not accept pipeline input.
 
 .OUTPUTS
-    PSCustomObject with Code, Message, and XPathHint properties.
+    System.Management.Automation.PSCustomObject. One object per status found, with the
+    properties Code, Message and XPathHint. Returns nothing when the response carries no
+    status at all.
 
 .EXAMPLE
-    Get-SfosApiStatus -Xml $response -ObjectName "Zone"
+    Get-SfosApiStatus -Xml $response -ObjectName 'Zone'
+
+    Reads the status of a Zone response.
+
+.LINK
+    https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+.LINK
+    Assert-SfosApiReturnSuccess
 #>
 function Get-SfosApiStatus {
     [CmdletBinding()]
@@ -433,41 +480,57 @@ function Get-SfosApiStatus {
 
 <#
 .SYNOPSIS
-    Validates that an API response indicates success.
+    Throws when a Sophos Firewall API response does not report success.
 
 .DESCRIPTION
-    Checks the login status and the entity status codes of an API response and throws if
-    the request did not succeed. Codes follow the table published by Sophos: 200 and 216
-    are success, 201/203/211-215 succeed with a warning, everything else is a failure.
-    There is no code 202 in that table.
+    Checks the login status and the entity status codes of a parsed API response and throws
+    a clear error naming the action and target if the request did not succeed. Codes 200
+    and 216 are treated as success, 201/203/211-215 as success with a warning, and every
+    other code in the documented range as a failure. Codes 217 and 222 are also treated as a
+    warning; every other undocumented code throws, so an unrecognised status is never
+    mistaken for success.
 
-    The published table covers 200-216 and 500-599. Codes 217 and 222 were measured against
-    a live firewall on operations that demonstrably succeeded and only produce a warning;
-    every other undocumented code throws, so an unrecognised status is never mistaken for
-    success. See the comments at the corresponding checks.
+    When no status is found at the path derived from -ObjectName, and none at the general
+    fallback path either, the cmdlet searches the rest of the response once for any node
+    that still looks like a status. A status found this way still throws on a failure code
+    and still succeeds on a success code, with a warning that names the path so -ObjectName
+    can be corrected for that operation. A response with genuinely no status anywhere is
+    unaffected.
 
-    If nothing is found at the path derived from -ObjectName (and not at the plain
-    /Response/Status fallback either), the function searches the rest of the response once
-    for any other node that still matches the API-status heuristic before giving up. A
-    status found this way still throws on an error code (with a hint in the message that the
-    -ObjectName needs measuring) and still succeeds on 200/216/... but with a warning naming
-    the path deviation - a response with genuinely no status anywhere is unaffected and
-    behaves exactly as before.
+    Domain modules call this cmdlet after every read and write to turn a failed request into
+    a thrown error instead of a silently wrong result.
 
 .PARAMETER Xml
-    The XML response from the API.
+    Required. The parsed XML response from the firewall.
 
 .PARAMETER ObjectName
-    Optional object name for status lookup.
+    Optional. Name of the entity element the status is expected under, for example 'Zone'.
+    If omitted, only the top-level /Response/Status is checked before the fallback search.
 
 .PARAMETER Action
-    Description of the action being performed (for error messages).
+    Optional. Short description of the action being performed, used in the error message,
+    for example 'create'. Default 'execute request'.
 
 .PARAMETER Target
-    Target object name (for error messages).
+    Optional. Name of the target object, used in the error message.
+
+.INPUTS
+    None. This cmdlet does not accept pipeline input.
+
+.OUTPUTS
+    None. The cmdlet writes no output and throws an exception if the response reports a
+    failure or an unrecognised status.
 
 .EXAMPLE
-    Assert-SfosApiReturnSuccess -Xml $response -ObjectName "Zone" -Action "Create" -Target "DMZ"
+    Assert-SfosApiReturnSuccess -Xml $response -ObjectName 'Zone' -Action 'create' -Target 'DMZ'
+
+    Throws a descriptive error if creating the Zone 'DMZ' failed; otherwise returns nothing.
+
+.LINK
+    https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+.LINK
+    Get-SfosApiStatus
 #>
 function Assert-SfosApiReturnSuccess {
     [CmdletBinding()]
@@ -502,13 +565,12 @@ function Assert-SfosApiReturnSuccess {
     # response as a broken status.
     $statusList = @(Get-SfosApiStatus -Xml $Xml -ObjectName $ObjectName | Where-Object { $_ })
 
-    # Fail-open guard, measured against New-SfosL2TPConnection: its create/update status
-    # landed FLAT at /Response/Configuration/Status while the caller's -ObjectName pointed
-    # at the nested Get/Remove shape, so the lookup above found nothing there and nothing at
-    # the /Response/Status fallback either - and this function used to just return, reporting
-    # success for a write that may have failed. Before treating "nothing at the expected
-    # path" as "no status anywhere" (which is legitimately what an empty Get result looks
-    # like), search the rest of the response once for any node the existing heuristic still
+    # Fail-open guard: some operations land their status FLAT at a different path than the
+    # nested Get/Remove shape -ObjectName points at, so the lookup above finds nothing there
+    # and nothing at the /Response/Status fallback either. Returning at that point would
+    # report success for a write that may have failed. Before treating "nothing at the
+    # expected path" as "no status anywhere" (which is legitimately what an empty Get result
+    # looks like), search the rest of the response once for any node the existing heuristic still
     # recognises as an API status: a Status carrying a code attribute, or a code-less Status
     # whose parent has no <Name> child. That second half is the same data-field exclusion
     # used above - a FirewallRule/NATRule's <Status>Enable</Status> sits next to <Name> and
@@ -575,10 +637,9 @@ function Assert-SfosApiReturnSuccess {
         }
 
         # The published table runs 200-216 and then resumes at 500, so 217-499 is undefined.
-        # Only the two codes actually measured against a firewall are let through, and only
-        # because the write demonstrably succeeded in both cases: creating a WebFilterCategory
-        # with an external URL list answers 217 or 222 'Unable to get status message' and the
-        # object is created correctly.
+        # Only 217 and 222 are let through as a warning, because they occur on writes that
+        # otherwise complete correctly, for example a WebFilterCategory created with an
+        # external URL list, which answers 217 or 222 'Unable to get status message'.
         #
         # The rest of that range still throws. Waving through every undocumented code would
         # fail open - an unrecognised code would be reported as success while the firewall
@@ -605,14 +666,13 @@ function Assert-SfosApiReturnSuccess {
 .DESCRIPTION
     Accepts the same shapes a domain cmdlet's -Session parameter can receive: $null (passed
     straight through, meaning "no session"), a registered session name (looked up in the
-    named-session registry, case-insensitively), an object already tagged with the
-    PSTypeName 'SophosFirewall.Session' (the return value of Connect-SfosFirewall, passed
-    through unchanged), or - as a duck-typing fallback - any other object that at least has a
-    Firewall property, so a caller who built a compatible object by hand is not blocked.
+    named-session registry, case-insensitively), an object already tagged as a session
+    returned by Connect-SfosFirewall, or - as a fallback - any other object that at least has
+    a Firewall property, so a caller who built a compatible object by hand is not blocked.
     Anything else throws.
 
 .PARAMETER Session
-    The raw value bound to a cmdlet's -Session parameter.
+    Required. The raw value bound to a cmdlet's -Session parameter.
 #>
 function Resolve-SfosSessionArgument {
     [CmdletBinding()]
@@ -648,33 +708,40 @@ function Resolve-SfosSessionArgument {
 
 <#
 .SYNOPSIS
-    Resolves connection parameters from session context or explicit values.
+    Resolves the connection parameters a cmdlet should use for an API call.
 
 .DESCRIPTION
-    Looks up connection parameters from the module session variable if not explicitly provided.
-    Ensures all required parameters are available for API calls.
+    Fills in Firewall, Port, Username, Password and SkipCertificateCheck from the active
+    connection wherever the caller did not supply them explicitly, and throws a clear error
+    if no connection information is available at all. Every domain cmdlet calls this once,
+    at the start of its body, instead of reading the connection state itself.
 
-    When the caller's bound parameters include a 'Session' key - i.e. the calling cmdlet
-    declared a -Session parameter and it was bound, even to $null - that session becomes the
-    base instead of the default session, and an explicit -Session $null disables the fallback
-    to the default session entirely rather than silently keeping it. This is the same
-    ContainsKey philosophy already used below for -Port 0 and -SkipCertificateCheck:$false.
-    Without a 'Session' key in -BoundParameters (every call site that predates -Session),
-    behaviour is unchanged: the default session set by Connect-SfosFirewall is the base.
+    When the caller passed -Session, that session is used as the base instead of the default
+    connection set by Connect-SfosFirewall; passing -Session $null explicitly switches the
+    default connection off rather than keeping it. A value the caller supplied directly for
+    Firewall, Port, Username, Password or SkipCertificateCheck always takes precedence over
+    both the session and the default connection.
 
 .PARAMETER BoundParameters
-    Hashtable of bound parameters from calling cmdlet.
+    Required. The calling cmdlet's own $PSBoundParameters.
+
+.INPUTS
+    None. This cmdlet does not accept pipeline input.
 
 .OUTPUTS
-    Hashtable with resolved Firewall, Port, Username, Password, and SkipCertificateCheck.
+    System.Collections.Hashtable. Contains the resolved Firewall, Port, Username, Password
+    and SkipCertificateCheck, ready to splat into Invoke-SfosApi.
 
 .EXAMPLE
-    $resolved = Resolve-SfosParameters -BoundParameters $PSBoundParameters
-.EXAMPLE
-    # A cmdlet with its own -Session parameter passes $PSBoundParameters straight through;
-    # if -Session was bound, its value - a registered name or a session object - becomes the
-    # base for this resolution instead of the default session.
-    $resolved = Resolve-SfosParameters -BoundParameters $PSBoundParameters
+    $params = Resolve-SfosParameters -BoundParameters $PSBoundParameters
+
+    Resolves the connection to use, typically called once in a cmdlet's begin block.
+
+.LINK
+    https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+.LINK
+    Connect-SfosFirewall
 #>
 function Resolve-SfosParameters {
     [CmdletBinding()]
@@ -740,53 +807,73 @@ function Resolve-SfosParameters {
 
 <#
 .SYNOPSIS
-    Establishes a connection to a Sophos Firewall.
+    Opens a connection to a Sophos Firewall for use by every other cmdlet.
 
 .DESCRIPTION
-    Stores connection details in the module session variable for reuse by other cmdlets.
-    Credentials are stored as SecureString for security.
+    Stores the firewall address, credentials and connection options as the default
+    connection, so subsequent cmdlets from any module in this suite can be called without
+    connection parameters. The password is kept as a SecureString, never as plain text. This
+    cmdlet does not itself send a request; the credentials are only validated on first use.
+
+    Call it once at the start of a session. Use -Name to hold more than one connection at
+    the same time and address a specific one later with a cmdlet's own -Session parameter.
 
 .PARAMETER Firewall
-    Sophos Firewall hostname or IP address.
+    Required. Host name or IP address of the firewall.
 
 .PARAMETER Port
-    Management/API port number (default: 4444).
+    Optional. TCP port of the management API. Default 4444.
 
 .PARAMETER Credential
-    PSCredential object containing username and password.
+    Required. A PSCredential holding the API user name and password.
 
 .PARAMETER SkipCertificateCheck
-    Skips SSL certificate validation for self-signed certificates.
+    Optional. Accepts the firewall certificate without validating it. Use this only for
+    appliances that still present a self-signed certificate.
 
 .PARAMETER Name
-    Registers this connection under a name in the session registry, so it can be referenced
-    later as -Session '<Name>' from any cmdlet, or listed with Get-SfosSession, without
-    holding a reference to the returned object. Lookup is case-insensitive. Optional; a
-    connection made without -Name still becomes the default session exactly as before, just
-    without a registry entry.
+    Optional. Registers this connection under a name in the session registry, so it can be
+    referenced later as -Session '<Name>' from any cmdlet, or listed with Get-SfosSession,
+    without holding a reference to the returned object. Lookup is case-insensitive. A
+    connection made without -Name still becomes the default session, just without a registry
+    entry.
 
 .PARAMETER NoDefault
-    Keeps the current default session (the one used when no -Session is passed anywhere)
-    unchanged instead of replacing it with this connection. Only meaningful together with
-    -Name - without -Name there would be no other way to reach this connection again, so
-    -NoDefault alone is a no-op and this connection still becomes the default, exactly like
-    calling Connect-SfosFirewall without -NoDefault at all.
+    Optional. Keeps the current default session unchanged instead of replacing it with this
+    connection. Only meaningful together with -Name; without -Name this switch has no effect
+    and the connection still becomes the default, because there would otherwise be no way to
+    reach it again.
+
+.INPUTS
+    None. This cmdlet does not accept pipeline input.
 
 .OUTPUTS
-    PSCustomObject with connection details (PSTypeName 'SophosFirewall.Session'). The object
-    shape is unchanged from earlier versions - Firewall, Port, Username, Password,
-    SkipCertificateCheck - and carries no Name property, so it can still be splatted directly
-    (@session) without colliding with a domain cmdlet's own -Name parameter. The
-    Name-to-session mapping lives only in the session registry, queried via Get-SfosSession.
+    System.Management.Automation.PSCustomObject. The session object, with the properties
+    Firewall, Port, Username, Password and SkipCertificateCheck. Pass it to another cmdlet's
+    -Session parameter, or splat it directly.
 
 .EXAMPLE
-    $cred = Get-Credential -Message "Sophos Firewall Admin"
-    Connect-SfosFirewall -Firewall "192.168.1.1" -Port 4444 -Credential $cred -SkipCertificateCheck
+    $cred = Get-Credential -Message 'Sophos Firewall Admin'
+    Connect-SfosFirewall -Firewall '192.168.1.1' -Port 4444 -Credential $cred -SkipCertificateCheck
+
+    Opens a connection and makes it the default for every subsequent cmdlet call.
+
 .EXAMPLE
-    # Hold two connections at once: fw1 becomes the default session (used by any call with
-    # no -Session), fw2 is registered but does not replace it.
-    Connect-SfosFirewall -Firewall "fw1.example.test" -Credential $cred -Name 'fw1'
-    Connect-SfosFirewall -Firewall "fw2.example.test" -Credential $cred -Name 'fw2' -NoDefault
+    $cred = Get-Credential -Message 'Sophos Firewall Admin'
+    Connect-SfosFirewall -Firewall 'fw1.example.test' -Credential $cred -Name 'fw1'
+    Connect-SfosFirewall -Firewall 'fw2.example.test' -Credential $cred -Name 'fw2' -NoDefault
+    Get-SfosSession
+
+    Holds two connections at once: fw1 becomes the default session, fw2 is registered but
+    does not replace it.
+
+.LINK
+    https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+.LINK
+    Disconnect-SfosFirewall
+
+.LINK
     Get-SfosSession
 #>
 function Connect-SfosFirewall {
@@ -838,36 +925,62 @@ function Connect-SfosFirewall {
 
 <#
 .SYNOPSIS
-    Disconnects from one, several, or all Sophos Firewall sessions.
+    Closes one, several, or all Sophos Firewall sessions.
 
 .DESCRIPTION
-    Four mutually exclusive ways to select what to disconnect:
-    - no parameter (the default parameter set): clears the default session exactly as
-      before - byte-identical behaviour for every existing caller.
-    - -Name: removes the one named session from the registry, and also clears the default
-      session if that named session happens to be the current default.
-    - -Session: same as -Name, but takes the session object itself (or a name, resolved the
-      same way -Session is resolved everywhere else) - accepts pipeline input, so
-      Get-SfosSession | Disconnect-SfosFirewall works.
-    - -All: clears the default session and empties the entire registry.
+    Removes stored connection state so it can no longer be used by other cmdlets. Nothing is
+    sent to the firewall; this only clears local session data. Four ways to select what to
+    close, mutually exclusive: no parameter clears the default session; -Name removes the one
+    named session from the registry, and also clears the default session if that named
+    session is currently the default; -Session does the same, but takes the session object
+    itself, so Get-SfosSession | Disconnect-SfosFirewall works; -All clears the default
+    session and empties the entire registry.
 
 .PARAMETER Name
-    The registered name of the session to remove.
+    Required in this parameter set. The registered name of the session to remove.
 
 .PARAMETER Session
-    A registered session name or a session object returned by Connect-SfosFirewall.
+    Required in this parameter set. A session object from Connect-SfosFirewall, or the name
+    of a session that was registered with Connect-SfosFirewall -Name. Accepts pipeline input.
 
 .PARAMETER All
-    Disconnects the default session and every registered named session.
+    Required in this parameter set. Closes the default session and every registered named
+    session.
+
+.INPUTS
+    System.Object. Session can be piped in, for example from Get-SfosSession.
+
+.OUTPUTS
+    None.
 
 .EXAMPLE
     Disconnect-SfosFirewall
+
+    Closes the default session.
+
 .EXAMPLE
     Disconnect-SfosFirewall -Name 'fw2'
+
+    Closes the session registered under the name 'fw2'.
+
 .EXAMPLE
     Get-SfosSession -Name 'fw2' | Disconnect-SfosFirewall
+
+    Closes the session found by Get-SfosSession.
+
 .EXAMPLE
     Disconnect-SfosFirewall -All
+
+    Closes every open and registered session.
+
+.LINK
+    https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+.LINK
+    Connect-SfosFirewall
+
+.LINK
+    Get-SfosSession
 #>
 function Disconnect-SfosFirewall {
     # PSReviewUnusedParameter: -All only selects the 'All' parameter set; $PSCmdlet.ParameterSetName
@@ -949,21 +1062,36 @@ function Disconnect-SfosFirewall {
     Lists registered Sophos Firewall sessions, or one specific session by name.
 
 .DESCRIPTION
-    Returns a view of the session registry populated by Connect-SfosFirewall -Name -
-    Firewall, Port, Username, SkipCertificateCheck and whether the session is the current
-    default. The Password is deliberately not included in the view.
+    Returns a view of the sessions that were registered with Connect-SfosFirewall -Name,
+    showing which one is currently the default. The stored password is never part of the
+    output.
 
 .PARAMETER Name
-    Return only the session registered under this name. Throws if no session with that name
-    is registered.
+    Optional. Returns only the session registered under this name. Throws if no session with
+    that name is registered. If omitted, every registered session is returned.
+
+.INPUTS
+    None. This cmdlet does not accept pipeline input.
 
 .OUTPUTS
-    PSCustomObject with Name, Firewall, Port, Username, SkipCertificateCheck, IsDefault.
+    System.Management.Automation.PSCustomObject. One object per session, with the properties
+    Name, Firewall, Port, Username, SkipCertificateCheck and IsDefault.
 
 .EXAMPLE
     Get-SfosSession
+
+    Lists every registered session.
+
 .EXAMPLE
     Get-SfosSession -Name 'fw2'
+
+    Returns the session registered under the name 'fw2'.
+
+.LINK
+    https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+.LINK
+    Connect-SfosFirewall
 #>
 function Get-SfosSession {
     # PSUseSingularNouns: 'Session' is already singular - this cmdlet returns either every

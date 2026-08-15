@@ -1,4 +1,4 @@
-@{
+﻿@{
     RootModule           = 'SophosFirewall.Routing.psm1'
     ModuleVersion        = '1.1.0'
     GUID                 = '6baa7e3d-24b6-46b1-b49c-9f0f71e04bc4'
@@ -54,10 +54,9 @@
 
     PrivateData          = @{
         PSData = @{
-            Tags         = @('Sophos', 'Firewall', 'API', 'XGS', 'SFOS', 'Routing', 'SDWAN', 'Gateway', 'Multicast')
-            LicenseUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/blob/main/Modules/SophosFirewall.Routing/LICENSE.txt'
-            ProjectUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/tree/main/Modules/SophosFirewall.Routing'
-            ReleaseNotes = '1.1.0: Adds the -Session parameter to all 31 cmdlets for multi-session use (requires SophosFirewall.Core 1.3.0).'
+            Tags       = @('Sophos', 'Firewall', 'API', 'XGS', 'SFOS', 'Routing', 'SDWAN', 'Gateway', 'Multicast')
+            LicenseUri = 'https://github.com/janweis/SophosFirewall-PowerShell/blob/main/Modules/SophosFirewall.Routing/LICENSE.txt'
+            ProjectUri = 'https://github.com/janweis/SophosFirewall-PowerShell/tree/main/Modules/SophosFirewall.Routing'
         }
     }
 }

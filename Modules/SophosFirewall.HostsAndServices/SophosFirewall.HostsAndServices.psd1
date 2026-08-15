@@ -3,7 +3,7 @@
     ModuleVersion        = '1.1.0'
     GUID                 = '1c2a45f5-8215-4035-a691-2be3ef0e8191'
     Author               = 'Jan Weis'
-    Description          = 'PowerShell module for managing Sophos XGS / SFOS 21.x firewall hosts and services via API.'
+    Description          = 'Manages IP hosts, FQDN hosts, MAC hosts, host groups, services and service groups on a Sophos XGS / SFOS 22.0 firewall via the management API.'
 
     PowerShellVersion    = '5.1'
     CompatiblePSEditions = @('Desktop', 'Core')
@@ -79,7 +79,6 @@
             Tags         = @('Sophos', 'Firewall', 'API', 'XGS', 'SFOS', 'Network', 'Security')
             LicenseUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/blob/main/Modules/SophosFirewall.HostsAndServices/LICENSE.txt'
             ProjectUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/tree/main/Modules/SophosFirewall.HostsAndServices'
-            ReleaseNotes = '1.1.0: Adds the -Session parameter to all 53 cmdlets for multi-session use (requires SophosFirewall.Core 1.3.0).'
         }
     }
 }

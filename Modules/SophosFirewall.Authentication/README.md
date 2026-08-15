@@ -1,393 +1,249 @@
-# SophosFirewall.Authentication Module
+# SophosFirewall.Authentication
 
-> **Security warning.** These cmdlets change who may log in to a live firewall and how -
-> authentication servers, users, group membership, admin/VPN/SSL VPN authentication and SSO.
-> An update that drops an authentication server, or a group membership written to the wrong
-> object, decides whether people can authenticate at all. Every write cmdlet in this module
-> supports `-WhatIf`; use it before running an unfamiliar call against a production firewall,
-> especially anything under Admin/VPN/SSLVPN authentication.
-
-## Overview
-
-The **Authentication** module provides PowerShell cmdlets for the **CONFIGURE > Authentication**
-area of the Sophos XGS / SFOS 22.0 API documentation. With 97 exported functions, it manages
+`SophosFirewall.Authentication` manages the Authentication area of a Sophos Firewall:
 authentication servers (Active Directory, LDAP, RADIUS, TACACS+, eDirectory), users and user
-groups, guest users, clientless users, SMS gateways, one-time passwords, firewall/admin/VPN/SSL
-VPN authentication, web authentication and captive portal, Microsoft Entra ID (Azure AD) SSO,
-STAS and live user sessions. Requires `SophosFirewall.Core`.
+groups, guest and clientless users, SMS gateways, one-time passwords, firewall/admin/VPN/SSL
+VPN authentication, web authentication and captive portal, Microsoft Entra ID (Azure AD)
+SSO, STAS and live user sessions. It is for administrators who script who may log in and how
+instead of configuring it in the web admin.
 
-## Features
+These cmdlets change who can authenticate against the firewall. An update that drops an
+authentication server, or a group membership written to the wrong object, decides whether
+people can log in at all. Every write cmdlet supports `-WhatIf`; use it before running an
+unfamiliar call against a production firewall, especially anything under admin, VPN or SSL
+VPN authentication.
 
-- **Authentication Servers**: Active Directory, LDAP, RADIUS, TACACS+ and eDirectory server objects
-- **Users and User Groups**: User accounts and groups, with membership management
-- **Guest Users, Clientless Users and SMS Gateways**: Temporary/portal-based access and SMS delivery for OTPs
-- **One-Time Passwords**: OTP settings, explicit OTP user list and OTP tokens
-- **Firewall Authentication**: Global settings, authentication methods, NTLM, CTAS, iOS web client and SSO-via-RADIUS-accounting
-- **Admin, VPN and SSL VPN Authentication**: Which server(s) the firewall consults for each login surface
-- **Web Authentication and Captive Portal**: Login flow settings, portal branding and direct web proxy authentication
-- **SSO, STAS and Live User Sessions**: Azure AD SSO servers, STAS enable/disable, live user login/logout
-- **API Integration**: Full integration with the Sophos XGS/SFOS firewall XML API
+## Requirements
+
+- `SophosFirewall.Core` (installed automatically as a dependency)
+- PowerShell 5.1 or 7.x
+- HTTPS access to the firewall's management API
+- A firewall account with permission to read and write this area
 
 ## Installation
 
 ```powershell
-Import-Module -Name SophosFirewall.Authentication
+Install-Module SophosFirewall.Authentication -Repository PSGallery -Scope CurrentUser
 ```
-
-Or with explicit path:
-
-```powershell
-Import-Module -Name "C:\Path\To\SophosFirewall.Authentication.psd1"
-```
-
-## Requirements
-
-- PowerShell 5.1 or higher (Windows PowerShell)
-- PowerShell 7.0+ (PowerShell Core) recommended
-- SophosFirewall.Core module (automatically loaded as dependency)
-- Network access to Sophos XGS / SFOS firewall (version 22.0)
-- API credentials with appropriate permissions
 
 ## Quick Start
 
-### Establish Connection
-
 ```powershell
-Connect-SfosFirewall -Firewall "192.168.1.1" -Port 4444 -Credential (Get-Credential) -SkipCertificateCheck
+Connect-SfosFirewall -Firewall '192.0.2.10' -Port 4444 -Credential (Get-Credential) -SkipCertificateCheck
+
+$securePw = ConvertTo-SecureString 'a-strong-password' -AsPlainText -Force
+New-SfosUser -AccountName 'jdoe' -Name 'Jane Doe' -UserType User -AccountPassword $securePw -LoginRestriction UserGroupNode -Group 'Open Group'
+
+New-SfosUserGroup -Name 'Sales' -GroupType Normal -QoSPolicy 'None' -SurfingQuotaPolicy 'Unlimited Internet Access' -AccessTimePolicy 'Allowed all the time' -LoginRestriction AnyNode
+
+Get-SfosUser -UsernameLike 'jdoe' | Set-SfosUser -SurfingQuotaPolicy 'Unlimited Internet Access'
+Remove-SfosUser -AccountName 'jdoe' -WhatIf
 ```
 
-### Multi-Session Usage
+### Authentication servers
 
 ```powershell
-# Register two connections without disturbing the default session
-Connect-SfosFirewall -Firewall "fw1.example.test" -Credential (Get-Credential) -Name "fw1"
-Connect-SfosFirewall -Firewall "fw2.example.test" -Credential (Get-Credential) -Name "fw2" -NoDefault
+$bindPw = ConvertTo-SecureString 'a-strong-password' -AsPlainText -Force
+New-SfosActiveDirectoryServer -ServerName 'CorpAD' -ServerAddress 'ad.example.com' -ServerPort 389 `
+    -NetBIOSDomain 'CORP' -ADSUsername 'svc-sfos' -BindPassword $bindPw -ConnectionSecurity Simple -DomainName 'example.com'
 
-# Read a group's policy assignment from fw1 and apply it to the same-named group on fw2
-Get-SfosUserGroup -Session "fw1" -NameLike "Sales" | Set-SfosUserGroup -Session "fw2" -QoSPolicy "High"
-```
-
-### Authentication Server Management
-
-```powershell
-# List the configured LDAP servers
 Get-SfosLDAPServer | Format-Table ServerName, ServerAddress, Port, BaseDN
-
-# Create an Active Directory server with simple bind
-$bindPw = ConvertTo-SecureString "P@ssw0rd" -AsPlainText -Force
-New-SfosActiveDirectoryServer -ServerName "CorpAD" -ServerAddress "ad.example.invalid" -ServerPort 389 -NetBIOSDomain "CORP" -ADSUsername "svc-sfos" -BindPassword $bindPw -ConnectionSecurity Simple -DomainName "example.invalid"
-
-# Update the domain name only, everything else preserved except the bind password
-Set-SfosActiveDirectoryServer -ServerName "CorpAD" -DomainName "corp.example.invalid" -BindPassword $bindPw
-
-# Preview removal
-Remove-SfosActiveDirectoryServer -ServerName "CorpAD" -WhatIf
+Remove-SfosActiveDirectoryServer -ServerName 'CorpAD' -WhatIf
 ```
 
-### User and Group Management
+### One-time passwords and guest users
 
 ```powershell
-# Create a user and place it in a group
-$securePw = ConvertTo-SecureString "P@ssw0rd!" -AsPlainText -Force
-New-SfosUser -AccountName "jdoe" -Name "Jane Doe" -UserType User -AccountPassword $securePw -LoginRestriction UserGroupNode -Group "Open Group"
+Add-SfosOTPSettingsMember -Members 'jdoe'
+$secret = ConvertTo-SecureString '0123456789abcdef0123456789abcdef' -AsPlainText -Force
+New-SfosOTPTokens -User 'jdoe' -Secret $secret -Algorithm SHA1
 
-# Create a normal group
-New-SfosUserGroup -Name "Sales" -GroupType Normal -QoSPolicy "None" -SurfingQuotaPolicy "Unlimited Internet Access" -AccessTimePolicy "Allowed all the time" -LoginRestriction AnyNode
-
-# Add users to an existing group - see Known limitations, this moves the user out of any other group
-Add-SfosUserGroupMember -Name "Sales" -Members "jdoe","asmith"
-
-# Update using pipeline input
-Get-SfosUser -UsernameLike "jdoe" | Set-SfosUser -SurfingQuotaPolicy "Unlimited Internet Access"
-
-# Remove a user
-Remove-SfosUser -AccountName "jdoe" -WhatIf
+New-SfosGuestUser -Name 'visitor1' -UserValidity '1' -Email 'visitor1@example.com'
+Get-SfosGuestUser -NameLike 'visitor1' | Remove-SfosGuestUser
 ```
 
-### Guest User, Clientless User and SMS Gateway Management
+## Cmdlets
 
-```powershell
-# Create a single guest user - see Known limitations, there is no Set-SfosGuestUser
-New-SfosGuestUser -Name "visitor1" -UserValidity "1" -Email "visitor1@example.test"
+### Authentication servers
 
-# List and remove via the pipeline
-Get-SfosGuestUser -NameLike "visitor1" | Remove-SfosGuestUser
+| Cmdlet | Purpose |
+|---|---|
+| `Get-SfosActiveDirectoryServer` | Retrieves Active Directory server objects. |
+| `New-SfosActiveDirectoryServer` | Creates an Active Directory server. |
+| `Set-SfosActiveDirectoryServer` | Updates an Active Directory server. |
+| `Remove-SfosActiveDirectoryServer` | Removes an Active Directory server. |
+| `Get-SfosLDAPServer` | Retrieves LDAP server objects. |
+| `New-SfosLDAPServer` | Creates an LDAP server. |
+| `Set-SfosLDAPServer` | Updates an LDAP server. |
+| `Remove-SfosLDAPServer` | Removes an LDAP server. |
+| `Get-SfosRADIUSServer` | Retrieves RADIUS server objects. |
+| `New-SfosRADIUSServer` | Creates a RADIUS server. |
+| `Set-SfosRADIUSServer` | Updates a RADIUS server. |
+| `Remove-SfosRADIUSServer` | Removes a RADIUS server. |
+| `Get-SfosTACACSServer` | Retrieves TACACS+ server objects. |
+| `New-SfosTACACSServer` | Creates a TACACS+ server. |
+| `Set-SfosTACACSServer` | Updates a TACACS+ server. |
+| `Remove-SfosTACACSServer` | Removes a TACACS+ server. |
+| `Get-SfosEDirectoryServer` | Retrieves eDirectory server objects. |
+| `New-SfosEDirectoryServer` | Creates an eDirectory server. |
+| `Set-SfosEDirectoryServer` | Updates an eDirectory server. |
+| `Remove-SfosEDirectoryServer` | Removes an eDirectory server. |
 
-# Create a clientless user
-New-SfosClientlessUser -AccountName "jdoe" -Name "John Doe" -ClientLessGroup "Clientless Group" -Email "jdoe@example.test" -IPAddress "203.0.113.10"
+### Users and groups
 
-# Add a whole range of clientless users at once
-New-SfosClientlessUserRange -FromIPAddress "203.0.113.10" -ToIPAddress "203.0.113.20" -ClientLessGroup "Clientless Group"
+| Cmdlet | Purpose |
+|---|---|
+| `Get-SfosUser` | Retrieves user accounts. |
+| `New-SfosUser` | Creates a user account. |
+| `Set-SfosUser` | Updates a user account. |
+| `Remove-SfosUser` | Removes a user account. |
+| `Get-SfosUserGroup` | Retrieves user group objects. |
+| `New-SfosUserGroup` | Creates a user group. |
+| `Set-SfosUserGroup` | Updates a user group. |
+| `Remove-SfosUserGroup` | Removes a user group. |
+| `Add-SfosUserGroupMember` | Places users into a user group. |
+| `Remove-SfosUserGroupMember` | Removes users from a user group. |
 
-# Create an SMS gateway used for OTP delivery
-New-SfosSMSGateway -Name "ExampleGateway" -URL "https://sms.example.test/send" -HTTPMethod Post -RequestParameterName @('to','msg') -RequestParameterValue @('{mobileno}','{msg}')
-```
+### Guest users, clientless users, SMS gateways
 
-### One-Time Password Management
+| Cmdlet | Purpose |
+|---|---|
+| `Get-SfosGuestUser` | Retrieves guest user objects. |
+| `New-SfosGuestUser` | Creates a guest user. |
+| `Remove-SfosGuestUser` | Removes a guest user. |
+| `Get-SfosGuestUserSettings` | Reads the guest user settings. |
+| `Set-SfosGuestUserSettings` | Updates the guest user settings. |
+| `Get-SfosClientlessUser` | Retrieves clientless user objects. |
+| `New-SfosClientlessUser` | Creates a clientless user. |
+| `Set-SfosClientlessUser` | Updates a clientless user. |
+| `Remove-SfosClientlessUser` | Removes a clientless user. |
+| `New-SfosClientlessUserRange` | Creates a range of clientless users. |
+| `Get-SfosSMSGateway` | Retrieves SMS gateway profiles. |
+| `New-SfosSMSGateway` | Creates an SMS gateway profile. |
+| `Set-SfosSMSGateway` | Updates an SMS gateway profile. |
+| `Remove-SfosSMSGateway` | Removes an SMS gateway profile. |
 
-```powershell
-# Read the one-time password settings and enrol a user
-Get-SfosOTPSettings
-Add-SfosOTPSettingsMember -Members "jdoe"
+### One-time passwords
 
-# Create a token for a user with a hexadecimal secret
-$secret = ConvertTo-SecureString "0123456789abcdef0123456789abcdef" -AsPlainText -Force
-New-SfosOTPTokens -User "jdoe" -Secret $secret -Algorithm SHA1
+| Cmdlet | Purpose |
+|---|---|
+| `Get-SfosOTPSettings` | Reads the one-time password settings. |
+| `Set-SfosOTPSettings` | Updates the one-time password settings. |
+| `Add-SfosOTPSettingsMember` | Adds users to the explicit OTP user list. |
+| `Remove-SfosOTPSettingsMember` | Removes users from the explicit OTP user list. |
+| `Get-SfosOTPTokens` | Retrieves one-time password tokens. |
+| `New-SfosOTPTokens` | Creates a one-time password token. |
+| `Set-SfosOTPTokens` | Updates a one-time password token. |
+| `Remove-SfosOTPTokens` | Removes a one-time password token. |
 
-# Disable a token, every other field is preserved
-Set-SfosOTPTokens -TokenId "ABC123" -Active 0
-```
+### Firewall authentication
 
-### Firewall, Admin, VPN and SSL VPN Authentication
+| Cmdlet | Purpose |
+|---|---|
+| `Get-SfosFirewallAuthenticationGlobalSettings` | Reads the firewall authentication global settings. |
+| `Set-SfosFirewallAuthenticationGlobalSettings` | Updates the firewall authentication global settings. |
+| `Get-SfosFirewallAuthenticationMethods` | Reads the firewall authentication method configuration. |
+| `Set-SfosFirewallAuthenticationMethods` | Updates the firewall authentication method configuration. |
+| `Add-SfosFirewallAuthenticationMethodsMember` | Adds servers to the firewall authentication server list. |
+| `Remove-SfosFirewallAuthenticationMethodsMember` | Removes servers from the firewall authentication server list. |
+| `Get-SfosFirewallAuthenticationNTLMSettings` | Reads the NTLM authentication settings. |
+| `Set-SfosFirewallAuthenticationNTLMSettings` | Updates the NTLM authentication settings. |
+| `Get-SfosFirewallAuthenticationCTASSettings` | Reads the CTAS authentication settings. |
+| `Set-SfosFirewallAuthenticationCTASSettings` | Updates the CTAS authentication settings. |
+| `Get-SfosFirewallAuthenticationiOSWebClientSettings` | Reads the iOS web client authentication settings. |
+| `Set-SfosFirewallAuthenticationiOSWebClientSettings` | Updates the iOS web client authentication settings. |
+| `Get-SfosSSORadiusAccount` | Reads the RADIUS accounting single sign-on configuration. |
+| `Set-SfosSSORadiusAccount` | Updates the RADIUS accounting single sign-on configuration. |
 
-```powershell
-# Inspect which authentication servers the firewall consults for VPN logins
-(Get-SfosVPNAuthentication).AuthenticationServerList
+### Admin, VPN and SSL VPN authentication
 
-# Add a RADIUS server alongside the existing firewall authentication servers
-Add-SfosFirewallAuthenticationMethodsMember -Members "RADIUS-Server1"
+| Cmdlet | Purpose |
+|---|---|
+| `Get-SfosAdminAuthentication` | Reads the administrator authentication configuration. |
+| `Set-SfosAdminAuthentication` | Updates the administrator authentication configuration. |
+| `Add-SfosAdminAuthenticationMember` | Adds servers to the administrator authentication server list. |
+| `Remove-SfosAdminAuthenticationMember` | Removes servers from the administrator authentication server list. |
+| `Get-SfosVPNAuthentication` | Reads the VPN authentication configuration. |
+| `Set-SfosVPNAuthentication` | Updates the VPN authentication configuration. |
+| `Add-SfosVPNAuthenticationMember` | Adds servers to the VPN authentication server list. |
+| `Remove-SfosVPNAuthenticationMember` | Removes servers from the VPN authentication server list. |
+| `Get-SfosSSLVPNAuthentication` | Reads the SSL VPN authentication configuration. |
+| `Set-SfosSSLVPNAuthentication` | Updates the SSL VPN authentication configuration. |
+| `Add-SfosSSLVPNAuthenticationMember` | Adds servers to the SSL VPN authentication server list. |
+| `Remove-SfosSSLVPNAuthenticationMember` | Removes servers from the SSL VPN authentication server list. |
 
-# Add a RADIUS server alongside the existing VPN authentication servers
-Add-SfosVPNAuthenticationMember -Members "RADIUS-Server1"
+### Web authentication and captive portal
 
-# See Known limitations - the list must never become empty
-Remove-SfosSSLVPNAuthenticationMember -Members "RADIUS-Server1"
-```
+| Cmdlet | Purpose |
+|---|---|
+| `Get-SfosWebAuthenticationSettings` | Reads the web authentication settings. |
+| `Set-SfosWebAuthenticationSettings` | Updates the web authentication settings. |
+| `Get-SfosCaptivePortalAppearance` | Reads the captive portal appearance settings. |
+| `Set-SfosCaptivePortalAppearance` | Updates the captive portal appearance settings. |
+| `Get-SfosDefaultCaptivePortal` | Reads the default captive portal wording. |
+| `Set-SfosDefaultCaptivePortal` | Updates the default captive portal wording. |
+| `Get-SfosDirectWebProxyAuthentication` | Reads the direct web proxy authentication configuration. |
+| `Set-SfosDirectWebProxyAuthentication` | Updates the direct web proxy authentication configuration. |
+| `Add-SfosDirectWebProxyAuthenticationMember` | Adds hosts to the direct web proxy multi-user host list. |
+| `Remove-SfosDirectWebProxyAuthenticationMember` | Removes hosts from the direct web proxy multi-user host list. |
 
-### Web Authentication and Captive Portal
+### SSO, STAS and live user sessions
 
-```powershell
-# Retrieve the current captive portal branding
-Get-SfosCaptivePortalAppearance
+| Cmdlet | Purpose |
+|---|---|
+| `Get-SfosAzureADSSO` | Retrieves Microsoft Entra ID (Azure AD) SSO server objects. |
+| `New-SfosAzureADSSO` | Creates a Microsoft Entra ID (Azure AD) SSO server. |
+| `Set-SfosAzureADSSO` | Updates a Microsoft Entra ID (Azure AD) SSO server. |
+| `Remove-SfosAzureADSSO` | Removes a Microsoft Entra ID (Azure AD) SSO server. |
+| `Get-SfosSTAS` | Reads the STAS configuration. |
+| `Set-SfosSTAS` | Enables or disables STAS. |
+| `Get-SfosLiveUser` | Retrieves currently logged-in live users. |
+| `Connect-SfosLiveUser` | Logs an end user in at the firewall's live user tracking. |
+| `Disconnect-SfosLiveUser` | Logs an end user out of the firewall's live user tracking. |
 
-# Change only the sign-in prompt text, every other field is preserved
-Set-SfosCaptivePortalAppearance -UserPrompt "Please sign in"
+## Limitations
 
-# Retrieve the current direct web proxy authentication configuration
-Get-SfosDirectWebProxyAuthentication
+There is no `Set-SfosGuestUser`: an in-place update of a guest user is refused by this
+firmware. To change a guest user's fields, remove and recreate it with
+`Remove-SfosGuestUser` and `New-SfosGuestUser`.
 
-# Add a terminal server to the multi-user hosts list
-Add-SfosDirectWebProxyAuthenticationMember -Members "TS-Server1"
-```
+`Get-SfosGuestUserSettings` can stop returning the settings after a write to
+`Set-SfosGuestUserSettings` on this firmware, even though the write itself succeeds and the
+stored values are correct. When this happens, verify or change the settings through the web
+admin console instead.
 
-### SSO, STAS and Live User Sessions
+A user belongs to exactly one group at a time; the group membership is a field on the user,
+not a list on the group. `Add-SfosUserGroupMember` on a user who is already in another group
+moves that user into the new group rather than adding a second membership.
 
-```powershell
-# Create a user-facing Azure AD SSO server (no role mapping)
-$secret = ConvertTo-SecureString "MySecret" -AsPlainText -Force
-New-SfosAzureADSSO -ServerName "CorpEntra" -ApplicationID "fa7fc787-011e-4398-812f-3152d8843320" -TenantID "10657f8b-d541-41a5-8e25-a8d7cbb9d4dd" -ClientSecret $secret -RedirectURI "fw.example.invalid" -DisplayName upn -EmailAddress email -FallbackUserGroup "Open Group" -UserType User
+`Set-`/`Add-`/`Remove-SfosAdminAuthentication` change the firewall's own administrator login
+path; a wrong value can lock out the account used to fix it. Confirm the current
+configuration with `Get-SfosAdminAuthentication` and use `-WhatIf` before writing.
 
-# Enable STAS (Single Agent Transparent Authentication Suite)
-Set-SfosSTAS -ACTION Enable
+`Connect-SfosLiveUser` creates a permanent user account as a side effect of the login; the
+matching `Disconnect-SfosLiveUser` ends only the live session and does not remove that
+account. Remove it with `Remove-SfosUser` if it is not wanted.
 
-# Preview a live user login/logout - see Known limitations, these throw on this firmware
-Connect-SfosLiveUser -LiveUserName "jdoe" -IPAddress "10.0.0.55" -WhatIf
-Disconnect-SfosLiveUser -LiveUserName "jdoe" -IPAddress "10.0.0.55" -WhatIf
-```
+`Set-SfosDirectWebProxyAuthentication -PerConnectionAuth Enable` and
+`Set-SfosWebAuthenticationSettings -OpenWebpageInNewWindow Disable` are both rejected by this
+firmware.
 
-## Available Cmdlets (97 total)
+The authentication server list of firewall, VPN and SSL VPN authentication cannot be made
+empty; removing the last entry is rejected.
 
-### Authentifizierungsserver (20 functions)
-- `Get-SfosActiveDirectoryServer` - Retrieves ActiveDirectory authentication server objects from the Sophos Firewall.
-- `New-SfosActiveDirectoryServer` - Creates a new ActiveDirectory authentication server on the Sophos Firewall.
-- `Set-SfosActiveDirectoryServer` - Updates an existing ActiveDirectory authentication server on the Sophos Firewall.
-- `Remove-SfosActiveDirectoryServer` - Removes an ActiveDirectory authentication server from the Sophos Firewall.
-- `Get-SfosLDAPServer` - Retrieves LDAPServer authentication server objects from the Sophos Firewall.
-- `New-SfosLDAPServer` - Creates a new LDAPServer authentication server on the Sophos Firewall.
-- `Set-SfosLDAPServer` - Updates an existing LDAPServer authentication server on the Sophos Firewall.
-- `Remove-SfosLDAPServer` - Removes an LDAPServer authentication server from the Sophos Firewall.
-- `Get-SfosRADIUSServer` - Retrieves RADIUSServer authentication server objects from the Sophos Firewall.
-- `New-SfosRADIUSServer` - Creates a new RADIUSServer authentication server on the Sophos Firewall.
-- `Set-SfosRADIUSServer` - Updates an existing RADIUSServer authentication server on the Sophos Firewall.
-- `Remove-SfosRADIUSServer` - Removes a RADIUSServer authentication server from the Sophos Firewall.
-- `Get-SfosTACACSServer` - Retrieves TACACSServer authentication server objects from the Sophos Firewall.
-- `New-SfosTACACSServer` - Creates a new TACACSServer authentication server on the Sophos Firewall.
-- `Set-SfosTACACSServer` - Updates an existing TACACSServer authentication server on the Sophos Firewall.
-- `Remove-SfosTACACSServer` - Removes a TACACSServer authentication server from the Sophos Firewall.
-- `Get-SfosEDirectoryServer` - Retrieves EDirectory authentication server objects from the Sophos Firewall.
-- `New-SfosEDirectoryServer` - Creates a new EDirectory authentication server on the Sophos Firewall.
-- `Set-SfosEDirectoryServer` - Updates an existing EDirectory authentication server on the Sophos Firewall.
-- `Remove-SfosEDirectoryServer` - Removes an EDirectory authentication server from the Sophos Firewall.
+`Set-SfosSTAS` only switches STAS on or off. The `Collector`, `Settings` and `VpnZone`
+sub-blocks that `Get-SfosSTAS` returns once STAS is enabled have no matching write cmdlet in
+this module.
 
-### Benutzer und Gruppen (10 functions)
-- `Get-SfosUser` - Retrieves User objects from the Sophos Firewall.
-- `New-SfosUser` - Creates a new User on the Sophos Firewall.
-- `Set-SfosUser` - Updates an existing User object on the Sophos Firewall.
-- `Remove-SfosUser` - Removes a User object from the Sophos Firewall.
-- `Get-SfosUserGroup` - Retrieves UserGroup objects from the Sophos Firewall.
-- `New-SfosUserGroup` - Creates a new UserGroup on the Sophos Firewall.
-- `Set-SfosUserGroup` - Updates an existing UserGroup object on the Sophos Firewall.
-- `Remove-SfosUserGroup` - Removes a UserGroup object from the Sophos Firewall.
-- `Add-SfosUserGroupMember` - Adds members to an existing UserGroup object on the Sophos Firewall.
-- `Remove-SfosUserGroupMember` - Removes members from an existing UserGroup object on the Sophos Firewall.
-
-### Gast- und Clientless-Benutzer (14 functions)
-- `Get-SfosGuestUser` - Retrieves GuestUser objects from the Sophos Firewall.
-- `New-SfosGuestUser` - Creates a new GuestUser on the Sophos Firewall.
-- `Remove-SfosGuestUser` - Removes a GuestUser object from the Sophos Firewall.
-- `Get-SfosGuestUserSettings` - Retrieves the GuestUserSettings from the Sophos Firewall.
-- `Set-SfosGuestUserSettings` - Updates the GuestUserSettings on the Sophos Firewall.
-- `Get-SfosClientlessUser` - Retrieves ClientlessUser objects from the Sophos Firewall.
-- `New-SfosClientlessUser` - Creates a new ClientlessUser on the Sophos Firewall.
-- `Set-SfosClientlessUser` - Updates an existing ClientlessUser object on the Sophos Firewall.
-- `Remove-SfosClientlessUser` - Removes a ClientlessUser object from the Sophos Firewall.
-- `New-SfosClientlessUserRange` - Adds a range of ClientlessUser objects on the Sophos Firewall.
-- `Get-SfosSMSGateway` - Retrieves SMSGateway objects from the Sophos Firewall.
-- `New-SfosSMSGateway` - Creates a new SMSGateway on the Sophos Firewall.
-- `Set-SfosSMSGateway` - Updates an existing SMSGateway object on the Sophos Firewall.
-- `Remove-SfosSMSGateway` - Removes an SMSGateway object from the Sophos Firewall.
-
-### Einmalpasswörter (8 functions)
-- `Get-SfosOTPSettings` - Retrieves the OTPSettings singleton from the Sophos Firewall.
-- `Set-SfosOTPSettings` - Updates the OTPSettings singleton on the Sophos Firewall.
-- `Add-SfosOTPSettingsMember` - Adds usernames to the OTPSettings explicit OTP user list.
-- `Remove-SfosOTPSettingsMember` - Removes usernames from the OTPSettings explicit OTP user list.
-- `Get-SfosOTPTokens` - Retrieves OTPTokens objects from the Sophos Firewall.
-- `New-SfosOTPTokens` - Creates a new OTPTokens object on the Sophos Firewall.
-- `Set-SfosOTPTokens` - Updates an existing OTPTokens object on the Sophos Firewall.
-- `Remove-SfosOTPTokens` - Removes an OTPTokens object from the Sophos Firewall.
-
-### Firewall-Authentifizierung (14 functions)
-- `Get-SfosFirewallAuthenticationGlobalSettings` - Retrieves the FirewallAuthentication GlobalSettings from the Sophos Firewall.
-- `Set-SfosFirewallAuthenticationGlobalSettings` - Updates the FirewallAuthentication GlobalSettings on the Sophos Firewall.
-- `Get-SfosFirewallAuthenticationMethods` - Retrieves the FirewallAuthentication AuthenticationMethods from the Sophos Firewall.
-- `Set-SfosFirewallAuthenticationMethods` - Updates the FirewallAuthentication AuthenticationMethods on the Sophos Firewall.
-- `Add-SfosFirewallAuthenticationMethodsMember` - Adds authentication servers to the FirewallAuthentication AuthenticationMethods server list.
-- `Remove-SfosFirewallAuthenticationMethodsMember` - Removes authentication servers from the FirewallAuthentication AuthenticationMethods server list.
-- `Get-SfosFirewallAuthenticationNTLMSettings` - Retrieves the FirewallAuthentication NTLMSettings from the Sophos Firewall.
-- `Set-SfosFirewallAuthenticationNTLMSettings` - Updates the FirewallAuthentication NTLMSettings on the Sophos Firewall.
-- `Get-SfosFirewallAuthenticationCTASSettings` - Retrieves the FirewallAuthentication CTASSettings from the Sophos Firewall.
-- `Set-SfosFirewallAuthenticationCTASSettings` - Updates the FirewallAuthentication CTASSettings on the Sophos Firewall.
-- `Get-SfosFirewallAuthenticationiOSWebClientSettings` - Retrieves the FirewallAuthentication iOSWebClientSettings from the Sophos Firewall.
-- `Set-SfosFirewallAuthenticationiOSWebClientSettings` - Updates the FirewallAuthentication iOSWebClientSettings on the Sophos Firewall.
-- `Get-SfosSSORadiusAccount` - Retrieves the FirewallAuthentication SSORadiusAccount configuration from the Sophos Firewall.
-- `Set-SfosSSORadiusAccount` - Creates or replaces the FirewallAuthentication SSORadiusAccount configuration on the Sophos Firewall.
-
-### Admin/VPN/SSLVPN (12 functions)
-- `Get-SfosAdminAuthentication` - Retrieves the AdminAuthentication configuration from the Sophos Firewall.
-- `Set-SfosAdminAuthentication` - Updates the AdminAuthentication configuration on the Sophos Firewall.
-- `Add-SfosAdminAuthenticationMember` - Adds authentication servers to the AdminAuthentication server list.
-- `Remove-SfosAdminAuthenticationMember` - Removes authentication servers from the AdminAuthentication server list.
-- `Get-SfosVPNAuthentication` - Retrieves the VPNAuthentication configuration from the Sophos Firewall.
-- `Set-SfosVPNAuthentication` - Updates the VPNAuthentication configuration on the Sophos Firewall.
-- `Add-SfosVPNAuthenticationMember` - Adds authentication servers to the VPNAuthentication server list.
-- `Remove-SfosVPNAuthenticationMember` - Removes authentication servers from the VPNAuthentication server list.
-- `Get-SfosSSLVPNAuthentication` - Retrieves the SSLVPNAuthentication configuration from the Sophos Firewall.
-- `Set-SfosSSLVPNAuthentication` - Updates the SSLVPNAuthentication configuration on the Sophos Firewall.
-- `Add-SfosSSLVPNAuthenticationMember` - Adds authentication servers to the SSLVPNAuthentication server list.
-- `Remove-SfosSSLVPNAuthenticationMember` - Removes authentication servers from the SSLVPNAuthentication server list.
-
-### Web-Authentifizierung und Captive Portal (10 functions)
-- `Get-SfosWebAuthenticationSettings` - Retrieves the WebAuthentication WebAuthenticationSettings from the Sophos Firewall.
-- `Set-SfosWebAuthenticationSettings` - Updates the WebAuthentication WebAuthenticationSettings on the Sophos Firewall.
-- `Get-SfosCaptivePortalAppearance` - Retrieves the WebAuthentication CaptivePortalAppearance from the Sophos Firewall.
-- `Set-SfosCaptivePortalAppearance` - Updates the WebAuthentication CaptivePortalAppearance on the Sophos Firewall.
-- `Get-SfosDefaultCaptivePortal` - Retrieves the DefaultCaptivePortal configuration from the Sophos Firewall.
-- `Set-SfosDefaultCaptivePortal` - Updates the DefaultCaptivePortal configuration on the Sophos Firewall.
-- `Get-SfosDirectWebProxyAuthentication` - Retrieves the DirectWebProxyAuthentication configuration from the Sophos Firewall.
-- `Set-SfosDirectWebProxyAuthentication` - Updates the DirectWebProxyAuthentication configuration on the Sophos Firewall.
-- `Add-SfosDirectWebProxyAuthenticationMember` - Adds hosts to the DirectWebProxyAuthentication MultiUserHosts list.
-- `Remove-SfosDirectWebProxyAuthenticationMember` - Removes hosts from the DirectWebProxyAuthentication MultiUserHosts list.
-
-### SSO/STAS/Live-User (9 functions)
-- `Get-SfosAzureADSSO` - Retrieves Microsoft Entra ID (Azure AD) SSO server objects from the Sophos Firewall.
-- `New-SfosAzureADSSO` - Creates a new Microsoft Entra ID (Azure AD) SSO server on the Sophos Firewall.
-- `Set-SfosAzureADSSO` - Updates an existing Microsoft Entra ID (Azure AD) SSO server on the Sophos Firewall.
-- `Remove-SfosAzureADSSO` - Removes a Microsoft Entra ID (Azure AD) SSO server from the Sophos Firewall.
-- `Get-SfosSTAS` - Retrieves the STAS (Single Agent Transparent Authentication Suite) configuration from the Sophos Firewall.
-- `Set-SfosSTAS` - Enables or disables STAS (Single Agent Transparent Authentication Suite) on the Sophos Firewall.
-- `Get-SfosLiveUser` - Retrieves LiveUser objects (currently logged-in end users) from the Sophos Firewall.
-- `Connect-SfosLiveUser` - Logs an end user in at the Sophos Firewall's live/transparent-authentication user tracking.
-- `Disconnect-SfosLiveUser` - Logs an end user out of the Sophos Firewall's live/transparent-authentication user tracking.
-
-## Known limitations (SFOS 22.0)
-
-Measured against a live SFOS 22.0 appliance. Every read-modify-write `Set-*` in this module
-exists because of the general finding that an update replaces the whole entity - see the
-points below for the exceptions and additional defects found on top of that.
-
-- **`GuestUser` has no working update.** `operation="update"` is refused with `500`/`501`
-  depending on the identifying field tried, and `operation="edit"` (undocumented but accepted
-  by other entities in this API) answers `200` but silently creates a duplicate object instead
-  of changing the one named - the original guest user is left untouched. No `Set-SfosGuestUser`
-  cmdlet exists; to change a guest user's fields, remove and recreate it with
-  `Remove-SfosGuestUser` and `New-SfosGuestUser`.
-- **`Get-`/`Set-SfosGuestUserSettings` break the read path on this firmware.** Every call that
-  reached the lab appliance - including a pure no-op update resending the values just read
-  back - made every subsequent `Get-SfosGuestUserSettings` answer `<Status>Transaction fail</Status>`
-  (no code attribute) instead of the settings, with no self-healing observed after 30+ seconds.
-  The write itself still answers `200`. This looks like a firmware-side bug in the settings
-  singleton's own transaction handling; both cmdlets are implemented documentation-faithful but
-  are not usable on this firmware without the ability to verify the result through the web
-  admin console immediately afterward.
-- **Group membership lives on the user, not on the group, and is a single value.** Writing
-  `GroupMembers` under `UserGroup` answers `200` and does nothing. The `Group` field of a
-  `User` holds exactly one group name, so a user belongs to exactly one group at a time -
-  `Add-SfosUserGroupMember`/`Add-SfosUserGroupMember` on a user already in another group moves
-  it rather than adding a second membership.
-- **`Set-`/`Add-`/`Remove-SfosAdminAuthentication` were deliberately not verified against the
-  appliance.** These fields carry the firewall's own management/administrator login path;
-  a wrong write could lock out the API user needed to fix it. The cmdlets are implemented
-  strictly to the documented request shape and to the pattern confirmed for
-  `FirewallAuthentication`, but the write itself is unconfirmed - see the cmdlet `.NOTES`.
-- **`Connect-SfosLiveUser` leaves a persistent `User` record behind.** Both cmdlets work
-  (they target the documented `LiveUserLogin`/`LiveUserLogout` roots), but a login creates
-  a permanent user object (`Group=Open Group`) as a measured side effect, and
-  `Disconnect-SfosLiveUser` ends only the live session - the user record survives and has
-  to be removed with `Remove-SfosUser` if it is not wanted.
-- **Two specific fields are rejected outright.** `Set-SfosDirectWebProxyAuthentication
-  -PerConnectionAuth Enable` and `Set-SfosWebAuthenticationSettings -OpenWebpageInNewWindow
-  Disable` are both answered with `501` and an empty `<InvalidParams/>` - no field is named as
-  invalid, so nothing can be narrowed down further client-side.
-- **The authentication server lists of firewall, VPN and SSL VPN authentication must never
-  become empty.** Removing the last entry answers `500` and changes nothing; there is no
-  client-side guard against attempting it.
-- **`Set-SfosSTAS` covers only enable/disable.** The `Collector`, `Settings` and `VpnZone`
-  sub-blocks that `Get-SfosSTAS` exposes once STAS is enabled are read-only in this module;
-  writing them would need per-sub-block status verification that was never measured live.
-- **`Remove-Sfos*` reports a non-existent object inconsistently.** Depending on the entity, an
-  attempt to remove an object that is not there answers `200` "Configuration applied
-  successfully" (e.g. `Remove-SfosAzureADSSO`), `526` "no record" or `528` "Trying to update
-  default entities which are not editable" - never a message that actually says "not found".
-  None of the `Remove-*` cmdlets in this module pre-check existence, so the caller cannot
-  distinguish "removed" from "never existed" from the response alone.
-
-## Error Handling
-
-```powershell
-try {
-    # Connect with proper error handling
-    Connect-SfosFirewall -Firewall "192.168.1.1" -Port 4444 -Credential (Get-Credential) -SkipCertificateCheck
-
-    # Retrieve a specific user with error handling
-    $user = Get-SfosUser -UsernameLike "jdoe" -ErrorAction Stop
-    Write-Output "Found user: $($user.AccountName) - Group: $($user.Group)"
-} catch {
-    Write-Error "Failed to retrieve user: $_"
-    $_.Exception
-} finally {
-    Disconnect-SfosFirewall
-}
-```
-
-## Troubleshooting
-
-- **Connection Issues**: Ensure firewall IP, port (4444 default), and credentials are correct
-- **Object Not Found**: Use `Get-SfosUser | Select-Object AccountName` to list all available objects
-- **Permission Denied**: Verify API user has proper role assignments on the firewall
-- **Invalid Parameters**: Check exact parameter names - functions are entity-specific (User, UserGroup, GuestUser, ClientlessUser, ...)
-- **A user unexpectedly moved between groups**: See Known limitations - group membership is a single value on the user, not a list on the group
-- **`Set-SfosGuestUserSettings` breaks `Get-SfosGuestUserSettings`**: See Known limitations - this is a known, unresolved firmware limitation, not a module defect
-- **A user object appears after `Connect-SfosLiveUser`**: See Known limitations - the login creates a persistent user record that `Disconnect-SfosLiveUser` does not remove; delete it with `Remove-SfosUser`
-
-## See Also
-
-- [SophosFirewall.Core](../SophosFirewall.Core/README.md) - Core connectivity functions (Connect-SfosFirewall, Disconnect-SfosFirewall, Invoke-SfosApi)
-- [Sophos API Documentation](https://docs.sophos.com/nsg/sophos-firewall/22.0/api/) - Official Sophos firewall REST API reference
-- [PowerShell Gallery](https://www.powershellgallery.com/packages/SophosFirewall.Authentication) - Download module from PSGallery
-
-## Author
-
-Jan Weis - www.it-explorations.de
+A `Remove-*` call against an object that does not exist can answer success on some entities
+in this module and a not-found-style error on others; none of the `Remove-*` cmdlets here
+check existence first.
 
 ## License
+
+MIT License - Copyright (c) 2025 Jan Weis
+
+## Links
+
+- [SophosFirewall.Core](../SophosFirewall.Core/README.md)
+- [Sophos Firewall API Documentation](https://docs.sophos.com/nsg/sophos-firewall/22.0/api/)

@@ -1,4 +1,4 @@
-@{
+﻿@{
     RootModule           = 'SophosFirewall.Web.psm1'
     ModuleVersion        = '1.1.0'
     GUID                 = '77a63a21-54db-4f49-a7c7-632f520bd61b'
@@ -75,10 +75,9 @@
 
     PrivateData          = @{
         PSData = @{
-            Tags         = @('Sophos', 'Firewall', 'API', 'XGS', 'SFOS', 'Web', 'WebFilter', 'Security')
-            LicenseUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/blob/main/Modules/SophosFirewall.Web/LICENSE.txt'
-            ProjectUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/tree/main/Modules/SophosFirewall.Web'
-            ReleaseNotes = '1.1.0: Adds the -Session parameter to all 50 cmdlets for multi-session use (requires SophosFirewall.Core 1.3.0).'
+            Tags       = @('Sophos', 'Firewall', 'API', 'XGS', 'SFOS', 'Web', 'WebFilter', 'Security')
+            LicenseUri = 'https://github.com/janweis/SophosFirewall-PowerShell/blob/main/Modules/SophosFirewall.Web/LICENSE.txt'
+            ProjectUri = 'https://github.com/janweis/SophosFirewall-PowerShell/tree/main/Modules/SophosFirewall.Web'
         }
     }
 }

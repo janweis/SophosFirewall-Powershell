@@ -1,317 +1,136 @@
-# SophosFirewall.Firewall Module
+# SophosFirewall.Firewall
 
-> **Security warning.** These cmdlets change the rule base of a live firewall: firewall
-> rules, rule groups, NAT rules and SSL/TLS inspection rules. A rule inserted at the wrong
-> position, or an update that drops a rule's position, changes which traffic the appliance
-> permits - immediately, with no confirmation beyond `ShouldProcess`. Every write cmdlet in
-> this module supports `-WhatIf`; use it before running an unfamiliar call against a
-> production firewall, especially anything that touches `-Position`, `-After` or `-Before`.
+`SophosFirewall.Firewall` manages the rule base of a Sophos Firewall: firewall rules
+(network policies), firewall rule groups, NAT rules, SSL/TLS inspection rules and the
+device-wide SSL/TLS inspection settings. It is for administrators who script rule
+maintenance instead of editing the rule base in the web admin.
 
-## Overview
+These cmdlets change what traffic the appliance permits, immediately and with no
+confirmation beyond `ShouldProcess`. A rule inserted at the wrong position, or an update
+that drops a rule's position, changes traffic handling as soon as it runs. Every write
+cmdlet supports `-WhatIf`; use it before running an unfamiliar call against a production
+firewall, especially one that touches `-Position`, `-After` or `-Before`.
 
-The **Firewall** module provides PowerShell cmdlets for the **PROTECT > Firewall** area of
-the Sophos XGS / SFOS 22.0 API documentation; the SFOS web admin presents the same area as
-**Rules and policies**. With 21 functions, it manages firewall rules (network policies),
-firewall rule groups, NAT rules, SSL/TLS inspection rules and the device-wide SSL/TLS
-inspection settings. Requires `SophosFirewall.Core`.
+## Requirements
 
-## Features
-
-- **Firewall Rules**: Network-policy security rules, with a builder for the policy subtree
-- **Firewall Rule Groups**: Named groupings of firewall rules, with member management
-- **NAT Rules**: Source and destination NAT policies
-- **SSL/TLS Inspection Rules**: Per-traffic decrypt/exempt/deny rules
-- **SSL/TLS Inspection Settings**: Device-wide TLS engine configuration (singleton)
-- **API Integration**: Full integration with the Sophos XGS/SFOS firewall XML API
+- `SophosFirewall.Core` (installed automatically as a dependency)
+- PowerShell 5.1 or 7.x
+- HTTPS access to the firewall's management API
+- A firewall account with permission to read and write the rule base
 
 ## Installation
 
 ```powershell
-Import-Module -Name SophosFirewall.Firewall
+Install-Module SophosFirewall.Firewall -Repository PSGallery -Scope CurrentUser
 ```
-
-Or with explicit path:
-
-```powershell
-Import-Module -Name "C:\Path\To\SophosFirewall.Firewall.psd1"
-```
-
-## Requirements
-
-- PowerShell 5.1 or higher (Windows PowerShell)
-- PowerShell 7.0+ (PowerShell Core) recommended
-- SophosFirewall.Core module (automatically loaded as dependency)
-- Network access to Sophos XGS / SFOS firewall (version 22.0)
-- API credentials with appropriate permissions
 
 ## Quick Start
 
-### Establish Connection
-
 ```powershell
-Connect-SfosFirewall -Firewall "192.168.1.1" -Port 4444 -Credential (Get-Credential) -SkipCertificateCheck
-```
+Connect-SfosFirewall -Firewall '192.0.2.10' -Port 4444 -Credential (Get-Credential) -SkipCertificateCheck
 
-### Multi-Session Use
-
-Every cmdlet accepts `-Session`, a session object or a registered name, to target a
-specific firewall without switching the stored default connection:
-
-```powershell
-Connect-SfosFirewall -Firewall "fw1.example.test" -Credential (Get-Credential) -Name fw1
-Connect-SfosFirewall -Firewall "fw2.example.test" -Credential (Get-Credential) -Name fw2 -NoDefault
-
-# Read a NAT rule's current fields from fw1, then apply the same fields on fw2
-Get-SfosNATRule -Session fw1 -NameLike "SNAT-LAN-to-WAN" |
-    Set-SfosNATRule -Session fw2 -Confirm:$false
-```
-
-### Firewall Rule Management
-
-```powershell
-# List rules in evaluation order
 Get-SfosFirewallRule | Format-Table Name, Status, Position, PolicyType
 
-# Build the NetworkPolicy subtree, then preview a new disabled rule at the bottom
-$policy = New-SfosFirewallRuleNetworkPolicy -Action Accept -SourceZone "LAN" -DestinationZone "WAN"
-New-SfosFirewallRule -Name "Allow-LAN-to-WAN" -Status Disable -Position Bottom -PolicyType Network -NetworkPolicy $policy -WhatIf
+$policy = New-SfosFirewallRuleNetworkPolicy -Action Accept -SourceZone 'LAN' -DestinationZone 'WAN'
+New-SfosFirewallRule -Name 'Allow-LAN-to-WAN' -Status Disable -Position Bottom -PolicyType Network -NetworkPolicy $policy -WhatIf
+New-SfosFirewallRule -Name 'Allow-LAN-to-WAN' -Status Disable -Position Bottom -PolicyType Network -NetworkPolicy $policy
 
-# Create it for real
-New-SfosFirewallRule -Name "Allow-LAN-to-WAN" -Status Disable -Position Bottom -PolicyType Network -NetworkPolicy $policy
-
-# Enable it - Position, After/Before and NetworkPolicy are preserved
-Get-SfosFirewallRule -NameLike "Allow-LAN-to-WAN" | Set-SfosFirewallRule -Status Enable
-
-# Preview removal
-Remove-SfosFirewallRule -Name "Allow-LAN-to-WAN" -WhatIf
+Get-SfosFirewallRule -NameLike 'Allow-LAN-to-WAN' | Set-SfosFirewallRule -Status Enable
+Remove-SfosFirewallRule -Name 'Allow-LAN-to-WAN' -WhatIf
 ```
 
-### Changing a single NetworkPolicy field
+### Changing a single field on an existing rule
 
-A rule carries what it actually does in its `NetworkPolicy` subtree - roughly 30 fields such
-as `Action`, the zone and service lists, `ScanVirus`, `IntrusionPrevention` and
-`ApplicationControl`. `Get-SfosFirewallRule` returns it as a nested object, and
-`Set-SfosFirewallRule` accepts each of those fields as its own parameter. Only the fields you
-pass are changed; everything else is read from the rule and written back unchanged.
+A rule keeps what it actually does in its `NetworkPolicy` subtree - around 30 fields such as
+`Action`, the zone and service lists, `ScanVirus`, `IntrusionPrevention` and
+`ApplicationControl`. `Set-SfosFirewallRule` accepts each of these as its own parameter; only
+the fields you pass change, everything else is read from the rule and kept.
 
 ```powershell
-# Turn on virus scanning. Nothing else about the rule changes.
-Set-SfosFirewallRule -Name "Allow-LAN-to-WAN" -ScanVirus Enable
-
-# Several fields at once
-Set-SfosFirewallRule -Name "Allow-LAN-to-WAN" -LogTraffic Enable -IntrusionPrevention "lantowan_general"
-
-# Inspect the current policy
-(Get-SfosFirewallRule -NameLike "Allow-LAN-to-WAN").NetworkPolicy
+Set-SfosFirewallRule -Name 'Allow-LAN-to-WAN' -ScanVirus Enable
+Set-SfosFirewallRule -Name 'Allow-LAN-to-WAN' -LogTraffic Enable -IntrusionPrevention 'lantowan_general'
 ```
 
-Do **not** build a fresh policy with `New-SfosFirewallRuleNetworkPolicy` just to change one
-field. That cmdlet applies its own defaults to everything you leave out, so a policy built to
-switch on virus scanning would also reset intrusion prevention, application control and the
-schedule. To start from an existing policy instead, pipe it in - then only the parameters you
-supply override it:
+Do not build a fresh policy with `New-SfosFirewallRuleNetworkPolicy` to change a single
+field on an existing rule - it applies its own defaults to every field you leave out. To
+start from the current policy instead, pipe it in first:
 
 ```powershell
-$policy = (Get-SfosFirewallRule -NameLike "Allow-LAN-to-WAN").NetworkPolicy |
+$policy = (Get-SfosFirewallRule -NameLike 'Allow-LAN-to-WAN').NetworkPolicy |
     New-SfosFirewallRuleNetworkPolicy -ScanVirus Enable
-
-# -NetworkPolicy replaces the whole subtree, so pass a complete policy
-Set-SfosFirewallRule -Name "Allow-LAN-to-WAN" -NetworkPolicy $policy
+Set-SfosFirewallRule -Name 'Allow-LAN-to-WAN' -NetworkPolicy $policy
 ```
 
-### Firewall Rule Group Management
+### Rule groups, NAT rules, SSL/TLS inspection
 
 ```powershell
-# Get all rule groups
-Get-SfosFirewallRuleGroup -NameLike "Outbound"
+New-SfosFirewallRuleGroup -Name 'Outbound' -Description 'Outbound rules'
+Add-SfosFirewallRuleGroupMember -Name 'Outbound' -Members 'Allow-LAN-to-WAN'
+Remove-SfosFirewallRuleGroup -Name 'Outbound' -WhatIf
 
-# Create an empty group
-New-SfosFirewallRuleGroup -Name "Outbound" -Description "Outbound rules"
+New-SfosNATRule -Name 'SNAT-LAN-to-WAN' -TranslatedSource 'MASQ' -Status Disable -Position Bottom
+Get-SfosNATRule -NameLike 'SNAT-LAN-to-WAN' | Set-SfosNATRule -Status Enable
 
-# Add a member
-Add-SfosFirewallRuleGroupMember -Name "Outbound" -Members "Allow-LAN-to-WAN"
-
-# Inspect membership
-(Get-SfosFirewallRuleGroup -NameLike "Outbound").SecurityPolicyList
-
-# Update the description, membership is preserved
-Set-SfosFirewallRuleGroup -Name "Outbound" -Description "Updated description"
-
-# Remove a member - see Known Firmware Limitations, this can fail even though the firewall answers 200
-Remove-SfosFirewallRuleGroupMember -Name "Outbound" -Members "Allow-LAN-to-WAN"
-
-# Delete the (now empty) group
-Remove-SfosFirewallRuleGroup -Name "Outbound"
-```
-
-### NAT Rule Management
-
-```powershell
-# Get all NAT rules
-Get-SfosNATRule -NameLike "SNAT"
-
-# Create a disabled masquerade rule at the bottom of the rule list
-New-SfosNATRule -Name "SNAT-LAN-to-WAN" -TranslatedSource "MASQ" -Status Disable -Position Bottom
-
-# Update only the description; Position and every translation field are preserved
-Set-SfosNATRule -Name "SNAT-LAN-to-WAN" -Description "Masquerade LAN to WAN"
-
-# Enable it via the pipeline
-Get-SfosNATRule -NameLike "SNAT-LAN-to-WAN" | Set-SfosNATRule -Status Enable
-
-# Preview removal
-Remove-SfosNATRule -Name "SNAT-LAN-to-WAN" -WhatIf
-```
-
-### SSL/TLS Inspection Rule Management
-
-```powershell
-# Read existing rules - the built-in default rule is flagged IsDefault=Yes
 Get-SfosSSLTLSInspectionRule | Format-Table Name, IsDefault, Enable, DecryptAction
-
-# Build a website reference and preview a new exemption rule.
-# See Known Firmware Limitations: New-SfosSSLTLSInspectionRule is documentation-faithful
-# but every tested call was rejected with 501 on the lab firewall.
-$website = [PSCustomObject]@{ Name = "Banking"; Type = "Web Category" }
-New-SfosSSLTLSInspectionRule -Name "Bypass-Banking" -Enable No -DecryptAction "Do not decrypt" -Website $website -WhatIf
-
-# Update a non-default rule - Set-/Remove- refuse rules with IsDefault=Yes
-Set-SfosSSLTLSInspectionRule -Name "Bypass-Banking" -Enable No -WhatIf
-
-# Preview removal of a non-default rule
-Remove-SfosSSLTLSInspectionRule -Name "Bypass-Banking" -WhatIf
-```
-
-### SSL/TLS Inspection Settings
-
-The settings functions manage a device-wide singleton: no `-Name`, no `New-`/`Remove-`,
-only `Get-` and `Set-`. Every field acts firewall-wide - see Known Firmware Limitations
-before running the `Set-` example without `-WhatIf`.
-
-```powershell
 Get-SfosSSLTLSInspectionSettings
-
-# Preview a change to the RSA re-signing CA only; every other field is preserved
-Set-SfosSSLTLSInspectionSettings -RSACA "MyIssuingCA" -WhatIf
 ```
 
-## Available Cmdlets (21 total)
+## Cmdlets
 
-### Firewall Rule Management (5 functions)
-- `Get-SfosFirewallRule` - Retrieve FirewallRule objects
-- `New-SfosFirewallRule` - Create a new firewall rule (PolicyType=Network only)
-- `Set-SfosFirewallRule` - Update an existing firewall rule
-- `Remove-SfosFirewallRule` - Delete a firewall rule
-- `New-SfosFirewallRuleNetworkPolicy` - Build a NetworkPolicy subtree for New-/Set-SfosFirewallRule (no API call)
+| Cmdlet | Purpose |
+|---|---|
+| `Get-SfosFirewallRule` | Retrieves firewall rules. |
+| `New-SfosFirewallRule` | Creates a firewall rule. |
+| `Set-SfosFirewallRule` | Updates a firewall rule. |
+| `Remove-SfosFirewallRule` | Removes a firewall rule. |
+| `New-SfosFirewallRuleNetworkPolicy` | Builds a NetworkPolicy object for `New-`/`Set-SfosFirewallRule`. |
+| `Get-SfosFirewallRuleGroup` | Retrieves firewall rule groups. |
+| `New-SfosFirewallRuleGroup` | Creates a firewall rule group. |
+| `Set-SfosFirewallRuleGroup` | Updates a firewall rule group. |
+| `Remove-SfosFirewallRuleGroup` | Removes a firewall rule group. |
+| `Add-SfosFirewallRuleGroupMember` | Adds rules to a firewall rule group. |
+| `Remove-SfosFirewallRuleGroupMember` | Removes rules from a firewall rule group. |
+| `Get-SfosNATRule` | Retrieves NAT rules. |
+| `New-SfosNATRule` | Creates a NAT rule. |
+| `Set-SfosNATRule` | Updates a NAT rule. |
+| `Remove-SfosNATRule` | Removes a NAT rule. |
+| `Get-SfosSSLTLSInspectionRule` | Retrieves SSL/TLS inspection rules. |
+| `New-SfosSSLTLSInspectionRule` | Creates an SSL/TLS inspection rule. |
+| `Set-SfosSSLTLSInspectionRule` | Updates an SSL/TLS inspection rule. |
+| `Remove-SfosSSLTLSInspectionRule` | Removes an SSL/TLS inspection rule. |
+| `Get-SfosSSLTLSInspectionSettings` | Reads the device-wide SSL/TLS inspection settings. |
+| `Set-SfosSSLTLSInspectionSettings` | Updates the device-wide SSL/TLS inspection settings. |
 
-### Firewall Rule Group Management (6 functions)
-- `Get-SfosFirewallRuleGroup` - Retrieve FirewallRuleGroup objects
-- `New-SfosFirewallRuleGroup` - Create a new rule group
-- `Set-SfosFirewallRuleGroup` - Update an existing rule group
-- `Remove-SfosFirewallRuleGroup` - Delete a rule group
-- `Add-SfosFirewallRuleGroupMember` - Add firewall rules to a group
-- `Remove-SfosFirewallRuleGroupMember` - Remove firewall rules from a group (append-only on this firmware, see below)
+## Limitations
 
-### NAT Rule Management (4 functions)
-- `Get-SfosNATRule` - Retrieve NATRule objects
-- `New-SfosNATRule` - Create a new NAT rule
-- `Set-SfosNATRule` - Update an existing NAT rule
-- `Remove-SfosNATRule` - Delete a NAT rule
+`New-`/`Set-SfosFirewallRule` support `PolicyType Network` only; `User` and `HTTPBased`
+rules are not built by this module. Creating a rule with `-Position Bottom` does not read
+back as `Bottom` afterwards - the firewall reports it as `After` the rule that was last in
+the list at creation time.
 
-### SSL/TLS Inspection Rule Management (4 functions)
-- `Get-SfosSSLTLSInspectionRule` - Retrieve SSLTLSInspectionRule objects
-- `New-SfosSSLTLSInspectionRule` - Create a new SSL/TLS inspection rule (unverified, see below)
-- `Set-SfosSSLTLSInspectionRule` - Update an existing rule (refuses IsDefault=Yes)
-- `Remove-SfosSSLTLSInspectionRule` - Delete a rule (refuses IsDefault=Yes)
+A firewall rule group's member list only grows on update: removing a name from the list you
+send does not remove it from the group. `Remove-SfosFirewallRuleGroupMember` reads the group
+back after the update and throws if the members it was asked to remove are still present. A
+rule leaves its group automatically when the rule itself is deleted, and a group that still
+has members cannot be deleted.
 
-### SSL/TLS Inspection Settings (2 functions, 1 Get/Set pair)
-- `Get-SfosSSLTLSInspectionSettings` / `Set-SfosSSLTLSInspectionSettings` - Device-wide TLS engine configuration
+`Set-/Remove-SfosSSLTLSInspectionRule` refuse to touch a rule with `IsDefault=Yes` - the
+built-in exemption rule has no undo if altered or removed.
 
-## Known Firmware Limitations (SFOS 22.0)
+`New-`/`Set-SfosNATRule` do not implement `OriginalSourceNetworks`,
+`OriginalDestinationNetworks`, `OriginalServices`, `NATMethod`, `HealthCheck`, `LoadBalance`
+or `InterfaceNATPolicyList`. Running `Set-SfosNATRule` against a rule that uses any of these
+fields removes them, because an update replaces the whole rule.
 
-Measured against a live SFOS 22.0 appliance. Every read-modify-write `Set-*` in this module
-exists because of the general finding that an update replaces the whole entity - see the
-points below for the exceptions and additional defects found on top of that.
-
-- **Documentation folder names differ from the wire element names.** The doc folder is
-  called `SecurityPolicy`, but the XML element is `FirewallRule`; a `<SecurityPolicy>` root
-  answers `529 Input request module is Invalid`. The same applies to `FirewallGroup` (folder)
-  vs. `FirewallRuleGroup` (element), `TLSRule` vs. `SSLTLSInspectionRule`, and `TLSSettings`
-  vs. `SSLTLSInspectionSettings`.
-- **Only `PolicyType Network` is supported.** `User` and `HTTPBased` are documented with
-  their own subtrees (`UserPolicy`, `HTTPBasedPolicy`), but neither was observed on the lab
-  firewall and could not be verified. `New-`/`Set-SfosFirewallRule` refuse both rather than
-  guessing at fields nobody has confirmed.
-- **`Position Bottom` is normalised by the firewall to `After` anchored on the last existing
-  rule.** A `Get` immediately following a `New-SfosFirewallRule -Position Bottom` therefore
-  does not return `Position=Bottom` - it returns `After` with a `Name`.
-- **The wire element for traffic shaping is misspelled.** `TrafficShappingPolicy`, with a
-  doubled p, is what the live `NetworkPolicy` subtree actually uses; the documentation spells
-  it correctly (`TrafficShapingPolicy`). Sending the correct spelling would land on an unknown
-  element and silently fail to set the field.
-- **A firewall rule group's member list is append-only on update.** A shorter list, an empty
-  `<SecurityPolicyList/>` and an omitted wrapper are all answered with status 200, and no
-  member disappears - only the order changes. `Remove-SfosFirewallRuleGroupMember` therefore
-  reads the group back after the update and throws if the members it was asked to remove are
-  still present, instead of reporting a success the firewall did not perform. A rule leaves
-  its group when the rule itself is deleted; a group with members cannot be deleted.
-- **`New-SfosSSLTLSInspectionRule` does not work on this firmware.** Every attempt - more than
-  20 variants, including a byte-for-byte copy of a rule the appliance itself returned, and
-  both documented field orderings - ended in `501`, most often with an empty
-  `<InvalidParams/>`. The minimal case names `IsDefault` as the invalid field, even though the
-  documentation marks it read-only. The cmdlet is implemented strictly to the documented
-  request shape but is unverified as working.
-- **`Set-`/`Remove-SfosSSLTLSInspectionRule` refuse to touch rules with `IsDefault=Yes`.** The
-  firewall's built-in exemption rule ('Exclusions by website or category') has no undo if
-  altered or removed, so both cmdlets read the object first and stop with a named error rather
-  than risk it.
-- **`Set-SfosSSLTLSInspectionSettings` was verified structurally only, not against a live
-  write.** Every field of this entity is device-wide and applies immediately to every HTTPS
-  connection through the firewall; a wrong value can drop or reject traffic that was
-  previously allowed, or turn TLS inspection off firewall-wide. The generated XML was
-  inspected (e.g. via `-WhatIf`), but the write path itself was never executed.
-- **`New-`/`Set-SfosNATRule` do not implement every documented field.**
-  `OriginalSourceNetworks`, `OriginalDestinationNetworks`, `OriginalServices`, `NATMethod`,
-  `HealthCheck`, `LoadBalance` and `InterfaceNATPolicyList` are not sent by this module.
-  Because an update replaces the whole entity, running `Set-SfosNATRule` against a rule that
-  uses any of these fields would clear them.
-
-## Error Handling
-
-```powershell
-try {
-    # Connect with proper error handling
-    Connect-SfosFirewall -Firewall "192.168.1.1" -Port 4444 -Credential (Get-Credential) -SkipCertificateCheck
-
-    # Retrieve a specific firewall rule with error handling
-    $rule = Get-SfosFirewallRule -NameLike "Allow-LAN-to-WAN" -ErrorAction Stop
-    Write-Output "Found rule: $($rule.Name) - Status: $($rule.Status), Position: $($rule.Position)"
-} catch {
-    Write-Error "Failed to retrieve firewall rule: $_"
-    $_.Exception
-} finally {
-    Disconnect-SfosFirewall
-}
-```
-
-## Troubleshooting
-
-- **Connection Issues**: Ensure firewall IP, port (4444 default), and credentials are correct
-- **Object Not Found**: Use `Get-SfosFirewallRule | Select-Object Name` to list all available objects
-- **Permission Denied**: Verify API user has proper role assignments on the firewall
-- **Invalid Parameters**: Check exact parameter names - functions are entity-specific (FirewallRule, FirewallRuleGroup, NATRule, SSLTLSInspectionRule, ...)
-- **A Set that appears to move a rule unexpectedly**: Check whether `-Position` was passed; if omitted, the existing Position/After/Before is always preserved - see Known Firmware Limitations for the `Bottom` -> `After` normalisation
-- **Members not removed from a rule group**: See Known Firmware Limitations - the member list is append-only on this firmware; `Remove-SfosFirewallRuleGroupMember` reports this as an error rather than a silent no-op
-- **`New-SfosSSLTLSInspectionRule` fails with 501**: See Known Firmware Limitations - this is a known, unresolved firmware limitation, not a module defect
-
-## See Also
-
-- [SophosFirewall.Core](../SophosFirewall.Core/README.md) - Core connectivity functions (Connect-SfosFirewall, Disconnect-SfosFirewall, Invoke-SfosApi)
-- [Sophos API Documentation](https://docs.sophos.com/nsg/sophos-firewall/22.0/api/) - Official Sophos firewall REST API reference
-- [PowerShell Gallery](https://www.powershellgallery.com/packages/SophosFirewall.Firewall) - Download module from PSGallery
-
-## Author
-
-Jan Weis - www.it-explorations.de
+`Set-SfosSSLTLSInspectionSettings` applies device-wide, to every HTTPS connection through
+the firewall; a wrong value can drop previously allowed traffic or turn off TLS inspection
+entirely. Preview the call with `-WhatIf` first.
 
 ## License
+
+MIT License - Copyright (c) 2025 Jan Weis
+
+## Links
+
+- [SophosFirewall.Core](../SophosFirewall.Core/README.md)
+- [Sophos Firewall API Documentation](https://docs.sophos.com/nsg/sophos-firewall/22.0/api/)

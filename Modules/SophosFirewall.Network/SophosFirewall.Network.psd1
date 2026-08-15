@@ -1,4 +1,4 @@
-@{
+﻿@{
     RootModule           = 'SophosFirewall.Network.psm1'
     ModuleVersion        = '1.1.0'
     GUID                 = 'c0ed538a-3f1f-4dbb-9f42-672fb8f40f4c'
@@ -126,7 +126,6 @@
             Tags         = @('Sophos', 'Firewall', 'API', 'XGS', 'SFOS', 'Network', 'DNS', 'DHCP', 'VLAN', 'Security')
             LicenseUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/blob/main/Modules/SophosFirewall.Network/LICENSE.txt'
             ProjectUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/tree/main/Modules/SophosFirewall.Network'
-            ReleaseNotes = '1.1.0: Adds the -Session parameter to all 91 cmdlets for multi-session use (requires SophosFirewall.Core 1.3.0).'
         }
     }
 }

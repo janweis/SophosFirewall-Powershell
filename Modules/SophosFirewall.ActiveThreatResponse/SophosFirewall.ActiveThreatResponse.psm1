@@ -2,53 +2,20 @@
 #requires -Modules SophosFirewall.Core
 
 <#
-        .SYNOPSIS
-        Manages Active Threat Response settings on Sophos Firewall: Sophos X-Ops threat feeds (ATP) and third-party threat feeds.
+    SophosFirewall.ActiveThreatResponse
+    ====================================
+    PowerShell module for the Sophos Firewall (SFOS) PROTECT > Active threat response area
+    via the XML API: the device-wide ATP (Sophos X-Ops threat feeds) singleton, including its
+    HostException and ThreatException lists, and ThirdPartyFeed objects.
 
-        .DESCRIPTION
-        PowerShell module for the PROTECT > Active threat response area of the Sophos XGS / SFOS 22.0
-        XML API.
+    Total Functions: 10 - see README.md for the full cmdlet table.
 
-        This module provides functions to read and update the device-wide ATP (Sophos X-Ops threat
-        feeds) singleton, including its HostException and ThreatException lists, and to create, read,
-        update, and delete ThirdPartyFeed objects.
+    Requires SophosFirewall.Core (>= 1.3.0) for transport, session state and status
+    evaluation. All XML building and entity parsing happens here; all HTTP(S) happens
+    in Core.
 
-        All functions support pipeline input, filtering, and connection context management.
-        Use Connect-SfosFirewall once, then call functions without connection parameters.
-
-        .EXAMPLE
-        # Connect and read the device-wide ATP configuration
-        Connect-SfosFirewall -Firewall "192.168.1.1" -Credential (Get-Credential) -SkipCertificateCheck
-        Get-SfosATPSettings
-
-        .EXAMPLE
-        # List every configured third-party threat feed
-        Get-SfosThirdPartyFeed
-
-        .NOTES
-        Module Name: SophosFirewall.ActiveThreatResponse
-        Author: Jan Weis
-        Homepage: https://www.it-explorations.de
-        Version: 1.0.0
-        PowerShell Version: 5.1+
-
-        Dependencies:
-        - SophosFirewall.Core module (provides Connect-SfosFirewall, Invoke-SfosApi, etc.)
-
-        API Compatibility:
-        - Sophos SFOS 22.0
-        - Sophos XGS Firewall Series
-
-        Total Functions: 10
-        - 6 ATP (Sophos X-Ops threat feeds) functions, including HostException/ThreatException members
-        - 4 ThirdPartyFeed functions
-
-        Behaviour that differs from the vendor documentation was measured against a live appliance
-        and is recorded in the .NOTES of the affected function. See the module README for the
-        cmdlet table and known behaviour/limitations.
-
-        .LINK
-        https://docs.sophos.com/nsg/sophos-firewall/22.0/API/
+    API reference:
+    https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
 #>
 
 #region ATP
@@ -59,54 +26,63 @@
 
         .DESCRIPTION
         Queries the Sophos Firewall XML API for the ATP singleton (PROTECT > Active threat
-        response > Sophos X-Ops threat feeds - the wire element and doc folder are still named
-        ATP, a rebranding leftover from "Advanced Threat Protection" [measured/doc]). There is
-        exactly one instance of this element per firewall. By default the cmdlet returns a
-        PowerShell-friendly object. Use -AsXml to return the raw XML node.
+        response > Sophos X-Ops threat feeds - the wire element and API documentation folder
+        are still named ATP, a naming leftover from the feature's former name "Advanced Threat
+        Protection"). There is exactly one instance of this element per firewall. By default
+        the cmdlet returns a PowerShell-friendly object. Use -AsXml to return the raw XML node.
+        The cmdlet only reads; nothing on the firewall is changed. It needs an open connection
+        from Connect-SfosFirewall, or the connection parameters supplied directly.
 
         .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific firewall
+        when you work with more than one at a time. Any connection parameter you pass
+        explicitly still takes precedence. If omitted, the stored default connection is used.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. User name for the API login. If omitted, the value from the current
+        connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
 
         .PARAMETER AsXml
-        Returns the raw XML node instead of a PowerShell-friendly object.
+        Optional. Returns the raw XML node sent by the firewall instead of a PowerShell
+        object.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        PSCustomObject (default). System.Xml.XmlElement when -AsXml is specified.
+        System.Management.Automation.PSCustomObject. One object with the properties
+        ThreatProtectionStatus, InspectContent, Policy, HostExceptionList and
+        ThreatExceptionList. Returns System.Xml.XmlElement when -AsXml is used. The exception
+        lists are always an array, empty when no exception is configured.
 
         .EXAMPLE
-        # Read the device-wide ATP configuration
         Get-SfosATPSettings
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        Measured live: the response carries no <Status> data field for this entity - fields
-        are named ThreatProtectionStatus/InspectContent/Policy, not Status - so Core's generic
-        Assert-SfosApiReturnSuccess/Get-SfosApiStatus heuristic needs no special-casing here
-        (unlike IPSSwitch, whose single field actually is named <Status>). A live-provoked
-        error (invalid Policy value) confirmed the status node sits at the expected
-        /Response/ATP/Status[@code] path and is picked up correctly.
-        HostException/Host and ThreatException/Threat come back as empty (no wrapper element
-        at all) when no exceptions are configured; this cmdlet returns @() for both in that
-        case, never $null.
+        Reads the device-wide ATP configuration.
+
+        .EXAMPLE
+        Get-SfosATPSettings -AsXml
+
+        Returns the raw XML node, for example to check a field that the standard output does
+        not contain.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/API/PROTECT/Active%20threat%20response/ATP/operations/SophosX-Opsthreatfeeds.html
@@ -177,77 +153,75 @@ function Get-SfosATPSettings {
         .DESCRIPTION
         Updates the device-wide ATP singleton using the Sophos Firewall XML API. Reads the
         current object first and resends every field, overriding only what the caller
-        explicitly passed (read-modify-write - SFOS replaces the whole entity on update).
-        Supports ShouldProcess; use -WhatIf to preview.
+        explicitly passed. Fields left out keep their current value on the firewall.
 
-        This is a device-wide security switch (advanced threat protection / IPS threat feed
-        enforcement for the whole appliance) - test any change against a maintenance window
-        and verify the result.
+        This is a device-wide security switch that controls threat feed enforcement for the
+        whole appliance. It needs an open connection from Connect-SfosFirewall, or the
+        connection parameters supplied directly, and an account with administrative
+        permission.
 
         .PARAMETER ThreatProtectionStatus
-        'Enable' or 'Disable' [doc]. If omitted, the existing value is kept.
+        Optional. 'Enable' or 'Disable'. If omitted, the existing value is kept.
 
         .PARAMETER InspectContent
-        'all' or 'untrusted' [doc]. If omitted, the existing value is kept. Both values
-        confirmed live.
+        Optional. 'all' or 'untrusted'. If omitted, the existing value is kept.
 
         .PARAMETER Policy
-        'Log Only' or 'Log and Drop' [doc - the wire uses this exact UI wording, not the
-        sample XML's 'alert'/'drop' placeholders, both confirmed live]. If omitted, the
-        existing value is kept.
+        Optional. 'Log Only' or 'Log and Drop'. If omitted, the existing value is kept.
 
         .PARAMETER HostException
-        Complete replacement list of HostException entries [doc]. Each entry must be the
-        Name of an existing IPHost object on the firewall - an arbitrary string is rejected
-        with a field-precise 501 naming /ATP/HostException/Host [measured]. If omitted, the
-        existing list is kept. Pass an empty array to clear the list - measured to be a
-        genuine full replace for this field (not append-only): omitting the wrapper entirely
-        or sending an explicit empty <HostException/> both clear a previously set list, and a
-        duplicate entry sent twice is silently de-duplicated by the firewall.
+        Optional. Complete replacement list of HostException entries. Each entry must be the
+        name of an existing IPHost object on the firewall. If omitted, the existing list is
+        kept. Pass an empty array to clear the list.
 
         .PARAMETER ThreatException
-        Complete replacement list of ThreatException entries [doc]. Unlike HostException, an
-        arbitrary string value is accepted here (no existing-object requirement) [measured].
-        If omitted, the existing list is kept. Pass an empty array to clear the list - same
-        full-replace behaviour as HostException.
+        Optional. Complete replacement list of ThreatException entries. Each entry is free
+        text. If omitted, the existing list is kept. Pass an empty array to clear the list.
 
         .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific firewall
+        when you work with more than one at a time. Any connection parameter you pass
+        explicitly still takes precedence. If omitted, the stored default connection is used.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. User name for the API login. The account needs administrative permission.
+        If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        None. Throws an exception if the update fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        update.
 
         .EXAMPLE
-        # Switch content inspection from untrusted-only to all traffic, leaving everything else unchanged
+        Set-SfosATPSettings -InspectContent all -WhatIf
+
+        Shows what the call would change without sending it to the firewall.
+
+        .EXAMPLE
         Set-SfosATPSettings -InspectContent all
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        Verified live end to end: baseline captured (ThreatProtectionStatus=Enable,
-        InspectContent=untrusted, Policy='Log and Drop'), written back unchanged (round trip
-        byte-identical), InspectContent toggled to 'all' and reverted, Policy toggled to
-        'Log Only' and reverted to 'Log and Drop' - every write answered code 200 and the
-        final read matched the captured baseline exactly. See the task report for the raw
-        responses.
+        Switches content inspection from untrusted-only to all traffic. Every other field
+        keeps its current value.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/API/PROTECT/Active%20threat%20response/ATP/operations/SophosX-Opsthreatfeeds.html
@@ -295,7 +269,7 @@ function Set-SfosATPSettings {
     $targetInspectContent = if ($bp.ContainsKey('InspectContent')) { $InspectContent } else { $current.InspectContent }
     $targetPolicy = if ($bp.ContainsKey('Policy')) { $Policy } else { $current.Policy }
     # @() wraps the whole if/else: a one-element array from a branch unrolls to a scalar
-    # on assignment (measured on PS 5.1).
+    # on assignment.
     $targetHostException = @(if ($bp.ContainsKey('HostException')) { $HostException } else { $current.HostExceptionList })
     $targetThreatException = @(if ($bp.ContainsKey('ThreatException')) { $ThreatException } else { $current.ThreatExceptionList })
 
@@ -356,52 +330,62 @@ function Set-SfosATPSettings {
 
         .DESCRIPTION
         Adds an entry to the ATP HostException list using the Sophos Firewall XML API. Reads
-        the current ATP object first and resends it complete with the new host appended
-        (read-modify-write, per Set-SfosATPSettings). Supports ShouldProcess; use -WhatIf to
-        preview.
+        the current ATP object first and resends it complete with the new host appended. It
+        needs an open connection from Connect-SfosFirewall, or the connection parameters
+        supplied directly.
+
+        HostException expects the name of an already existing IPHost object, while
+        ThreatException accepts free text.
 
         .PARAMETER HostName
-        Name of an existing IPHost object on the firewall to except from ATP inspection
-        [measured: an arbitrary string that is not the name of an existing IPHost object is
-        rejected with a field-precise 501 on /ATP/HostException/Host]. Mandatory; accepts
-        pipeline input by value or by property name (aliased 'Host' so
-        Get-SfosIPHost | Add-SfosATPHostException binds).
+        Required. Name of an existing IPHost object on the firewall to except from ATP
+        inspection. Accepts pipeline input by value or by property name, aliased 'Host' so
+        Get-SfosIPHost | Add-SfosATPHostException binds.
 
         .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific firewall
+        when you work with more than one at a time. Any connection parameter you pass
+        explicitly still takes precedence. If omitted, the stored default connection is used.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. User name for the API login. If omitted, the value from the current
+        connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .INPUTS
+        System.String. HostName can be supplied by value or by property name, for example
+        from Get-SfosIPHost.
 
         .OUTPUTS
-        None. Throws an exception if the update fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        update.
+
+        .EXAMPLE
+        Add-SfosATPHostException -HostName 'WebServer01' -WhatIf
+
+        Shows what the call would change without sending it to the firewall.
 
         .EXAMPLE
         Add-SfosATPHostException -HostName 'WebServer01'
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        Verified live: created a test IPHost, added it as a HostException (code 200), read
-        back and confirmed present under HostException/Host, sent the exact same host a
-        second time and confirmed the firewall de-duplicates rather than storing it twice, then
-        removed it and confirmed the ATP object returned to its original captured baseline
-        (byte-identical). See the task report for the raw responses.
+        Adds the IPHost object 'WebServer01' to the ATP HostException list.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/API/PROTECT/Active%20threat%20response/ATP/operations/SophosX-Opsthreatfeeds.html
@@ -462,52 +446,57 @@ function Add-SfosATPHostException {
         .DESCRIPTION
         Removes an entry from the ATP HostException list using the Sophos Firewall XML API.
         Reads the current ATP object first, throws if the host is not currently listed, and
-        otherwise resends the ATP object complete with the host filtered out
-        (read-modify-write, per Set-SfosATPSettings). Reads the object back afterwards and
-        throws if the host is still present - guards against the append-only-list pattern
-        seen elsewhere in this API, even though this entity was measured NOT to have that
-        problem (see .NOTES). Supports ShouldProcess; use -WhatIf to preview.
+        otherwise resends the ATP object complete with the host filtered out. Reads the
+        object back afterwards and throws if the host is still present. It needs an open
+        connection from Connect-SfosFirewall, or the connection parameters supplied directly.
 
         .PARAMETER HostName
-        Name of the IPHost object to remove from the HostException list. Mandatory; accepts
-        pipeline input by value or by property name (aliased 'Host').
+        Required. Name of the IPHost object to remove from the HostException list. Accepts
+        pipeline input by value or by property name, aliased 'Host'.
 
         .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific firewall
+        when you work with more than one at a time. Any connection parameter you pass
+        explicitly still takes precedence. If omitted, the stored default connection is used.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. User name for the API login. If omitted, the value from the current
+        connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .INPUTS
+        System.String. HostName can be supplied by value or by property name.
 
         .OUTPUTS
-        None. Throws an exception if the update fails or the host is still present afterwards.
+        None. The cmdlet writes no output and raises an error if the update fails or the host
+        is still present afterwards.
+
+        .EXAMPLE
+        Remove-SfosATPHostException -HostName 'WebServer01' -WhatIf
+
+        Shows what the call would change without sending it to the firewall.
 
         .EXAMPLE
         Remove-SfosATPHostException -HostName 'WebServer01'
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        Verified live: unlike the URLList/SecurityPolicyList append-only lists documented
-        elsewhere in this project, ATP's HostException list is a genuine full replace on
-        update - omitting the <HostException> wrapper entirely, or sending an explicit empty
-        <HostException/>, both cleared a previously set entry and the object read back to
-        exactly its pre-test baseline. This cmdlet's post-removal read-back is kept anyway as
-        a defensive guard, per project convention for member-removal cmdlets.
+        Removes the IPHost object 'WebServer01' from the ATP HostException list.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/API/PROTECT/Active%20threat%20response/ATP/operations/SophosX-Opsthreatfeeds.html
@@ -580,50 +569,61 @@ function Remove-SfosATPHostException {
         Adds a threat exception to the ATP settings on the Sophos Firewall.
 
         .DESCRIPTION
-        Adds an entry to the ATP ThreatException list using the Sophos Firewall XML API. Reads
-        the current ATP object first and resends it complete with the new threat identifier
-        appended (read-modify-write, per Set-SfosATPSettings). Supports ShouldProcess; use
-        -WhatIf to preview.
+        Adds an entry to the ATP ThreatException list using the Sophos Firewall XML API.
+        Reads the current ATP object first and resends it complete with the new threat
+        identifier appended. It needs an open connection from Connect-SfosFirewall, or the
+        connection parameters supplied directly.
+
+        HostException expects the name of an already existing IPHost object, while
+        ThreatException accepts free text.
 
         .PARAMETER Threat
-        Threat identifier text to except from ATP enforcement [doc]. Unlike HostException, an
-        arbitrary string is accepted here - no existing-object requirement was found
-        [measured]. Mandatory; accepts pipeline input by value or by property name.
+        Required. Threat identifier text to except from ATP enforcement. Accepts pipeline
+        input by value or by property name.
 
         .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific firewall
+        when you work with more than one at a time. Any connection parameter you pass
+        explicitly still takes precedence. If omitted, the stored default connection is used.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. User name for the API login. If omitted, the value from the current
+        connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .INPUTS
+        System.String. Threat can be supplied by value or by property name.
 
         .OUTPUTS
-        None. Throws an exception if the update fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        update.
+
+        .EXAMPLE
+        Add-SfosATPThreatException -Threat 'C2/Generic-A' -WhatIf
+
+        Shows what the call would change without sending it to the firewall.
 
         .EXAMPLE
         Add-SfosATPThreatException -Threat 'C2/Generic-A'
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        Verified live: added an arbitrary threat identifier string (code 200), read back and
-        confirmed present under ThreatException/Threat, then removed it and confirmed the ATP
-        object returned to its original captured baseline (byte-identical). See the task
-        report for the raw responses.
+        Adds the threat identifier 'C2/Generic-A' to the ATP ThreatException list.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/API/PROTECT/Active%20threat%20response/ATP/operations/SophosX-Opsthreatfeeds.html
@@ -683,47 +683,57 @@ function Add-SfosATPThreatException {
         .DESCRIPTION
         Removes an entry from the ATP ThreatException list using the Sophos Firewall XML API.
         Reads the current ATP object first, throws if the threat is not currently listed, and
-        otherwise resends the ATP object complete with the threat filtered out
-        (read-modify-write, per Set-SfosATPSettings). Reads the object back afterwards and
-        throws if the threat is still present. Supports ShouldProcess; use -WhatIf to preview.
+        otherwise resends the ATP object complete with the threat filtered out. Reads the
+        object back afterwards and throws if the threat is still present. It needs an open
+        connection from Connect-SfosFirewall, or the connection parameters supplied directly.
 
         .PARAMETER Threat
-        Threat identifier text to remove from the ThreatException list. Mandatory; accepts
+        Required. Threat identifier text to remove from the ThreatException list. Accepts
         pipeline input by value or by property name.
 
         .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific firewall
+        when you work with more than one at a time. Any connection parameter you pass
+        explicitly still takes precedence. If omitted, the stored default connection is used.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. User name for the API login. If omitted, the value from the current
+        connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .INPUTS
+        System.String. Threat can be supplied by value or by property name.
 
         .OUTPUTS
-        None. Throws an exception if the update fails or the threat is still present afterwards.
+        None. The cmdlet writes no output and raises an error if the update fails or the
+        threat is still present afterwards.
+
+        .EXAMPLE
+        Remove-SfosATPThreatException -Threat 'C2/Generic-A' -WhatIf
+
+        Shows what the call would change without sending it to the firewall.
 
         .EXAMPLE
         Remove-SfosATPThreatException -Threat 'C2/Generic-A'
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        Verified live as part of the ATP round trip - see the NOTES section of
-        Remove-SfosATPHostException for the measured full-replace behaviour that applies
-        identically to this list.
+        Removes the threat identifier 'C2/Generic-A' from the ATP ThreatException list.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/API/PROTECT/Active%20threat%20response/ATP/operations/SophosX-Opsthreatfeeds.html
@@ -800,69 +810,74 @@ function Remove-SfosATPThreatException {
 
         .DESCRIPTION
         Queries the Sophos Firewall XML API for ThirdPartyFeed objects (PROTECT > Active
-        threat response > Third party threat feed). By default the cmdlet returns
-        PowerShell-friendly objects. Use -AsXml to return the raw XML nodes.
+        threat response > Third party threat feed). A ThirdPartyFeed polls an external URL
+        for threat indicators and feeds them into the firewall's own enforcement. By default
+        the cmdlet returns PowerShell-friendly objects. Use -AsXml to return the raw XML
+        nodes. The cmdlet only reads; nothing on the firewall is changed. It needs an open
+        connection from Connect-SfosFirewall, or the connection parameters supplied directly.
 
-        -NameLike is sent as the server-side filter key (confirmed live: 'like' criteria on
-        Name works correctly, both for a matching substring and for a non-matching one, unlike
-        several other entities in this API area where any filter is silently ignored or
-        breaks the response) and is re-applied client-side together with every other filter,
-        AND semantics, per the project's server-side filtering rule.
+        You can combine several filters. The firewall itself evaluates at most one of them,
+        so every filter you supply is applied again on the client. The result therefore
+        always matches all filters you gave.
+
+        Position is a write-only field and Get-SfosThirdPartyFeed never returns it, so
+        Set-SfosThirdPartyFeed has no -Position parameter.
 
         .PARAMETER NameLike
-        Filters by Name, substring match. Sent as the server-side filter key and re-applied
-        client-side.
+        Optional. Returns only objects whose name contains the given text anywhere. This is a
+        substring match, not a wildcard pattern. If omitted, the name is not used to filter.
 
         .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific firewall
+        when you work with more than one at a time. Any connection parameter you pass
+        explicitly still takes precedence. If omitted, the stored default connection is used.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. User name for the API login. If omitted, the value from the current
+        connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
 
         .PARAMETER AsXml
-        Returns the raw XML nodes instead of PowerShell-friendly objects.
+        Optional. Returns the raw XML nodes sent by the firewall instead of PowerShell
+        objects.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        PSCustomObject[] (default). System.Xml.XmlElement[] when -AsXml is specified.
+        System.Management.Automation.PSCustomObject. One object per feed, with the properties
+        Id, Name, Description, Action, IndicatorType, ExternalURL, Authorization, Username,
+        PasswordHash, Key, ValueHash, AddTo, ValidateServerCertificate, PollingInterval and
+        Enabled. PasswordHash and ValueHash carry the firewall's hashed secret for
+        troubleshooting only; they are never usable as a credential. Returns
+        System.Xml.XmlElement when -AsXml is used, and an empty array when no object matches.
 
         .EXAMPLE
-        # List every configured third-party threat feed
         Get-SfosThirdPartyFeed
 
+        Lists every configured third-party threat feed.
+
         .EXAMPLE
-        # Find a feed by name
         Get-SfosThirdPartyFeed -NameLike 'Feed'
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        Measured live: an empty firewall (and a filter with no matches) answers
-        '<ThirdPartyFeed><Status>No. of records Zero.</Status></ThirdPartyFeed>' - a normal
-        empty result, not an error; this cmdlet returns @() for it.
-        The firewall assigns a server-generated <Id> (a GUID) to every feed on create; it is
-        exposed here read-only and is not accepted as input by New-/Set-SfosThirdPartyFeed.
-        <Position> is accepted on write (New-/Set-*) but is never returned by this Get - it
-        does not appear as a property here; see New-SfosThirdPartyFeed's .NOTES for why
-        Set-SfosThirdPartyFeed does not expose it at all.
-        Username/Key are returned in plain text when the corresponding Authorization is
-        configured; Password/Value (the secret half of basic/apiKey authorization) are
-        returned firewall-hashed with a 'hashform' attribute, never in plain text - exposed
-        here as PasswordHash/ValueHash for troubleshooting only, not usable as a credential.
+        Lists all feeds whose name contains 'Feed'.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/API/PROTECT/Active%20threat%20response/thirdpartyfeeds/thirdpartyfeeds.html
@@ -959,148 +974,123 @@ function Get-SfosThirdPartyFeed {
 
         .DESCRIPTION
         Creates a ThirdPartyFeed (PROTECT > Active threat response > Third party threat feed)
-        using the Sophos Firewall XML API. Supports ShouldProcess; use -WhatIf to preview.
+        using the Sophos Firewall XML API. Use this cmdlet to add an external threat
+        indicator feed for the firewall to poll. It needs an open connection from
+        Connect-SfosFirewall, or the connection parameters supplied directly, and an account
+        with administrative permission.
 
         .PARAMETER Name
-        Name of the feed [doc]. Mandatory. Max 63 characters, letters/digits/underscore/hyphen
-        only.
+        Required. Name of the feed. Maximum 63 characters, letters, digits, underscore and
+        hyphen only.
 
         .PARAMETER Description
-        Free-text description [doc]. Optional, max 255 characters.
+        Optional. Free-text description. Maximum 255 characters. If omitted, an empty
+        description is stored.
 
         .PARAMETER Action
-        'block' or 'monitor' [doc]. Both values confirmed live. Default 'monitor' [doc].
+        Optional. 'block' or 'monitor'. Default 'monitor'.
 
         .PARAMETER Position
-        'top' or 'bottom' [doc]. Both values were accepted without error live, but this field
-        is never returned by Get-SfosThirdPartyFeed - see .NOTES. Default 'top' [doc].
+        Optional. 'top' or 'bottom'. Default 'top'. This field is write-only; Get-* never
+        returns it, so it can only be set here at creation, not changed afterwards.
 
         .PARAMETER IndicatorType
-        'ip', 'domain' or 'url' [doc]. 'ip' and 'domain' confirmed live; 'url' is documented
-        but was not exercised. Default 'ip' [doc].
+        Optional. 'ip', 'domain' or 'url'. Default 'ip'.
 
         .PARAMETER ExternalURL
-        URL the firewall polls for indicator data [doc]. Mandatory, max 1024 characters. A
-        syntactically valid but unreachable URL under a documentation domain was accepted
-        without the firewall attempting to reach it at creation time - see .NOTES.
+        Required. URL the firewall polls for indicator data. Maximum 1024 characters.
 
         .PARAMETER Authorization
-        'noAuthentication', 'basicAuthentication' or 'apiKey' [doc]. Default
-        'noAuthentication' [doc]. Determines which of -FeedUsername/-FeedPassword or
-        -ApiKeyName/-ApiKeyValue/-AddTo are required - see those parameters.
+        Optional. 'noAuthentication', 'basicAuthentication' or 'apiKey'. Default
+        'noAuthentication'. Determines which of -FeedUsername/-FeedPassword or
+        -ApiKeyName/-ApiKeyValue/-AddTo are required; see those parameters.
 
         .PARAMETER FeedUsername
-        Username for -Authorization basicAuthentication [doc; wire element is <Username>].
-        Named differently from the connection parameter -Username on purpose, for the same
-        reason as -FeedPassword below - an entity field named -Username would bind to the
-        connection parameter instead and silently leave the entity field unset, and
-        Resolve-SfosParameters would misread the entity's basic-auth username as the API
-        connection identity. Ignored for other -Authorization values.
+        Optional. Username for -Authorization basicAuthentication. Named differently from the
+        connection parameter -Username because that name is reserved for the API login
+        identity. Ignored for other -Authorization values.
 
         .PARAMETER FeedPassword
-        Password for -Authorization basicAuthentication, as a SecureString [doc]. Named
-        differently from the connection parameter -Password on purpose: an entity secret named
-        -Password would bind to the connection parameter instead and silently leave the entity
-        field unset.
-        Required when -Authorization is basicAuthentication.
+        Optional. Password for -Authorization basicAuthentication, as a SecureString. Named
+        differently from the connection parameter -Password because that name is reserved for
+        the API login secret. Required when -Authorization is basicAuthentication.
 
         .PARAMETER ApiKeyName
-        The API key field/header name for -Authorization apiKey [doc; wire element is <Key>].
-        Required when -Authorization is apiKey.
+        Optional. The API key field or header name for -Authorization apiKey. Required when
+        -Authorization is apiKey.
 
         .PARAMETER ApiKeyValue
-        The API key secret value for -Authorization apiKey, as a SecureString [doc; wire
-        element is <Value>]. Named to avoid a bare -Value/-Key ambiguity next to -ApiKeyName.
+        Optional. The API key secret value for -Authorization apiKey, as a SecureString.
         Required when -Authorization is apiKey.
 
         .PARAMETER AddTo
-        'header' or 'queryParam' for -Authorization apiKey [doc]. 'header' confirmed live;
-        'queryParam' is documented but was not exercised. Required when -Authorization is
-        apiKey.
+        Optional. 'header' or 'queryParam' for -Authorization apiKey. Required when
+        -Authorization is apiKey.
 
         .PARAMETER ValidateServerCertificate
-        '1' or '0' [doc table - the sample XML's true/false placeholders were also accepted on
-        input, but the firewall always echoes the value back as '1'/'0' regardless of which
-        form was sent, so the table wins here]. Mandatory
-        [doc].
+        Required. '1' or '0'. Whether the firewall validates the TLS certificate of
+        -ExternalURL when polling.
 
         .PARAMETER PollingInterval
-        One of '5m','15m','30m','1h','6h','24h','7d','30d' [doc]. '1h' and '30m' confirmed
-        live. Mandatory [doc].
+        Required. One of '5m','15m','30m','1h','6h','24h','7d','30d'.
 
         .PARAMETER Enabled
-        '1' or '0' [doc table; sample XML's true/false was not tested for input, but the wire
-        always returns '1'/'0'. Table wins here for the same reason as
-        -ValidateServerCertificate]. Optional.
+        Optional. '1' or '0'. Default '1'.
 
         .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific firewall
+        when you work with more than one at a time. Any connection parameter you pass
+        explicitly still takes precedence. If omitted, the stored default connection is used.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. User name for the API login. The account needs administrative permission.
+        If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        None. Throws an exception if creation fails.
+        None. The cmdlet writes no output and raises an error if creation fails.
 
         .EXAMPLE
-        # Feed with no authentication
-        New-SfosThirdPartyFeed -Name 'AbuseChIPFeed' -Action monitor -IndicatorType ip `
-            -ExternalURL 'https://feeds.example.com/blocklist.txt' -Authorization noAuthentication `
-            -ValidateServerCertificate 1 -PollingInterval 1h -Enabled 1
+        New-SfosThirdPartyFeed -Name 'AbuseChIPFeed' -Action monitor -IndicatorType ip -ExternalURL 'https://feeds.example.com/blocklist.txt' -Authorization noAuthentication -ValidateServerCertificate 1 -PollingInterval 1h -Enabled 1 -WhatIf
+
+        Shows what the call would create without sending it to the firewall.
 
         .EXAMPLE
-        # Feed with basic authentication
+        New-SfosThirdPartyFeed -Name 'AbuseChIPFeed' -Action monitor -IndicatorType ip -ExternalURL 'https://feeds.example.com/blocklist.txt' -Authorization noAuthentication -ValidateServerCertificate 1 -PollingInterval 1h -Enabled 1
+
+        Creates a feed with no authentication.
+
+        .EXAMPLE
         $pw = ConvertTo-SecureString 'FeedSecret1!' -AsPlainText -Force
-        New-SfosThirdPartyFeed -Name 'VendorIPFeed' -Action monitor -IndicatorType ip `
-            -ExternalURL 'https://feeds.example.com/blocklist.txt' -Authorization basicAuthentication `
-            -FeedUsername 'feedreader' -FeedPassword $pw `
-            -ValidateServerCertificate 1 -PollingInterval 1h -Enabled 1
+        New-SfosThirdPartyFeed -Name 'VendorIPFeed' -Action monitor -IndicatorType ip -ExternalURL 'https://feeds.example.com/blocklist.txt' -Authorization basicAuthentication -FeedUsername 'feedreader' -FeedPassword $pw -ValidateServerCertificate 1 -PollingInterval 1h -Enabled 1
+
+        Creates a feed that authenticates with a username and password.
 
         .EXAMPLE
-        # Feed with API key authentication
         $key = ConvertTo-SecureString 'MyApiKeyValue123' -AsPlainText -Force
-        New-SfosThirdPartyFeed -Name 'PartnerIPFeed' -Action monitor -IndicatorType ip `
-            -ExternalURL 'https://feeds.example.com/blocklist.txt' -Authorization apiKey `
-            -ApiKeyName 'X-Api-Key' -ApiKeyValue $key -AddTo header `
-            -ValidateServerCertificate 1 -PollingInterval 1h -Enabled 1
+        New-SfosThirdPartyFeed -Name 'PartnerIPFeed' -Action monitor -IndicatorType ip -ExternalURL 'https://feeds.example.com/blocklist.txt' -Authorization apiKey -ApiKeyName 'X-Api-Key' -ApiKeyValue $key -AddTo header -ValidateServerCertificate 1 -PollingInterval 1h -Enabled 1
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        Verified live: created with -Authorization noAuthentication (code 201, confirmed with
-        a follow-up Get, all fields matched including the server-assigned Id), then updated in
-        place through -Authorization basicAuthentication and apiKey to exercise those code
-        paths - see Set-SfosThirdPartyFeed's .NOTES, which carries the security-relevant
-        findings for the shared secret handling. The example -ExternalURL used throughout
-        (feeds.example.com, syntactically valid but not a real host) was accepted by the
-        firewall without any reachability check at write time - unlike WebFilterCategory,
-        no 217/222 warning code was seen, just a plain 201 "Configuration applied
-        successfully.".
-        <Id> is server-assigned and cannot be set by the caller - not exposed as a parameter.
-        <Position> is accepted here (create time) but is never returned by
-        Get-SfosThirdPartyFeed: since a field a Get-* does not
-        expose is impossible to preserve on update, Set-SfosThirdPartyFeed has no
-        -Position parameter at all, matching the FileType/-Template precedent. Only New-* can
-        set it, and only once, at creation.
-        Creating a second object with a Name already in use answers a field-precise 409
-        naming /ThirdPartyFeed/Name [measured] - outside the documented 200-216/500-599 status
-        table, so it throws by default rather than being waved through, consistent with this
-        project's fail-closed handling of undocumented codes.
+        Creates a feed that authenticates with an API key.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/API/PROTECT/Active%20threat%20response/thirdpartyfeeds/operations/AddThird-partythreatfeed%26EditThird-partythreatfeed.html
@@ -1248,130 +1238,114 @@ function New-SfosThirdPartyFeed {
 
         .DESCRIPTION
         Updates a ThirdPartyFeed using the Sophos Firewall XML API. Reads the current object
-        first and resends every field, overriding only what the caller explicitly passed
-        (read-modify-write - SFOS replaces the whole entity on update). Supports ShouldProcess;
-        use -WhatIf to preview.
+        first and resends every field, overriding only what the caller explicitly passed.
+        Fields left out keep their current value on the firewall.
 
-        The Password/Key secret fields are the one measured exception to full replace on this
-        entity - see .NOTES. This cmdlet never resends the hashed value Get-SfosThirdPartyFeed
-        returns; when the caller does not supply a new secret and the authorization type is
-        unchanged, the corresponding element is omitted entirely, which was measured to leave
-        the stored secret untouched.
+        Resending a password or API key value that was read back from Get-SfosThirdPartyFeed
+        makes the whole update fail; leaving the secret parameter out keeps the stored secret
+        unchanged. This cmdlet never resends the value Get-SfosThirdPartyFeed returns, so pass
+        -FeedPassword or -ApiKeyValue only when you want to set a new secret.
 
         .PARAMETER Name
-        Name of the target feed. Mandatory; accepts pipeline input by property name.
+        Required. Name of the target feed. Accepts pipeline input by property name.
 
         .PARAMETER Description
-        Free-text description. If omitted, the existing value is kept.
+        Optional. Free-text description. If omitted, the existing value is kept.
 
         .PARAMETER Action
-        'block' or 'monitor'. If omitted, the existing value is kept.
+        Optional. 'block' or 'monitor'. If omitted, the existing value is kept.
 
         .PARAMETER IndicatorType
-        'ip', 'domain' or 'url'. If omitted, the existing value is kept.
+        Optional. 'ip', 'domain' or 'url'. If omitted, the existing value is kept.
 
         .PARAMETER ExternalURL
-        URL the firewall polls for indicator data. If omitted, the existing value is kept.
+        Optional. URL the firewall polls for indicator data. If omitted, the existing value
+        is kept.
 
         .PARAMETER Authorization
-        'noAuthentication', 'basicAuthentication' or 'apiKey'. If omitted, the existing value
-        is kept. Switching to basicAuthentication or apiKey without a previous value of that
-        type requires the matching secret parameter - see -FeedPassword/-ApiKeyValue.
+        Optional. 'noAuthentication', 'basicAuthentication' or 'apiKey'. If omitted, the
+        existing value is kept. Switching to basicAuthentication or apiKey without a previous
+        value of that type requires the matching secret parameter; see
+        -FeedPassword/-ApiKeyValue.
 
         .PARAMETER FeedUsername
-        Username for -Authorization basicAuthentication [wire element <Username>]. Named
-        differently from the connection parameter -Username on purpose - see
-        New-SfosThirdPartyFeed's -FeedUsername for why. If omitted, the existing value is
-        kept.
+        Optional. Username for -Authorization basicAuthentication. Named differently from the
+        connection parameter -Username because that name is reserved for the API login
+        identity. If omitted, the existing value is kept.
 
         .PARAMETER FeedPassword
-        New password for -Authorization basicAuthentication, as a SecureString. If omitted and
-        the feed is already (or remains) basicAuthentication, the existing password is left
-        untouched on the firewall - see .NOTES. Required when switching from a different
+        Optional. New password for -Authorization basicAuthentication, as a SecureString. If
+        omitted and the feed is already, or remains, basicAuthentication, the existing
+        password is left unchanged on the firewall. Required when switching from a different
         -Authorization value to basicAuthentication in the same call.
 
         .PARAMETER ApiKeyName
-        The API key field/header name for -Authorization apiKey. If omitted, the existing
-        value is kept.
+        Optional. The API key field or header name for -Authorization apiKey. If omitted, the
+        existing value is kept.
 
         .PARAMETER ApiKeyValue
-        New API key secret value for -Authorization apiKey, as a SecureString. If omitted and
-        the feed is already (or remains) apiKey, the existing value is left untouched on the
-        firewall - see .NOTES. Required when switching from a different -Authorization value
-        to apiKey in the same call.
+        Optional. New API key secret value for -Authorization apiKey, as a SecureString. If
+        omitted and the feed is already, or remains, apiKey, the existing value is left
+        unchanged on the firewall. Required when switching from a different -Authorization
+        value to apiKey in the same call.
 
         .PARAMETER AddTo
-        'header' or 'queryParam' for -Authorization apiKey. If omitted, the existing value is
-        kept.
+        Optional. 'header' or 'queryParam' for -Authorization apiKey. If omitted, the existing
+        value is kept.
 
         .PARAMETER ValidateServerCertificate
-        '1' or '0'. If omitted, the existing value is kept.
+        Optional. '1' or '0'. If omitted, the existing value is kept.
 
         .PARAMETER PollingInterval
-        One of '5m','15m','30m','1h','6h','24h','7d','30d'. If omitted, the existing value is
-        kept.
+        Optional. One of '5m','15m','30m','1h','6h','24h','7d','30d'. If omitted, the existing
+        value is kept.
 
         .PARAMETER Enabled
-        '1' or '0'. If omitted, the existing value is kept.
+        Optional. '1' or '0'. If omitted, the existing value is kept.
 
         .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific firewall
+        when you work with more than one at a time. Any connection parameter you pass
+        explicitly still takes precedence. If omitted, the stored default connection is used.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. User name for the API login. The account needs administrative permission.
+        If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .INPUTS
+        System.Management.Automation.PSCustomObject. Name is bound by property name, for
+        example from Get-SfosThirdPartyFeed.
 
         .OUTPUTS
-        None. Throws an exception if the update fails.
+        None. The cmdlet writes no output and raises an error if the update fails.
 
         .EXAMPLE
-        # Disable a feed, leaving every other field untouched (including any stored secret)
+        Set-SfosThirdPartyFeed -Name 'AbuseChIPFeed' -Enabled 0 -WhatIf
+
+        Shows what the call would change without sending it to the firewall.
+
+        .EXAMPLE
         Set-SfosThirdPartyFeed -Name 'AbuseChIPFeed' -Enabled 0
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        Two measured findings specific to this entity's secret fields, both reproduced twice
-        against the lab appliance:
-
-        1. Resending the Password (or Value) element exactly as Get-SfosThirdPartyFeed returns
-           it - hashed text plus its 'hashform' attribute, the pattern that works for
-           Set-SfosSSLBookmark - makes SFOS answer HTTP 200 with a response that contains no
-           <ThirdPartyFeed> element and no <Status> at all, and the update is silently
-           dropped: a Description change sent in the same request was confirmed absent on a
-           follow-up Get. This is the "missing status element is not success" trap, and Core's
-           generic status check cannot catch it, because there is no ThirdPartyFeed subtree in
-           the response to look inside at all.
-        2. Omitting the Password (or Value) element entirely, while Authorization stays the
-           same authenticated type, answers a normal 200 AND the previously stored password
-           hash comes back completely unchanged on the next Get. This is the opposite of the
-           project's usual full-replace warning for Set-* - here NOT sending the field is what
-           preserves it, and sending the read-back hash is what breaks the whole request. This
-           cmdlet relies on that: it never resends PasswordHash/ValueHash, only a caller-
-           supplied new SecureString or nothing at all.
-
-        Switching Authorization to noAuthentication (with every auth sub-field omitted) was
-        confirmed to properly clear Username/Password/Key/Value/AddTo - normal full-replace
-        semantics apply there, only the "keep the existing secret while remaining in the same
-        authenticated mode" case is special.
-
-        Verified live: full round trip through noAuthentication -> basicAuthentication (with
-        -FeedPassword) -> apiKey (with -ApiKeyValue) -> back to noAuthentication, each
-        transition confirmed correct on a follow-up Get, before the test object was removed.
+        Disables a feed, leaving every other field, including any stored secret, unchanged.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/API/PROTECT/Active%20threat%20response/thirdpartyfeeds/operations/AddThird-partythreatfeed%26EditThird-partythreatfeed.html
@@ -1473,9 +1447,8 @@ function Set-SfosThirdPartyFeed {
                 $authXml = "<Username>$usernameEsc</Username><Password>$passwordEsc</Password>"
             }
             elseif ($current.Authorization -eq 'basicAuthentication') {
-                # Measured: omitting Password here (while staying basicAuthentication)
-                # preserves the stored secret - see .NOTES. Resending PasswordHash would
-                # silently drop the whole update instead.
+                # Omitting Password here, while staying basicAuthentication, preserves the
+                # stored secret. Resending PasswordHash silently drops the whole update instead.
                 $authXml = "<Username>$usernameEsc</Username>"
             }
             else {
@@ -1499,7 +1472,7 @@ function Set-SfosThirdPartyFeed {
                 $authXml = "<Key>$keyEsc</Key><Value>$valueEsc</Value><AddTo>$targetAddTo</AddTo>"
             }
             elseif ($current.Authorization -eq 'apiKey') {
-                # Same measured preserve-on-omit behaviour as Password above.
+                # Same preserve-on-omit behaviour as Password above.
                 $authXml = "<Key>$keyEsc</Key><AddTo>$targetAddTo</AddTo>"
             }
             else {
@@ -1554,54 +1527,58 @@ function Set-SfosThirdPartyFeed {
 
         .DESCRIPTION
         Removes a ThirdPartyFeed using the Sophos Firewall XML API. Reads the object first and
-        throws a clear "not found" error if it does not exist. The firewall's own delete
-        response for this entity cannot be trusted at face value - see .NOTES - so this
-        cmdlet confirms the outcome with a follow-up Get instead of relying on the returned
-        status code. Supports ShouldProcess; use -WhatIf to preview.
+        throws a clear "not found" error if it does not exist. Remove-SfosThirdPartyFeed
+        decides whether the removal succeeded by reading the object back afterwards, because
+        the firewall's own delete response for this entity does not reliably indicate success
+        or failure.
 
         .PARAMETER Name
-        Name of the feed to remove. Mandatory; accepts pipeline input by property name.
+        Required. Name of the feed to remove. Accepts pipeline input by property name.
 
         .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific firewall
+        when you work with more than one at a time. Any connection parameter you pass
+        explicitly still takes precedence. If omitted, the stored default connection is used.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. User name for the API login. The account needs administrative permission.
+        If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .INPUTS
+        System.Management.Automation.PSCustomObject. Name is bound by property name, for
+        example from Get-SfosThirdPartyFeed.
 
         .OUTPUTS
-        None. Throws an exception if the removal fails or cannot be confirmed.
+        None. The cmdlet writes no output and raises an error if the removal fails or cannot
+        be confirmed.
+
+        .EXAMPLE
+        Remove-SfosThirdPartyFeed -Name 'AbuseChIPFeed' -WhatIf
+
+        Shows what the call would remove without sending it to the firewall.
 
         .EXAMPLE
         Remove-SfosThirdPartyFeed -Name 'AbuseChIPFeed'
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        Measured live and reproduced twice: Remove on this entity always answers code 500
-        "Deleted some configurations. Couldn't delete all." - for a genuinely nonexistent
-        object AND for a real object that the same call actually deletes cleanly. The message
-        text is identical in both cases, so the status code and message cannot distinguish
-        success from failure here at all (a stricter defect than the Code-528-on-nonexistent
-        pattern documented for other Remove-Sfos* cmdlets in this project, where at least the
-        object legitimately not existing is the trigger). This cmdlet therefore ignores that
-        status entirely (beyond checking the login itself did not fail) and determines the
-        real outcome from a follow-up Get: both the "object never existed" and "object deleted
-        successfully" paths were confirmed this way, twice.
+        Removes the ThirdPartyFeed object 'AbuseChIPFeed'.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/API/PROTECT/Active%20threat%20response/thirdpartyfeeds/operations/Delete%20Third-party%20threat%20feed.html
@@ -1666,9 +1643,9 @@ function Remove-SfosThirdPartyFeed {
             throw "Failed to remove ThirdPartyFeed object '$Name': $($_.Exception.Message)"
         }
 
-        # See .NOTES: the status code/message this entity returns on Remove cannot
-        # distinguish success from failure, so only the login is checked here and the real
-        # outcome is confirmed below with a follow-up Get.
+        # The status code/message this entity returns on Remove cannot distinguish success
+        # from failure, so only the login is checked here and the real outcome is confirmed
+        # below with a follow-up Get.
         $XmlResponse = [xml]$response.Content
         $loginNode = $XmlResponse.SelectSingleNode('/Response/Login/status')
         if ($loginNode -and [string]$loginNode.InnerText -notmatch 'Success') {
@@ -1684,7 +1661,7 @@ function Remove-SfosThirdPartyFeed {
                 Where-Object -FilterScript { $_.Name -eq $Name })
 
         if ($stillThere.Count -gt 0) {
-            throw "Failed to remove ThirdPartyFeed object '$Name': the firewall's delete response cannot be trusted for this entity (see .NOTES) and the object is still present."
+            throw "Failed to remove ThirdPartyFeed object '$Name': the firewall's delete response cannot be trusted for this entity and the object is still present."
         }
     }
 }

@@ -1,4 +1,4 @@
-@{
+﻿@{
     RootModule           = 'SophosFirewall.Authentication.psm1'
     ModuleVersion        = '1.1.0'
     GUID                 = '3c25abfe-0eba-4bc1-831a-d35445a2fd9f'
@@ -120,10 +120,9 @@
 
     PrivateData          = @{
         PSData = @{
-            Tags         = @('Sophos', 'Firewall', 'API', 'XGS', 'SFOS', 'Authentication', 'LDAP', 'RADIUS', 'OTP', 'SSO')
-            LicenseUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/blob/main/Modules/SophosFirewall.Authentication/LICENSE.txt'
-            ProjectUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/tree/main/Modules/SophosFirewall.Authentication'
-            ReleaseNotes = '1.1.0: Adds the -Session parameter to all 97 cmdlets for multi-session use (requires SophosFirewall.Core 1.3.0). 1.0.2: ConfirmImpact High on admin-authentication and guest-user-settings cmdlets; LiveUser login side effect and SMS gateway response-parameter indexes documented; if/else array-unwrap hardening.'
+            Tags       = @('Sophos', 'Firewall', 'API', 'XGS', 'SFOS', 'Authentication', 'LDAP', 'RADIUS', 'OTP', 'SSO')
+            LicenseUri = 'https://github.com/janweis/SophosFirewall-PowerShell/blob/main/Modules/SophosFirewall.Authentication/LICENSE.txt'
+            ProjectUri = 'https://github.com/janweis/SophosFirewall-PowerShell/tree/main/Modules/SophosFirewall.Authentication'
         }
     }
 }

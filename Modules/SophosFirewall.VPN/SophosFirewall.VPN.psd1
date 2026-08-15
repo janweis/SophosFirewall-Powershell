@@ -1,4 +1,4 @@
-@{
+﻿@{
     RootModule           = 'SophosFirewall.VPN.psm1'
     ModuleVersion        = '1.1.0'
     GUID                 = '2d774502-71be-403a-987f-12fad7d243b9'
@@ -74,10 +74,9 @@
 
     PrivateData          = @{
         PSData = @{
-            Tags         = @('Sophos', 'Firewall', 'API', 'XGS', 'SFOS', 'VPN', 'IPsec', 'SSLVPN', 'L2TP')
-            LicenseUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/blob/main/Modules/SophosFirewall.VPN/LICENSE.txt'
-            ProjectUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/tree/main/Modules/SophosFirewall.VPN'
-            ReleaseNotes = '1.1.0: Adds the -Session parameter to all 51 cmdlets for multi-session use (requires SophosFirewall.Core 1.3.0). 1.0.1: New-/Set-SfosL2TPConnection no longer fail open (write status is asserted at the measured flat path); ConfirmImpact High on Set-SfosL2TP-/PPTPConfiguration; measured docs updated.'
+            Tags       = @('Sophos', 'Firewall', 'API', 'XGS', 'SFOS', 'VPN', 'IPsec', 'SSLVPN', 'L2TP')
+            LicenseUri = 'https://github.com/janweis/SophosFirewall-PowerShell/blob/main/Modules/SophosFirewall.VPN/LICENSE.txt'
+            ProjectUri = 'https://github.com/janweis/SophosFirewall-PowerShell/tree/main/Modules/SophosFirewall.VPN'
         }
     }
 }

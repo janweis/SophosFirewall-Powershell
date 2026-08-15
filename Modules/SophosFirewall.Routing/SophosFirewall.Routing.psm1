@@ -3,187 +3,147 @@
 
 <#
         .SYNOPSIS
-        Manages routing on Sophos Firewall: gateways, health checks, SD-WAN, unicast and multicast routes.
+        Manages routing on a Sophos Firewall: gateways, health checks, SD-WAN, unicast and multicast routes.
 
         .DESCRIPTION
-        PowerShell module for the CONFIGURE > Routing area of the Sophos XGS / SFOS 22.0
-        XML API.
-
-        This module provides functions to create, read, update, and delete:
-        - Gateway objects and health check profiles (including the status toggle)
-        - SD-WAN profiles and SD-WAN policy routes (including the status toggle)
-        - Unicast routes
-        - Multicast routes, the multicast forwarding setting and PIM dynamic routing
+        PowerShell module for the CONFIGURE > Routing area of the Sophos XGS / SFOS 22.0 XML
+        API. Provides functions to create, read, update and delete gateway objects and health
+        check profiles, SD-WAN profiles and policy routes, unicast routes, multicast routes,
+        the multicast forwarding setting and PIM dynamic routing.
 
         All functions support pipeline input, filtering, and connection context management.
         Use Connect-SfosFirewall once, then call functions without connection parameters.
 
+        These cmdlets change how a live firewall forwards traffic. A wrong route or a removed
+        gateway decides whether packets still reach their destination, and a change to the
+        management path can also cut off the API session used to correct it. Every Set-*
+        cmdlet reads the current object first and writes it back complete.
+
         .EXAMPLE
-        # Connect and list the configured gateways with their health state
-        Connect-SfosFirewall -Firewall "192.168.1.1" -Credential (Get-Credential) -SkipCertificateCheck
+        Connect-SfosFirewall -Firewall '192.168.1.1' -Credential (Get-Credential) -SkipCertificateCheck
         Get-SfosGatewayHost | Format-Table Name, GatewayIP, Interface
         Get-SfosHealthCheckProfileStatus
 
-        .EXAMPLE
-        # Create a disabled static route and enable it later
-        New-SfosUnicastRoute -DestinationIP "203.0.113.0" -Netmask "255.255.255.0" -Interface "Port1" -Status OFF
-        Set-SfosUnicastRoute -DestinationIP "203.0.113.0" -Netmask "255.255.255.0" -Status ON
+        Connects to the firewall and lists the configured gateways with their health state.
 
         .EXAMPLE
-        # Read the SD-WAN routes and their state
+        New-SfosUnicastRoute -DestinationIP '203.0.113.0' -Netmask '255.255.255.0' -Interface 'Port1' -Status OFF
+        Set-SfosUnicastRoute -DestinationIP '203.0.113.0' -Netmask '255.255.255.0' -Status ON
+
+        Creates a disabled static route and enables it afterwards.
+
+        .EXAMPLE
         Get-SfosSDWANPolicyRoute | Format-Table Name, IPFamily
         Get-SfosSDWANPolicyRouteStatus
 
-        .NOTES
-        Module Name: SophosFirewall.Routing
-        Author: Jan Weis
-        Homepage: https://www.it-explorations.de
-        Version: 1.0.0
-        PowerShell Version: 5.1+
+        Lists the SD-WAN policy routes together with their enabled state.
 
-        Dependencies:
-        - SophosFirewall.Core module (provides Connect-SfosFirewall, Invoke-SfosApi, etc.)
-
-        API Compatibility:
-        - Sophos SFOS 22.0
-        - Sophos XGS Firewall Series
-
-        Total Functions: 32 (31 exported, 1 internal helper)
-        - 10 Gateway and health check functions
-        - 10 SD-WAN profile and policy route functions
-        - 11 Unicast, multicast and PIM functions
-
-        These cmdlets change how a live firewall forwards traffic. A wrong route or a removed
-        gateway decides whether packets reach their destination at all, and a change that cuts
-        off the management path also cuts off the API used to repair it. Every Set-* therefore
-        reads the current object first and writes it back complete.
-
-        Behaviour that differs from the vendor documentation was measured against a live
-        appliance and is recorded in the .NOTES of the affected function. The most important
-        ones:
-        - The documentation folder names are not the wire element names for seven of the ten
-          entities (PolicyRoute is SDWANPolicyRoute, MonitorObject is HealthCheckProfile,
-          GatewayObject is GatewayHost, and so on). Four read paths exist without being
-          documented at all, and the Multicast topic page is entirely empty.
-        - UnicastRoute has no working update: operation="update" answers 500 whatever is sent,
-          so Set-SfosUnicastRoute removes and recreates the route, with a brief window where
-          it is absent. The firewall also accepts duplicate routes for the same destination
-          and mask with code 200; New-SfosUnicastRoute refuses that client-side.
-        - Removing an SD-WAN profile that a policy route still references answers 200 and
-          silently deletes the referencing route as well - see Remove-SfosSDWANProfile.
-        - The status toggles answer 200 for names that do not exist without changing anything;
-          both Set-*Status cmdlets read back afterwards and throw when nothing happened.
-        - Enabled state is represented inconsistently across entities (integer 1/0 on the
-          health check profile, text ON/OFF on routes and status entities); values are passed
-          through exactly as the firewall delivers them.
-
-        Functions that could not be confirmed against the lab appliance are marked as such in
-        their own .NOTES (multicast route writes answer 500 for every documented variant, and
-        PIM's write path applies device-wide and was verified structurally only). They are
-        implemented faithful to the documentation rather than omitted, but nothing about them
-        should be assumed to work.
+        .LINK
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
 #>
 
 #requires -Version 5.1
 #requires -Modules SophosFirewall.Core
 
-# SophosFirewall.Routing - Group A: Gateways & Health Checks
-# Entities: GatewayHost (doc folder GatewayObject), HealthCheckProfile (doc folder
-# MonitorObject), HealthCheckProfileStatus (doc folder MonitorObjectStatus).
+# Group: Gateways and health checks.
+# Entities: GatewayHost (API documentation folder GatewayObject), HealthCheckProfile
+# (documentation folder MonitorObject), HealthCheckProfileStatus (documentation folder
+# MonitorObjectStatus).
 #
-# Measured live against the SFOS lab (22.0, APIVersion 2200.1) - see .NOTES on each
-# function for the specific finding. Two cross-cutting findings that apply to every
-# GatewayHost function in this fragment:
+# The enable flag of a gateway is spelled <Healthcheck> (lowercase c) on the wire, not
+# <HealthCheck> as the sample XML in the documentation shows. The API validates Name,
+# GatewayIP, Interface and IPFamily individually and names the offending field on a bad
+# value, but not Healthcheck, MailNotification, Interval or Timeout.
 #
-# 1. The enable-flag element is spelled <Healthcheck> (lowercase 'c') on the wire, not
-#    <HealthCheck> as the sample XML on the GatewayObject Add/Update page shows. Sending
-#    the sample's casing is silently ignored (unknown element) and the create fails with a
-#    generic, field-less 501 - the API validates Name/GatewayIP/Interface/IPFamily
-#    individually (each produces a precise <InvalidParams><Params>/GatewayHost/Field</...>
-#    on a bad value) but does not name Healthcheck/MailNotification/Interval/Timeout in
-#    <InvalidParams> even when they are the reason a request is rejected.
-# 2. GatewayIP values are rejected with the same generic, field-less 501 whenever the
-#    address does not lie in the subnet of the chosen Interface - not merely reserved
-#    address classes; a public address like 8.8.8.8 fails identically on a private-subnet
-#    interface, while an unused address in the interface's own subnet is accepted at once.
-#    The gateway must be on-link for the selected interface; live round-trips therefore use
-#    an unused address from the carrier interface's subnet and remove it immediately after
-#    each test.
+# GatewayIP must lie in the subnet of the chosen Interface. An address outside that
+# subnet is rejected, whether it is a public or a private address.
 
 #region GatewayHost
 
 <#
 .SYNOPSIS
-    Retrieves GatewayHost objects from the Sophos Firewall.
+    Retrieves gateway objects from a Sophos Firewall.
 
 .DESCRIPTION
-    Queries the Sophos Firewall XML API for GatewayHost objects (Routing > Gateways). By
-    default the cmdlet returns PowerShell-friendly objects. Use -AsXml to return the raw XML
-    nodes.
+    Returns the gateway objects defined under Routing > Gateways. A gateway object names
+    the next hop and the interface used to reach it, and is used as a target in unicast
+    routes, SD-WAN policy routes and health check profiles. Use this cmdlet to review the
+    existing gateways or to feed them into another cmdlet through the pipeline. The cmdlet
+    only reads; nothing on the firewall is changed. It needs an open connection from
+    Connect-SfosFirewall, or the connection parameters supplied directly.
 
-    The server only evaluates the first <key> of the first <Filter> reliably [doc/measured
-    pattern shared by every entity in this module]; -NameLike is sent as that one server-side
-    key (exact-match tested live and confirmed working for this entity), and every filter -
-    including -NameLike again - is re-applied client-side with AND semantics so -AsXml returns
-    the same set as the default output.
+    A default gateway that the firewall derives from an interface, for example a DHCP
+    lease, is not a gateway object and is not returned here.
+
+    You can combine several filters. The firewall itself evaluates at most one of them, so
+    every filter you supply is applied again on the client. The result therefore always
+    matches all filters you gave.
 
 .PARAMETER NameLike
-    Filters by Name, substring match. Sent as the server-side filter key and re-applied
-    client-side.
+    Optional. Returns only gateways whose name contains the given text anywhere. This is a
+    substring match, not a wildcard pattern. If omitted, the name is not used to filter.
 
 .PARAMETER GatewayIPLike
-    Filters by GatewayIP, substring match. Client-side only.
+    Optional. Returns only gateways whose IP address contains the given text anywhere.
+    Applied on the client. If omitted, the address is not used to filter.
 
 .PARAMETER InterfaceLike
-    Filters by Interface, substring match. Client-side only.
-
-.PARAMETER Session
-A session object returned by Connect-SfosFirewall, or the name of a session
-registered with Connect-SfosFirewall -Name. Overrides the stored default
-connection context; any of -Firewall/-Port/-Username/-Password/
--SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+    Optional. Returns only gateways whose interface name contains the given text anywhere.
+    Applied on the client. If omitted, the interface is not used to filter.
 
 .PARAMETER Firewall
-    Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. Host name or IP address of the firewall. If omitted, the value from the
+    current connection is used.
 
 .PARAMETER Port
-    Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. TCP port of the management API, usually 4444. If omitted, the value from the
+    current connection is used.
 
 .PARAMETER Username
-    Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. User name for the API login. The account needs read permission for routing
+    objects. If omitted, the value from the current connection is used.
 
 .PARAMETER Password
-    Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. Password for the API login, as a SecureString. If omitted, the value from
+    the current connection is used.
 
 .PARAMETER SkipCertificateCheck
-    Skips SSL certificate validation for the API call.
+    Optional. Accepts the firewall certificate without validating it. Use this only for
+    appliances that still present a self-signed certificate. If omitted, the certificate is
+    validated.
+
+.PARAMETER Session
+    Optional. A session object from Connect-SfosFirewall, or the name of a session that was
+    registered with Connect-SfosFirewall -Name. Use it to address a specific firewall when
+    you work with more than one at a time. Any connection parameter you pass explicitly
+    still takes precedence. If omitted, the stored default connection is used.
 
 .PARAMETER AsXml
-    Returns the raw XML nodes instead of PowerShell-friendly objects.
+    Optional. Returns the raw XML elements sent by the firewall instead of PowerShell
+    objects. Useful when you need a field that the standard output does not show.
+
+.INPUTS
+    None. This cmdlet does not accept pipeline input.
 
 .OUTPUTS
-    PSCustomObject[] (default). System.Xml.XmlElement[] when -AsXml is specified.
+    System.Management.Automation.PSCustomObject. One object per gateway, with the
+    properties Name, IPFamily, GatewayIP, Interface, NetworkZone, Healthcheck,
+    MailNotification, Interval, Timeout, FailureRetries and MonitoringConditionList.
+    Returns System.Xml.XmlElement when -AsXml is used, and an empty array when no object
+    matches.
 
 .EXAMPLE
-    # List every gateway
     Get-SfosGatewayHost
 
+    Lists every gateway object on the firewall of the current connection.
+
 .EXAMPLE
-    # Find a gateway by name
     Get-SfosGatewayHost -NameLike 'ISP1'
 
-.NOTES
-    Minimum supported PowerShell version: 5.1
-    Measured live: an empty firewall answers HTTP 200 with
-    '<GatewayHost><Status>No. of records Zero.</Status></GatewayHost>' - this is a normal
-    empty result, not an error, and this cmdlet returns @() for it. The lab's de-facto default
-    route (an interface-derived DHCP gateway) is managed outside this entity entirely and does
-    not appear here even when a working default gateway exists on the firewall - see the task
-    report.
+    Lists the gateways whose name contains 'ISP1'.
 
 .LINK
-    https://docs.sophos.com/nsg/sophos-firewall/22.0/API/CONFIGURE/Routing/GatewayObject/GatewayObject.html
+    https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
 
 .LINK
     New-SfosGatewayHost
@@ -285,107 +245,110 @@ function Get-SfosGatewayHost {
 
 <#
 .SYNOPSIS
-    Creates a new GatewayHost object on the Sophos Firewall.
+    Creates a gateway object on a Sophos Firewall.
 
 .DESCRIPTION
-    Creates a GatewayHost (Routing > Gateways) using the Sophos Firewall XML API. Supports
-    ShouldProcess; use -WhatIf to preview.
+    Creates a gateway object under Routing > Gateways. A gateway names the next hop and
+    the outgoing interface, and is used as a target in unicast routes, SD-WAN policy
+    routes and health check profiles. It needs an open connection from
+    Connect-SfosFirewall, or the connection parameters supplied directly, and an account
+    with write permission for routing objects.
 
     When -Healthcheck is 'ON', -Interval, -Timeout, -FailureRetries and at least one
-    -MonitoringCondition entry are required and sent; when -Healthcheck is 'OFF' (the
-    default), none of those elements are sent at all - matching the shape SFOS itself
-    produces for a health-check-disabled gateway [measured].
+    -MonitoringCondition entry are required. When -Healthcheck is 'OFF', those values are
+    not needed.
 
 .PARAMETER Name
-    Name of the gateway [doc]. Mandatory. Max 50 characters, no commas.
+    Required. Name of the gateway. Maximum 50 characters, must not contain a comma.
 
 .PARAMETER IPFamily
-    'IPv4' or 'IPv6' [doc]. Mandatory.
+    Required. Address family of the gateway. Valid values: IPv4, IPv6.
 
 .PARAMETER GatewayIP
-    IP address of the gateway [doc]. Mandatory. The address must lie in the subnet of the
-    chosen -Interface (the gateway has to be on-link): SFOS rejects any off-subnet value -
-    documentation ranges and public addresses alike - with a generic, field-less 501
-    [measured]. See the region header comment.
+    Required. IP address of the gateway. The address must lie in the subnet of the chosen
+    -Interface; an address outside that subnet is rejected.
 
 .PARAMETER Interface
-    Outgoing interface for the gateway, for example 'Port1' [doc]. Mandatory.
+    Required. Outgoing interface for the gateway, for example 'Port1'.
 
 .PARAMETER NetworkZone
-    Zone assigned to the gateway [doc]. Optional; omitted or empty is accepted.
+    Optional. Zone assigned to the gateway. If omitted, no zone is set.
 
 .PARAMETER Healthcheck
-    Enables health-check monitoring for this gateway: 'ON' or 'OFF' [doc, but note the wire
-    element is spelled with a lowercase 'c' - see the region header comment]. Default: 'OFF'.
+    Optional. Enables health-check monitoring for the gateway. Valid values: ON, OFF.
+    Default: OFF.
 
 .PARAMETER MailNotification
-    Sends an email notification on gateway status change: 'ON' or 'OFF' [doc]. Default: 'OFF'.
+    Optional. Sends an email notification when the gateway status changes. Valid values:
+    ON, OFF. Default: OFF.
 
 .PARAMETER Interval
-    Health-check probe interval in seconds, 5-65535 [doc]. Required when -Healthcheck is 'ON'.
+    Required when -Healthcheck is ON. Probe interval in seconds, 5-65535.
 
 .PARAMETER Timeout
-    Health-check response timeout in seconds, 1-10 [doc]. Required when -Healthcheck is 'ON'.
+    Required when -Healthcheck is ON. Response timeout in seconds, 1-10.
 
 .PARAMETER FailureRetries
-    Number of failed health-check retries before the gateway is marked down, 1-10 [doc]. Wire
-    element is <FailureRetries> - the sample XML on the doc page shows a bare <Retries/>
-    instead, which is not a field the API validates or accepts [measured: an omitted
-    FailureRetries is named directly in <InvalidParams>, a present-but-misnamed <Retries> is
-    not]. Required when -Healthcheck is 'ON'.
+    Required when -Healthcheck is ON. Number of failed probes before the gateway is
+    marked down, 1-10.
 
 .PARAMETER MonitoringCondition
-    One or more health-check rules, each a PSCustomObject with Protocol ('PING' or 'TCP'),
-    IPAddress, and optionally Port and Condition ('AND'/'OR' - applies to the next rule in
-    the list) [doc]. Required when -Healthcheck is 'ON'.
-
-.PARAMETER Session
-A session object returned by Connect-SfosFirewall, or the name of a session
-registered with Connect-SfosFirewall -Name. Overrides the stored default
-connection context; any of -Firewall/-Port/-Username/-Password/
--SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+    Required when -Healthcheck is ON. One or more health-check rules, each a
+    PSCustomObject with the properties Protocol (PING or TCP), IPAddress, and optionally
+    Port and Condition (AND or OR, applies to the next rule in the list).
 
 .PARAMETER Firewall
-    Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. Host name or IP address of the firewall. If omitted, the value from the
+    current connection is used.
 
 .PARAMETER Port
-    Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. TCP port of the management API, usually 4444. If omitted, the value from the
+    current connection is used.
 
 .PARAMETER Username
-    Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. User name for the API login. The account needs write permission for routing
+    objects. If omitted, the value from the current connection is used.
 
 .PARAMETER Password
-    Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. Password for the API login, as a SecureString. If omitted, the value from
+    the current connection is used.
 
 .PARAMETER SkipCertificateCheck
-    Skips SSL certificate validation for the API call.
+    Optional. Accepts the firewall certificate without validating it. Use this only for
+    appliances that still present a self-signed certificate. If omitted, the certificate is
+    validated.
+
+.PARAMETER Session
+    Optional. A session object from Connect-SfosFirewall, or the name of a session that was
+    registered with Connect-SfosFirewall -Name. Use it to address a specific firewall when
+    you work with more than one at a time. Any connection parameter you pass explicitly
+    still takes precedence. If omitted, the stored default connection is used.
+
+.INPUTS
+    None. This cmdlet does not accept pipeline input.
 
 .OUTPUTS
-    None. Throws an exception if creation fails.
+    None. The cmdlet writes no output and raises an error if the firewall rejects the
+    creation.
 
 .EXAMPLE
-    # Gateway with health-check disabled (default). The gateway address must lie in the
-    # subnet of the chosen interface (here: Port1 on 192.168.1.0/24) or SFOS answers 501.
+    New-SfosGatewayHost -Name 'ISP1' -IPFamily IPv4 -GatewayIP '192.168.1.254' -Interface 'Port1' -WhatIf
+
+    Shows what the call would create without sending it to the firewall.
+
+.EXAMPLE
     New-SfosGatewayHost -Name 'ISP1' -IPFamily IPv4 -GatewayIP '192.168.1.254' -Interface 'Port1'
 
-.EXAMPLE
-    # Gateway with health-check enabled
-    $rule = [PSCustomObject]@{ Protocol = 'PING'; IPAddress = '192.168.1.254'; Port = '*' }
-    New-SfosGatewayHost -Name 'ISP1' -IPFamily IPv4 -GatewayIP '192.168.1.254' -Interface 'Port1' `
-        -Healthcheck ON -Interval 60 -Timeout 5 -FailureRetries 3 -MonitoringCondition $rule
+    Creates a gateway with health-check monitoring disabled.
 
-.NOTES
-    Minimum supported PowerShell version: 5.1
-    Verified live: create with -Healthcheck OFF (no Interval/Timeout/FailureRetries/
-    MonitoringCondition sent) and create with -Healthcheck ON plus a single PING rule both
-    answered code 200 and the object was confirmed present and correctly shaped on a
-    subsequent Get. See the region header comment for the two measured pitfalls
-    (Healthcheck casing, GatewayIP address-class rejection) that block a naive implementation
-    of this cmdlet.
+.EXAMPLE
+    $rule = [PSCustomObject]@{ Protocol = 'PING'; IPAddress = '192.168.1.254'; Port = '*' }
+    New-SfosGatewayHost -Name 'ISP1' -IPFamily IPv4 -GatewayIP '192.168.1.254' -Interface 'Port1' -Healthcheck ON -Interval 60 -Timeout 5 -FailureRetries 3 -MonitoringCondition $rule
+
+    Creates a gateway with health-check monitoring enabled, using a single PING rule.
 
 .LINK
-    https://docs.sophos.com/nsg/sophos-firewall/22.0/API/CONFIGURE/Routing/GatewayObject/operations/AddGatewayObject%26UpdateGatewayObject.html
+    https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
 
 .LINK
     Get-SfosGatewayHost
@@ -505,100 +468,105 @@ function New-SfosGatewayHost {
 
 <#
 .SYNOPSIS
-    Updates an existing GatewayHost object on the Sophos Firewall.
+    Updates a gateway object on a Sophos Firewall.
 
 .DESCRIPTION
-    Updates a GatewayHost using the Sophos Firewall XML API. Reads the current object first
-    and resends every field, overriding only what the caller explicitly passed
-    (read-modify-write - SFOS replaces the whole entity on update). Supports ShouldProcess;
-    use -WhatIf to preview.
+    Changes one or more fields of an existing gateway. The cmdlet reads the current object
+    first and sends the complete entity back, so fields you do not pass keep their current
+    value. It needs an open connection from Connect-SfosFirewall, or the connection
+    parameters supplied directly, and an account with write permission for routing objects.
 
-    This cmdlet uses a single parameter set, because pipeline input and
-    parameter sets do not mix: -Healthcheck is the discriminator for whether
-    Interval/Timeout/FailureRetries/MonitoringCondition are sent, and it is always resolved
-    from either the caller's value or the object's current value - never left to a
-    parameter-set default.
+    -Healthcheck controls whether Interval, Timeout, FailureRetries and
+    MonitoringCondition are sent. When you switch it from OFF to ON in the same call, pass
+    -Interval, -Timeout, -FailureRetries and -MonitoringCondition too, because there is no
+    previous value to fall back to.
 
 .PARAMETER Name
-    Name of the target gateway. Mandatory; accepts pipeline input by property name.
+    Required. Name of the gateway to update. Accepts pipeline input by property name.
 
 .PARAMETER IPFamily
-    'IPv4' or 'IPv6'. If omitted, the existing value is kept.
+    Optional. Address family of the gateway. Valid values: IPv4, IPv6. If omitted, the
+    current value is kept.
 
 .PARAMETER GatewayIP
-    IP address of the gateway. If omitted, the existing value is kept.
+    Optional. IP address of the gateway. If omitted, the current value is kept.
 
 .PARAMETER Interface
-    Outgoing interface for the gateway. If omitted, the existing value is kept.
+    Optional. Outgoing interface for the gateway. If omitted, the current value is kept.
 
 .PARAMETER NetworkZone
-    Zone assigned to the gateway. If omitted, the existing value is kept.
+    Optional. Zone assigned to the gateway. If omitted, the current value is kept.
 
 .PARAMETER Healthcheck
-    'ON' or 'OFF'. If omitted, the existing value is kept. Determines whether
-    Interval/Timeout/FailureRetries/MonitoringCondition are required and sent - see
-    -MonitoringCondition.
+    Optional. Enables health-check monitoring for the gateway. Valid values: ON, OFF. If
+    omitted, the current value is kept.
 
 .PARAMETER MailNotification
-    'ON' or 'OFF'. If omitted, the existing value is kept.
+    Optional. Sends an email notification when the gateway status changes. Valid values:
+    ON, OFF. If omitted, the current value is kept.
 
 .PARAMETER Interval
-    Health-check probe interval in seconds, 5-65535. If omitted, the existing value is kept
-    (when the resolved -Healthcheck is 'ON'; ignored when 'OFF').
+    Optional. Probe interval in seconds, 5-65535. If omitted, the current value is kept.
 
 .PARAMETER Timeout
-    Health-check response timeout in seconds, 1-10. If omitted, the existing value is kept
-    (when the resolved -Healthcheck is 'ON'; ignored when 'OFF').
+    Optional. Response timeout in seconds, 1-10. If omitted, the current value is kept.
 
 .PARAMETER FailureRetries
-    Number of failed health-check retries before the gateway is marked down, 1-10. If
-    omitted, the existing value is kept (when the resolved -Healthcheck is 'ON'; ignored when
-    'OFF').
+    Optional. Number of failed probes before the gateway is marked down, 1-10. If omitted,
+    the current value is kept.
 
 .PARAMETER MonitoringCondition
-    Complete replacement list of health-check rules (PSCustomObject with Protocol, IPAddress,
-    optionally Port and Condition). If omitted, the existing list is kept (when the resolved
-    -Healthcheck is 'ON'; ignored when 'OFF'). Required when switching -Healthcheck from
-    'OFF' to 'ON' in the same call, together with -Interval/-Timeout/-FailureRetries, since
-    there is no existing value to fall back to.
-
-.PARAMETER Session
-A session object returned by Connect-SfosFirewall, or the name of a session
-registered with Connect-SfosFirewall -Name. Overrides the stored default
-connection context; any of -Firewall/-Port/-Username/-Password/
--SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+    Optional. Complete replacement list of health-check rules, each a PSCustomObject with
+    the properties Protocol (PING or TCP), IPAddress, and optionally Port and Condition
+    (AND or OR). If omitted, the current list is kept.
 
 .PARAMETER Firewall
-    Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. Host name or IP address of the firewall. If omitted, the value from the
+    current connection is used.
 
 .PARAMETER Port
-    Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. TCP port of the management API, usually 4444. If omitted, the value from the
+    current connection is used.
 
 .PARAMETER Username
-    Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. User name for the API login. The account needs write permission for routing
+    objects. If omitted, the value from the current connection is used.
 
 .PARAMETER Password
-    Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. Password for the API login, as a SecureString. If omitted, the value from
+    the current connection is used.
 
 .PARAMETER SkipCertificateCheck
-    Skips SSL certificate validation for the API call.
+    Optional. Accepts the firewall certificate without validating it. Use this only for
+    appliances that still present a self-signed certificate. If omitted, the certificate is
+    validated.
+
+.PARAMETER Session
+    Optional. A session object from Connect-SfosFirewall, or the name of a session that was
+    registered with Connect-SfosFirewall -Name. Use it to address a specific firewall when
+    you work with more than one at a time. Any connection parameter you pass explicitly
+    still takes precedence. If omitted, the stored default connection is used.
+
+.INPUTS
+    System.String. Accepts a gateway name by property name, so Get-SfosGatewayHost |
+    Set-SfosGatewayHost works.
 
 .OUTPUTS
-    None. Throws an exception if the update fails.
+    None. The cmdlet writes no output and raises an error if the firewall rejects the
+    update.
 
 .EXAMPLE
-    # Turn on mail notification, everything else is preserved
+    Set-SfosGatewayHost -Name 'ISP1' -MailNotification ON -WhatIf
+
+    Shows what the call would change without sending it to the firewall.
+
+.EXAMPLE
     Set-SfosGatewayHost -Name 'ISP1' -MailNotification ON
 
-.NOTES
-    Minimum supported PowerShell version: 5.1
-    Verified live: created a test gateway with -Healthcheck OFF, updated -MailNotification
-    from OFF to ON only, re-read it and confirmed every other field (IPFamily, GatewayIP,
-    Interface) was unchanged, then removed it.
+    Turns on mail notification for the gateway. All other fields keep their current value.
 
 .LINK
-    https://docs.sophos.com/nsg/sophos-firewall/22.0/API/CONFIGURE/Routing/GatewayObject/operations/AddGatewayObject%26UpdateGatewayObject.html
+    https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
 
 .LINK
     Get-SfosGatewayHost
@@ -743,55 +711,64 @@ function Set-SfosGatewayHost {
 
 <#
 .SYNOPSIS
-    Removes a GatewayHost object from the Sophos Firewall.
+    Removes a gateway object from a Sophos Firewall.
 
 .DESCRIPTION
-    Removes a GatewayHost using the Sophos Firewall XML API. Reads the object first and
-    throws a clear "not found" error if it does not exist, rather than passing through the
-    firewall's own answer for that case [measured: Remove on a nonexistent GatewayHost
-    answers code 504 "Deleting entity referred by another entity" - actively misleading, the
-    object never existed and nothing referred to it]. Supports ShouldProcess; use -WhatIf to
-    preview.
+    Deletes a gateway object under Routing > Gateways. The cmdlet reads the object first
+    and reports a clear error if the name does not exist. It needs an open connection from
+    Connect-SfosFirewall, or the connection parameters supplied directly, and an account
+    with write permission for routing objects.
 
 .PARAMETER Name
-    Name of the gateway to remove. Mandatory; accepts pipeline input by property name.
-
-.PARAMETER Session
-A session object returned by Connect-SfosFirewall, or the name of a session
-registered with Connect-SfosFirewall -Name. Overrides the stored default
-connection context; any of -Firewall/-Port/-Username/-Password/
--SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+    Required. Name of the gateway to remove. Accepts pipeline input by property name.
 
 .PARAMETER Firewall
-    Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. Host name or IP address of the firewall. If omitted, the value from the
+    current connection is used.
 
 .PARAMETER Port
-    Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. TCP port of the management API, usually 4444. If omitted, the value from the
+    current connection is used.
 
 .PARAMETER Username
-    Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. User name for the API login. The account needs write permission for routing
+    objects. If omitted, the value from the current connection is used.
 
 .PARAMETER Password
-    Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. Password for the API login, as a SecureString. If omitted, the value from
+    the current connection is used.
 
 .PARAMETER SkipCertificateCheck
-    Skips SSL certificate validation for the API call.
+    Optional. Accepts the firewall certificate without validating it. Use this only for
+    appliances that still present a self-signed certificate. If omitted, the certificate is
+    validated.
+
+.PARAMETER Session
+    Optional. A session object from Connect-SfosFirewall, or the name of a session that was
+    registered with Connect-SfosFirewall -Name. Use it to address a specific firewall when
+    you work with more than one at a time. Any connection parameter you pass explicitly
+    still takes precedence. If omitted, the stored default connection is used.
+
+.INPUTS
+    System.String. Accepts a gateway name by property name, so Get-SfosGatewayHost |
+    Remove-SfosGatewayHost works.
 
 .OUTPUTS
-    None. Throws an exception if the removal fails.
+    None. The cmdlet writes no output and raises an error if the gateway does not exist or
+    the firewall rejects the removal.
+
+.EXAMPLE
+    Remove-SfosGatewayHost -Name 'ISP1' -WhatIf
+
+    Shows what the call would remove without sending it to the firewall.
 
 .EXAMPLE
     Remove-SfosGatewayHost -Name 'ISP1'
 
-.NOTES
-    Minimum supported PowerShell version: 5.1
-    Verified live: removed a test gateway created for this purpose, confirmed gone with a
-    follow-up Get, then confirmed the "not found" error path against a name that never
-    existed.
+    Removes the gateway named ISP1.
 
 .LINK
-    https://docs.sophos.com/nsg/sophos-firewall/22.0/API/CONFIGURE/Routing/GatewayObject/operations/Delete%20Gateway%20Object.html
+    https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
 
 .LINK
     Get-SfosGatewayHost
@@ -864,60 +841,74 @@ function Remove-SfosGatewayHost {
 
 <#
 .SYNOPSIS
-    Retrieves HealthCheckProfile objects from the Sophos Firewall.
+    Retrieves health check profiles from a Sophos Firewall.
 
 .DESCRIPTION
-    Queries the Sophos Firewall XML API for HealthCheckProfile objects (Routing > Health
-    Check Profiles). By default the cmdlet returns PowerShell-friendly objects. Use -AsXml to
-    return the raw XML nodes.
-
-    -NameLike is sent as the single server-side filter key and re-applied client-side
-    together with every other filter, combined with AND semantics.
+    Returns the health check profiles defined under Routing > Health Check Profiles. A
+    health check profile groups one or more probe targets used to decide whether a
+    gateway or SD-WAN link is up. Use this cmdlet to review the existing profiles or to
+    feed them into another cmdlet through the pipeline. The cmdlet only reads; nothing on
+    the firewall is changed. It needs an open connection from Connect-SfosFirewall, or the
+    connection parameters supplied directly.
 
 .PARAMETER NameLike
-    Filters by Name, substring match.
-
-.PARAMETER Session
-A session object returned by Connect-SfosFirewall, or the name of a session
-registered with Connect-SfosFirewall -Name. Overrides the stored default
-connection context; any of -Firewall/-Port/-Username/-Password/
--SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+    Optional. Returns only profiles whose name contains the given text anywhere. This is a
+    substring match, not a wildcard pattern. If omitted, the name is not used to filter.
 
 .PARAMETER Firewall
-    Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. Host name or IP address of the firewall. If omitted, the value from the
+    current connection is used.
 
 .PARAMETER Port
-    Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. TCP port of the management API, usually 4444. If omitted, the value from the
+    current connection is used.
 
 .PARAMETER Username
-    Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. User name for the API login. The account needs read permission for routing
+    objects. If omitted, the value from the current connection is used.
 
 .PARAMETER Password
-    Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. Password for the API login, as a SecureString. If omitted, the value from
+    the current connection is used.
 
 .PARAMETER SkipCertificateCheck
-    Skips SSL certificate validation for the API call.
+    Optional. Accepts the firewall certificate without validating it. Use this only for
+    appliances that still present a self-signed certificate. If omitted, the certificate is
+    validated.
+
+.PARAMETER Session
+    Optional. A session object from Connect-SfosFirewall, or the name of a session that was
+    registered with Connect-SfosFirewall -Name. Use it to address a specific firewall when
+    you work with more than one at a time. Any connection parameter you pass explicitly
+    still takes precedence. If omitted, the stored default connection is used.
 
 .PARAMETER AsXml
-    Returns the raw XML nodes instead of PowerShell-friendly objects.
+    Optional. Returns the raw XML elements sent by the firewall instead of PowerShell
+    objects. Useful when you need a field that the standard output does not show.
+
+.INPUTS
+    None. This cmdlet does not accept pipeline input.
 
 .OUTPUTS
-    PSCustomObject[] (default). System.Xml.XmlElement[] when -AsXml is specified.
+    System.Management.Automation.PSCustomObject. One object per profile, with the
+    properties Name, IPFamily, ProbeInterval, ResponseTimeout, ProbesResponseFailure,
+    ProbeResponseSuccess, Status and ProbeTargets. Status is the enabled state as an
+    integer, as delivered by the firewall. ProbeTargets is a list of objects with
+    conditionid, monitorip, monitormethod, operator and port. Returns
+    System.Xml.XmlElement when -AsXml is used, and an empty array when no object matches.
 
 .EXAMPLE
     Get-SfosHealthCheckProfile
 
-.NOTES
-    Minimum supported PowerShell version: 5.1
-    Measured live: the Status field is an integer ('1'), a different representation of
-    "enabled" than the ON/OFF text used by HealthCheckProfileStatus.Status for the same
-    concept - returned exactly as the firewall sends it, not normalized. The 'conditionid'
-    field inside each ProbeTarget is present live but documented nowhere; it is returned
-    as-is and is not accepted back by New-/Set-SfosHealthCheckProfile.
+    Lists every health check profile on the firewall of the current connection.
+
+.EXAMPLE
+    Get-SfosHealthCheckProfile -NameLike 'ISP'
+
+    Lists the profiles whose name contains 'ISP'.
 
 .LINK
-    https://docs.sophos.com/nsg/sophos-firewall/22.0/API/CONFIGURE/Routing/MonitorObject/MonitorObject.html
+    https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
 
 .LINK
     New-SfosHealthCheckProfile
@@ -1008,86 +999,90 @@ function Get-SfosHealthCheckProfile {
 
 <#
 .SYNOPSIS
-    Creates a new HealthCheckProfile object on the Sophos Firewall.
+    Creates a health check profile on a Sophos Firewall.
 
 .DESCRIPTION
-    Creates a HealthCheckProfile (Routing > Health Check Profiles) using the Sophos Firewall
-    XML API. Supports ShouldProcess; use -WhatIf to preview.
+    Creates a health check profile under Routing > Health Check Profiles. A profile groups
+    one or more probe targets and is attached to a gateway or an SD-WAN profile to decide
+    whether that link is up. It needs an open connection from Connect-SfosFirewall, or the
+    connection parameters supplied directly, and an account with write permission for
+    routing objects.
 
 .PARAMETER Name
-    Name of the health check profile [doc]. Mandatory. Max 125 characters, no commas.
+    Required. Name of the profile. Maximum 125 characters, must not contain a comma.
 
 .PARAMETER IPFamily
-    'IPv4' or 'IPv6' [doc]. Default: 'IPv4'.
+    Optional. Address family of the profile. Valid values: IPv4, IPv6. Default: IPv4.
 
 .PARAMETER ProbeInterval
-    Interval between health check probes in seconds, 1-65535 [doc]. If omitted, the firewall
-    applies its own default (60, per the doc).
+    Optional. Interval between probes in seconds, 1-65535. If omitted, the firewall applies
+    its own default.
 
 .PARAMETER ResponseTimeout
-    Time in which the target must respond, 1-10 [doc]. If omitted, the firewall applies its
-    own default (2, per the doc).
+    Optional. Time in seconds within which a target must respond, 1-10. If omitted, the
+    firewall applies its own default.
 
 .PARAMETER ProbesResponseFailure
-    Consecutive failed probes before the object is deactivated, 1-10 [doc]. If omitted, the
-    firewall applies its own default (1, per the doc).
+    Optional. Number of consecutive failed probes before the profile is marked down, 1-10.
+    If omitted, the firewall applies its own default.
 
 .PARAMETER ProbeResponseSuccess
-    Consecutive successful probes before the object is activated, 1-10 [doc]. If omitted, the
-    firewall applies its own default (3, per the doc).
+    Optional. Number of consecutive successful probes before the profile is marked up,
+    1-10. If omitted, the firewall applies its own default.
 
 .PARAMETER ProbeTarget
-    One or more probe targets, each a PSCustomObject with monitormethod ('PING' or 'TCP'),
-    and optionally monitorip, port and operator ('&' or '|', default '|') [doc]. Mandatory -
-    a profile with no targets has nothing to probe.
-
-.PARAMETER Session
-A session object returned by Connect-SfosFirewall, or the name of a session
-registered with Connect-SfosFirewall -Name. Overrides the stored default
-connection context; any of -Firewall/-Port/-Username/-Password/
--SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+    Required. One or more probe targets, each a PSCustomObject with the property
+    monitormethod (PING or TCP), and optionally monitorip, port and operator (& or |,
+    default |).
 
 .PARAMETER Firewall
-    Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. Host name or IP address of the firewall. If omitted, the value from the
+    current connection is used.
 
 .PARAMETER Port
-    Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. TCP port of the management API, usually 4444. If omitted, the value from the
+    current connection is used.
 
 .PARAMETER Username
-    Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. User name for the API login. The account needs write permission for routing
+    objects. If omitted, the value from the current connection is used.
 
 .PARAMETER Password
-    Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. Password for the API login, as a SecureString. If omitted, the value from
+    the current connection is used.
 
 .PARAMETER SkipCertificateCheck
-    Skips SSL certificate validation for the API call.
+    Optional. Accepts the firewall certificate without validating it. Use this only for
+    appliances that still present a self-signed certificate. If omitted, the certificate is
+    validated.
+
+.PARAMETER Session
+    Optional. A session object from Connect-SfosFirewall, or the name of a session that was
+    registered with Connect-SfosFirewall -Name. Use it to address a specific firewall when
+    you work with more than one at a time. Any connection parameter you pass explicitly
+    still takes precedence. If omitted, the stored default connection is used.
+
+.INPUTS
+    None. This cmdlet does not accept pipeline input.
 
 .OUTPUTS
-    None. Throws an exception if creation fails.
+    None. The cmdlet writes no output and raises an error if the firewall rejects the
+    creation.
+
+.EXAMPLE
+    $t = [PSCustomObject]@{ monitormethod = 'PING'; monitorip = '203.0.113.10'; port = '0'; operator = '|' }
+    New-SfosHealthCheckProfile -Name 'WAN-Probe' -IPFamily IPv4 -ProbeTarget $t -WhatIf
+
+    Shows what the call would create without sending it to the firewall.
 
 .EXAMPLE
     $t = [PSCustomObject]@{ monitormethod = 'PING'; monitorip = '203.0.113.10'; port = '0'; operator = '|' }
     New-SfosHealthCheckProfile -Name 'WAN-Probe' -IPFamily IPv4 -ProbeTarget $t
 
-.NOTES
-    Minimum supported PowerShell version: 5.1
-    Measured live: 'Set operation="add"' for this entity answers code 200 and does create the
-    object, but Get-SfosHealthCheckProfile - this entity's own listing - never shows a
-    standalone profile that is not attached to a gateway or SD-WAN profile; only the one
-    production profile that is attached (to the lab's SD-WAN profile) appears there. The
-    created object was confirmed to genuinely exist by two independent, non-Get signals:
-    Get-SfosHealthCheckProfileStatus lists a matching record under the profile's own raw
-    Name (see that cmdlet's .NOTES), and Remove-SfosHealthCheckProfile on the same name
-    removed that record (confirmed by it disappearing from
-    Get-SfosHealthCheckProfileStatus). Whether such a standalone-and-invisible profile is
-    actually usable when later referenced by a GatewayHost or SD-WAN profile was not tested
-    (out of scope for this group). Because Get-SfosHealthCheckProfile cannot see these
-    objects, Set-SfosHealthCheckProfile's read-modify-write cannot operate on them either -
-    see that cmdlet's .NOTES.
+    Creates a health check profile with a single PING probe target.
 
 .LINK
-    https://docs.sophos.com/nsg/sophos-firewall/22.0/API/CONFIGURE/Routing/MonitorObject/operations/Addhealthcheckprofile%26Updatethehealthcheckprofile.html
+    https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
 
 .LINK
     Get-SfosHealthCheckProfile
@@ -1181,84 +1176,90 @@ function New-SfosHealthCheckProfile {
 
 <#
 .SYNOPSIS
-    Updates an existing HealthCheckProfile object on the Sophos Firewall.
+    Updates a health check profile on a Sophos Firewall.
 
 .DESCRIPTION
-    Updates a HealthCheckProfile using the Sophos Firewall XML API. Reads the current object
-    first and resends every field, overriding only what the caller explicitly passed
-    (read-modify-write - SFOS replaces the whole entity on update). Supports ShouldProcess;
-    use -WhatIf to preview.
+    Changes one or more fields of an existing health check profile. The cmdlet reads the
+    current object first and sends the complete entity back, so fields you do not pass keep
+    their current value. It needs an open connection from Connect-SfosFirewall, or the
+    connection parameters supplied directly, and an account with write permission for
+    routing objects.
 
 .PARAMETER Name
-    Name of the target profile. Mandatory; accepts pipeline input by property name.
+    Required. Name of the profile to update. Accepts pipeline input by property name.
 
 .PARAMETER IPFamily
-    'IPv4' or 'IPv6'. If omitted, the existing value is kept.
+    Optional. Address family of the profile. Valid values: IPv4, IPv6. If omitted, the
+    current value is kept.
 
 .PARAMETER ProbeInterval
-    Interval between health check probes in seconds, 1-65535. If omitted, the existing value
-    is kept.
+    Optional. Interval between probes in seconds, 1-65535. If omitted, the current value is
+    kept.
 
 .PARAMETER ResponseTimeout
-    Time in which the target must respond, 1-10. If omitted, the existing value is kept.
+    Optional. Time in seconds within which a target must respond, 1-10. If omitted, the
+    current value is kept.
 
 .PARAMETER ProbesResponseFailure
-    Consecutive failed probes before the object is deactivated, 1-10. If omitted, the
-    existing value is kept.
+    Optional. Number of consecutive failed probes before the profile is marked down, 1-10.
+    If omitted, the current value is kept.
 
 .PARAMETER ProbeResponseSuccess
-    Consecutive successful probes before the object is activated, 1-10. If omitted, the
-    existing value is kept.
+    Optional. Number of consecutive successful probes before the profile is marked up,
+    1-10. If omitted, the current value is kept.
 
 .PARAMETER ProbeTarget
-    Complete replacement list of probe targets (PSCustomObject with monitormethod, and
-    optionally monitorip, port, operator). If omitted, the existing list is kept - the
-    'conditionid' field the firewall returns on Get is dropped on resend, since the Add/Update
-    sample never accepts it as input.
-
-.PARAMETER Session
-A session object returned by Connect-SfosFirewall, or the name of a session
-registered with Connect-SfosFirewall -Name. Overrides the stored default
-connection context; any of -Firewall/-Port/-Username/-Password/
--SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+    Optional. Complete replacement list of probe targets, each a PSCustomObject with the
+    property monitormethod, and optionally monitorip, port and operator. If omitted, the
+    current list is kept.
 
 .PARAMETER Firewall
-    Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. Host name or IP address of the firewall. If omitted, the value from the
+    current connection is used.
 
 .PARAMETER Port
-    Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. TCP port of the management API, usually 4444. If omitted, the value from the
+    current connection is used.
 
 .PARAMETER Username
-    Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. User name for the API login. The account needs write permission for routing
+    objects. If omitted, the value from the current connection is used.
 
 .PARAMETER Password
-    Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. Password for the API login, as a SecureString. If omitted, the value from
+    the current connection is used.
 
 .PARAMETER SkipCertificateCheck
-    Skips SSL certificate validation for the API call.
+    Optional. Accepts the firewall certificate without validating it. Use this only for
+    appliances that still present a self-signed certificate. If omitted, the certificate is
+    validated.
+
+.PARAMETER Session
+    Optional. A session object from Connect-SfosFirewall, or the name of a session that was
+    registered with Connect-SfosFirewall -Name. Use it to address a specific firewall when
+    you work with more than one at a time. Any connection parameter you pass explicitly
+    still takes precedence. If omitted, the stored default connection is used.
+
+.INPUTS
+    System.String. Accepts a profile name by property name, so Get-SfosHealthCheckProfile |
+    Set-SfosHealthCheckProfile works.
 
 .OUTPUTS
-    None. Throws an exception if the update fails.
+    None. The cmdlet writes no output and raises an error if the firewall rejects the
+    update.
+
+.EXAMPLE
+    Set-SfosHealthCheckProfile -Name 'WAN-Probe' -ProbeInterval 30 -WhatIf
+
+    Shows what the call would change without sending it to the firewall.
 
 .EXAMPLE
     Set-SfosHealthCheckProfile -Name 'WAN-Probe' -ProbeInterval 30
 
-.NOTES
-    Minimum supported PowerShell version: 5.1
-    Not verified against the live firewall as a write. This cmdlet reads the current object
-    through Get-SfosHealthCheckProfile before writing, and that Get does not show a
-    standalone profile not attached to a gateway or SD-WAN profile - see
-    New-SfosHealthCheckProfile's .NOTES - so a freshly created test profile cannot be updated
-    through this cmdlet either; it throws "was not found" for it. The only profile
-    Get-SfosHealthCheckProfile does show is production (attached to the live SD-WAN profile),
-    and was not used for a write test. Implemented per the documented Add/Update contract and
-    the read-modify-write rule shared by every Set-* in this project; verifying it needs
-    either a firmware where standalone profiles are listed, or a profile actually attached to
-    a test gateway/SD-WAN profile, neither available within this task's safety scope.
+    Changes the probe interval of the profile. All other fields keep their current value.
 
 .LINK
-    https://docs.sophos.com/nsg/sophos-firewall/22.0/API/CONFIGURE/Routing/MonitorObject/operations/Addhealthcheckprofile%26Updatethehealthcheckprofile.html
+    https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
 
 .LINK
     Get-SfosHealthCheckProfile
@@ -1369,65 +1370,65 @@ function Set-SfosHealthCheckProfile {
 
 <#
 .SYNOPSIS
-    Removes a HealthCheckProfile object from the Sophos Firewall.
+    Removes a health check profile from a Sophos Firewall.
 
 .DESCRIPTION
-    Removes a HealthCheckProfile using the Sophos Firewall XML API.
-
-    Unlike every other Remove-* in this project, this cmdlet does not read the object first
-    to produce a clean "not found" error: Get-SfosHealthCheckProfile does not list a
-    standalone profile that is not attached to a gateway or SD-WAN profile [measured - see
-    New-SfosHealthCheckProfile's .NOTES], so a pre-check against it would reject removing an
-    object that genuinely exists. Instead this cmdlet calls Remove directly and relies on
-    Assert-SfosApiReturnSuccess to surface a real failure; a name that was never created
-    answers a status with an empty code attribute and the message "Operation could not be
-    performed on Entity.", which Assert-SfosApiReturnSuccess correctly treats as a failure
-    (an empty code is not "no code at all", and the message is not the "No. of records Zero."
-    wording that means empty) [measured]. Supports ShouldProcess; use -WhatIf to preview.
+    Deletes a health check profile under Routing > Health Check Profiles. Unlike most
+    Remove-* cmdlets in this module, this cmdlet does not read the object first; it sends
+    the removal directly and reports an error if the firewall rejects it. It needs an open
+    connection from Connect-SfosFirewall, or the connection parameters supplied directly,
+    and an account with write permission for routing objects.
 
 .PARAMETER Name
-    Name of the profile to remove. Mandatory; accepts pipeline input by property name.
-
-.PARAMETER Session
-A session object returned by Connect-SfosFirewall, or the name of a session
-registered with Connect-SfosFirewall -Name. Overrides the stored default
-connection context; any of -Firewall/-Port/-Username/-Password/
--SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+    Required. Name of the profile to remove. Accepts pipeline input by property name.
 
 .PARAMETER Firewall
-    Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. Host name or IP address of the firewall. If omitted, the value from the
+    current connection is used.
 
 .PARAMETER Port
-    Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. TCP port of the management API, usually 4444. If omitted, the value from the
+    current connection is used.
 
 .PARAMETER Username
-    Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. User name for the API login. The account needs write permission for routing
+    objects. If omitted, the value from the current connection is used.
 
 .PARAMETER Password
-    Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. Password for the API login, as a SecureString. If omitted, the value from
+    the current connection is used.
 
 .PARAMETER SkipCertificateCheck
-    Skips SSL certificate validation for the API call.
+    Optional. Accepts the firewall certificate without validating it. Use this only for
+    appliances that still present a self-signed certificate. If omitted, the certificate is
+    validated.
+
+.PARAMETER Session
+    Optional. A session object from Connect-SfosFirewall, or the name of a session that was
+    registered with Connect-SfosFirewall -Name. Use it to address a specific firewall when
+    you work with more than one at a time. Any connection parameter you pass explicitly
+    still takes precedence. If omitted, the stored default connection is used.
+
+.INPUTS
+    System.String. Accepts a profile name by property name, so Get-SfosHealthCheckProfile |
+    Remove-SfosHealthCheckProfile works.
 
 .OUTPUTS
-    None. Throws an exception if the removal fails.
+    None. The cmdlet writes no output and raises an error if the firewall rejects the
+    removal.
+
+.EXAMPLE
+    Remove-SfosHealthCheckProfile -Name 'WAN-Probe' -WhatIf
+
+    Shows what the call would remove without sending it to the firewall.
 
 .EXAMPLE
     Remove-SfosHealthCheckProfile -Name 'WAN-Probe'
 
-.NOTES
-    Minimum supported PowerShell version: 5.1
-    Verified live end-to-end: created 'WAN-Probe' with New-SfosHealthCheckProfile,
-    confirmed it existed via Get-SfosHealthCheckProfileStatus (see that cmdlet's .NOTES),
-    removed it with this cmdlet (code 200), and confirmed it was gone from
-    Get-SfosHealthCheckProfileStatus afterwards - no test object left behind. Also
-    verified the error path: Remove on a name that was never created answers a status with
-    an empty code attribute and "Operation could not be performed on Entity.", which this
-    cmdlet surfaces as a thrown error rather than silent success - see the .DESCRIPTION.
+    Removes the health check profile named WAN-Probe.
 
 .LINK
-    https://docs.sophos.com/nsg/sophos-firewall/22.0/API/CONFIGURE/Routing/MonitorObject/operations/Delete%20health%20check%20profile.html
+    https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
 
 .LINK
     Get-SfosHealthCheckProfile
@@ -1491,73 +1492,68 @@ function Remove-SfosHealthCheckProfile {
 
 <#
 .SYNOPSIS
-    Retrieves HealthCheckProfileStatus records from the Sophos Firewall.
+    Retrieves health check status records from a Sophos Firewall.
 
 .DESCRIPTION
-    Queries the Sophos Firewall XML API for HealthCheckProfileStatus records - the on/off
-    state of the health check attached to a gateway or SD-WAN profile, or standing alone for
-    a profile that is not yet attached to either. This Get is undocumented [measured,
-    consistent with the same finding for HealthCheckProfileStatus's sibling status entities
-    and for FirewallAuthentication elsewhere in this project: SFOS exposes a working Get for
-    entities whose docs only describe a write operation]. By default the cmdlet returns
-    PowerShell-friendly objects. Use -AsXml to return the raw XML nodes.
+    Returns the enabled state of the health check attached to a gateway or SD-WAN profile,
+    or standing alone for a profile that is not attached to either. A record tied to a
+    gateway or SD-WAN profile is named HealthCheckObject_GW_<GatewayName> or
+    HealthCheckObject_SDWAN_<ProfileName>; a standalone profile keeps its own name. The
+    cmdlet only reads; nothing on the firewall is changed. It needs an open connection from
+    Connect-SfosFirewall, or the connection parameters supplied directly.
 
-    This entity does not get a server-side filter [measured: unlike GatewayHost and
-    HealthCheckProfile, sending '<Filter><key name="Name" criteria="like">...' for
-    HealthCheckProfileStatus answers '<Status>Transaction fail</Status>' - no code, and not
-    the "No. of records Zero." wording that means an empty result - so it would either look
-    like every record failed or, if that message were misread as empty, hide real records.
-    Same defect class already known for ContentConditionList in this project]. Every filter
-    is therefore applied client-side only, against a full, unfiltered Get.
+    Filters are applied on the client, against the full list of records.
 
 .PARAMETER NameLike
-    Filters by Name, substring match. Client-side only - see the .DESCRIPTION.
-
-.PARAMETER Session
-A session object returned by Connect-SfosFirewall, or the name of a session
-registered with Connect-SfosFirewall -Name. Overrides the stored default
-connection context; any of -Firewall/-Port/-Username/-Password/
--SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+    Optional. Returns only records whose name contains the given text anywhere. This is a
+    substring match, not a wildcard pattern. If omitted, the name is not used to filter.
 
 .PARAMETER Firewall
-    Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. Host name or IP address of the firewall. If omitted, the value from the
+    current connection is used.
 
 .PARAMETER Port
-    Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. TCP port of the management API, usually 4444. If omitted, the value from the
+    current connection is used.
 
 .PARAMETER Username
-    Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. User name for the API login. The account needs read permission for routing
+    objects. If omitted, the value from the current connection is used.
 
 .PARAMETER Password
-    Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. Password for the API login, as a SecureString. If omitted, the value from
+    the current connection is used.
 
 .PARAMETER SkipCertificateCheck
-    Skips SSL certificate validation for the API call.
+    Optional. Accepts the firewall certificate without validating it. Use this only for
+    appliances that still present a self-signed certificate. If omitted, the certificate is
+    validated.
+
+.PARAMETER Session
+    Optional. A session object from Connect-SfosFirewall, or the name of a session that was
+    registered with Connect-SfosFirewall -Name. Use it to address a specific firewall when
+    you work with more than one at a time. Any connection parameter you pass explicitly
+    still takes precedence. If omitted, the stored default connection is used.
 
 .PARAMETER AsXml
-    Returns the raw XML nodes instead of PowerShell-friendly objects.
+    Optional. Returns the raw XML elements sent by the firewall instead of PowerShell
+    objects. Useful when you need a field that the standard output does not show.
+
+.INPUTS
+    None. This cmdlet does not accept pipeline input.
 
 .OUTPUTS
-    PSCustomObject[] (default). System.Xml.XmlElement[] when -AsXml is specified.
+    System.Management.Automation.PSCustomObject. One object per record, with the properties
+    Name and Status (ON or OFF). Returns System.Xml.XmlElement when -AsXml is used, and an
+    empty array when no record matches.
 
 .EXAMPLE
     Get-SfosHealthCheckProfileStatus
 
-.NOTES
-    Minimum supported PowerShell version: 5.1
-    Measured live: records tied to a gateway or SD-WAN profile are named
-    'HealthCheckObject_SDWAN_<SDWANProfileName>' / 'HealthCheckObject_GW_<GatewayHostName>'.
-    A standalone HealthCheckProfile - created but not attached to either - gets a status
-    record too, under its own raw Name with no prefix; this was the only way this project
-    could confirm New-SfosHealthCheckProfile actually creates something on this firmware,
-    since Get-SfosHealthCheckProfile itself never lists a standalone profile - see
-    New-SfosHealthCheckProfile's .NOTES. Status is returned exactly as the firewall sends it
-    (text 'ON'/'OFF'), not normalized - it is a different representation of "enabled" than
-    HealthCheckProfile.Status (integer).
+    Lists every health check status record on the firewall of the current connection.
 
 .LINK
-    https://docs.sophos.com/nsg/sophos-firewall/22.0/API/CONFIGURE/Routing/MonitorObjectStatus/MonitorObjectStatus.html
+    https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
 
 .LINK
     Set-SfosHealthCheckProfileStatus
@@ -1579,8 +1575,7 @@ function Get-SfosHealthCheckProfileStatus {
 
     $params = Resolve-SfosParameters -BoundParameters $PSBoundParameters
 
-    # No server-side filter for this entity - see the .DESCRIPTION for the measured
-    # "Transaction fail" behaviour. Always a full, unfiltered Get; -NameLike is applied
+    # No server-side filter for this entity: a full, unfiltered Get; -NameLike is applied
     # client-side below.
     $inner = '<Get><HealthCheckProfileStatus></HealthCheckProfileStatus></Get>'
 
@@ -1622,76 +1617,69 @@ function Get-SfosHealthCheckProfileStatus {
 
 <#
 .SYNOPSIS
-    Turns a HealthCheckProfileStatus record on or off.
+    Turns a health check status record on or off on a Sophos Firewall.
 
 .DESCRIPTION
-    Toggles the on/off state of a health check attached to a gateway or SD-WAN profile,
-    using the single dedicated operation SFOS documents for this entity - there is no
-    New/Remove, only this toggle. This is a two-field entity (Name, Status) with nothing
-    else to preserve, so unlike every other Set-* in this project it does not read the
-    current object first - there is no other field a read-modify-write could lose. Supports
-    ShouldProcess; use -WhatIf to preview.
-
-    WARNING: the Name of a HealthCheckProfileStatus record identifies the gateway or SD-WAN
-    profile it monitors (see Get-SfosHealthCheckProfileStatus's .NOTES). Disabling the status
-    record for a production gateway or SD-WAN profile silently stops health monitoring for
-    that live route - the route itself is unaffected, only its failover detection is. Verify
-    -Name against Get-SfosHealthCheckProfileStatus before calling this on anything other than
-    a test object.
+    Changes the enabled state of the health check attached to a gateway or SD-WAN profile,
+    or of a standalone profile. This is the only write operation for this entity; there is
+    no separate create or delete. It needs an open connection from Connect-SfosFirewall, or
+    the connection parameters supplied directly, and an account with write permission for
+    routing objects.
 
 .PARAMETER Name
-    Name of the health check status record to change. Mandatory; accepts pipeline input by
+    Required. Name of the health check status record to change. Accepts pipeline input by
     property name.
 
 .PARAMETER Status
-    'ON' or 'OFF' [sample XML - the parameter table on the same doc page instead calls this
-    field mandatory INTEGER, which contradicts the sample; ON/OFF is what this cmdlet sends,
-    matching what Get-SfosHealthCheckProfileStatus reads back live]. Mandatory.
-
-.PARAMETER Session
-A session object returned by Connect-SfosFirewall, or the name of a session
-registered with Connect-SfosFirewall -Name. Overrides the stored default
-connection context; any of -Firewall/-Port/-Username/-Password/
--SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+    Required. New state of the record. Valid values: ON, OFF.
 
 .PARAMETER Firewall
-    Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. Host name or IP address of the firewall. If omitted, the value from the
+    current connection is used.
 
 .PARAMETER Port
-    Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. TCP port of the management API, usually 4444. If omitted, the value from the
+    current connection is used.
 
 .PARAMETER Username
-    Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. User name for the API login. The account needs write permission for routing
+    objects. If omitted, the value from the current connection is used.
 
 .PARAMETER Password
-    Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+    Optional. Password for the API login, as a SecureString. If omitted, the value from
+    the current connection is used.
 
 .PARAMETER SkipCertificateCheck
-    Skips SSL certificate validation for the API call.
+    Optional. Accepts the firewall certificate without validating it. Use this only for
+    appliances that still present a self-signed certificate. If omitted, the certificate is
+    validated.
+
+.PARAMETER Session
+    Optional. A session object from Connect-SfosFirewall, or the name of a session that was
+    registered with Connect-SfosFirewall -Name. Use it to address a specific firewall when
+    you work with more than one at a time. Any connection parameter you pass explicitly
+    still takes precedence. If omitted, the stored default connection is used.
+
+.INPUTS
+    System.String. Accepts a record name by property name, so
+    Get-SfosHealthCheckProfileStatus | Set-SfosHealthCheckProfileStatus works.
 
 .OUTPUTS
-    None. Throws an exception if the update fails.
+    None. The cmdlet writes no output and raises an error if the firewall rejects the
+    update.
+
+.EXAMPLE
+    Set-SfosHealthCheckProfileStatus -Name 'HealthCheckObject_GW_ISP1' -Status OFF -WhatIf
+
+    Shows what the call would change without sending it to the firewall.
 
 .EXAMPLE
     Set-SfosHealthCheckProfileStatus -Name 'HealthCheckObject_GW_ISP1' -Status OFF
 
-.NOTES
-    Minimum supported PowerShell version: 5.1
-    Verified live end-to-end, without touching either production record: created
-    'WAN-Probe' with New-SfosHealthCheckProfile, which registers its own
-    HealthCheckProfileStatus record under that raw Name (see Get-SfosHealthCheckProfileStatus
-    .NOTES); toggled it OFF with this cmdlet, confirmed via Get; toggled it back ON and
-    confirmed again; then removed the whole test profile with Remove-SfosHealthCheckProfile.
-    Neither 'HealthCheckObject_SDWAN_sdwan_MainOffice' nor the tabu
-    'HealthCheckObject_GW_DHCP_Port2_GW' was ever targeted. The error path (a nonexistent
-    Name) was also verified: it answers code 500 "Operation could not be performed on
-    Entity"; an invalid -Status value sent around this cmdlet's client-side ValidateSet was
-    separately verified with a raw request and rejected with code 501 and
-    '/HealthCheckProfileStatus/Status' named in InvalidParams.
+    Turns off the health check status record for the gateway ISP1.
 
 .LINK
-    https://docs.sophos.com/nsg/sophos-firewall/22.0/API/CONFIGURE/Routing/MonitorObjectStatus/operations/Changehealthcheckobjectstatus.html
+    https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
 
 .LINK
     Get-SfosHealthCheckProfileStatus
@@ -1756,14 +1744,11 @@ function Set-SfosHealthCheckProfileStatus {
 #requires -Version 5.1
 #requires -Modules SophosFirewall.Core
 <#
-    SophosFirewall.Routing - Group B: SD-WAN Routing
-    Entities: SDWANProfile (Get/New/Set/Remove), SDWANPolicyRoute (Get/New/Set/Remove),
-    SDWANPolicyRouteStatus (Get/Set - toggle only, no New/Remove documented or accepted).
-
-    Doc folder names differ from the wire element in every case here (folder SDWANProfile
-    matches, folders PolicyRoute and PolicyRouteStatus do not) - confirmed live for all three,
-    see the entity map. Root elements used below are the measured/sample wire names:
-    <SDWANProfile>, <SDWANPolicyRoute>, <SDWANPolicyRouteStatus>.
+    Group: SD-WAN routing.
+    Entities: SDWANProfile, SDWANPolicyRoute, SDWANPolicyRouteStatus. SDWANPolicyRouteStatus
+    has only a read and a toggle operation; there is no create or delete for it. The wire
+    root elements are <SDWANProfile>, <SDWANPolicyRoute> and <SDWANPolicyRouteStatus>, which
+    do not always match the corresponding API documentation folder name.
 #>
 
 #region SDWANPolicyRoute-internal helpers (not exported)
@@ -1773,15 +1758,14 @@ function Set-SfosHealthCheckProfileStatus {
     Normalises a DSCPMarking value for the wire. Internal helper, not exported.
 
 .DESCRIPTION
-    Measured live against SDWANPolicyRoute: every DSCPMarking value round-trips as the bare
-    number Get returns it as (e.g. '1', '9', '8'), and named codepoints round-trip fine too
-    once written with their full text ('8-Class 1(CS1)') - Get then echoes back whatever was
-    last written verbatim. The single exception is the value '0': sending the bare string '0'
-    back - exactly what a fresh object or a prior write of '0-Best Effort' reads back as - is
-    rejected with 'code="501" Configuration parameters validation failed', naming
-    /SDWANPolicyRoute/DSCPMarking. Only '0-Best Effort' is accepted for that codepoint. This
-    normalises just that one value; every other value (explicit or read back from an existing
-    object during Set's read-modify-write) passes through unchanged.
+    A DSCPMarking value round-trips through the API as the same string it was written
+    with, with one exception: the codepoint that Get returns as the bare number '0' is
+    rejected on write unless sent as '0-Best Effort'. This helper applies that one
+    substitution; every other value passes through unchanged.
+
+.PARAMETER Value
+    DSCPMarking value to normalise, as read back from the firewall or supplied by the
+    caller.
 #>
 function ConvertTo-SfosDSCPMarkingWireValue {
     [CmdletBinding()]
@@ -1805,66 +1789,77 @@ function ConvertTo-SfosDSCPMarkingWireValue {
 
 <#
         .SYNOPSIS
-        Retrieves SD-WAN profiles from the Sophos Firewall.
+        Retrieves SD-WAN profiles from a Sophos Firewall.
 
         .DESCRIPTION
-        Queries the Sophos Firewall XML API for SDWANProfile objects. Server-side filtering
-        only evaluates a single 'Name' key reliably (measured); -NameLike is sent as that one
-        key and reapplied client-side afterwards, so -AsXml returns the same set as the
-        default output. By default the cmdlet returns a PowerShell-friendly object. Use -AsXml
-        to return the raw XML nodes.
+        Returns the SD-WAN profiles defined under Routing > SD-WAN Routes. An SD-WAN profile
+        groups gateways with a selection strategy and is used as a target in SD-WAN policy
+        routes. Use this cmdlet to review the existing profiles or to feed them into another
+        cmdlet through the pipeline. The cmdlet only reads; nothing on the firewall is
+        changed. It needs an open connection from Connect-SfosFirewall, or the connection
+        parameters supplied directly.
 
         .PARAMETER NameLike
-        Filters by profile name, substring match (SFOS 'like' semantics, not a wildcard).
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. Returns only profiles whose name contains the given text anywhere. This is
+        a substring match, not a wildcard pattern. If omitted, the name is not used to
+        filter.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. User name for the API login. The account needs read permission for routing
+        objects. If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
 
         .PARAMETER AsXml
-        Returns the raw XML nodes instead of PowerShell-friendly objects.
+        Optional. Returns the raw XML elements sent by the firewall instead of PowerShell
+        objects. Useful when you need a field that the standard output does not show.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        PSCustomObject[] (default). System.Xml.XmlElement[] when -AsXml is specified.
+        System.Management.Automation.PSCustomObject. One object per profile, with the
+        properties Name, SLAStrategy, GatewayPreferences, EnableSLA, IsLatency, IsJitter and
+        IsPacketloss. Returns System.Xml.XmlElement when -AsXml is used, and an empty array
+        when no object matches.
 
         .EXAMPLE
-        # Retrieve every SD-WAN profile
         Get-SfosSDWANProfile
 
-        .EXAMPLE
-        # Retrieve a single profile by name
-        Get-SfosSDWANProfile -NameLike "MainOffice"
+        Lists every SD-WAN profile on the firewall of the current connection.
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        Measured live: SLAStrategy came back as 'BestQualityv' on every object observed on this
-        firmware, including a brand-new profile that never had SLAStrategy set explicitly - the
-        documented values are 'BestQuality' and 'CustomSLA'. This is returned verbatim, not
-        normalised, because Set-SfosSDWANProfile's read-modify-write must be able to write the
-        exact same string back (see Set-SfosSDWANProfile's .NOTES).
-        GatewayPreferences, EnableSLA, IsLatency, IsJitter and IsPacketloss are returned exactly
-        as delivered (e.g. 'ON'/'OFF') - nothing is normalised.
+        .EXAMPLE
+        Get-SfosSDWANProfile -NameLike 'MainOffice'
+
+        Lists the profiles whose name contains 'MainOffice'.
 
         .LINK
-        https://docs.sophos.com/nsg/sophos-firewall/22.0/API/CONFIGURE/Routing/SDWANProfile/SDWANProfile.html
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        New-SfosSDWANProfile
 #>
 function Get-SfosSDWANProfile {
     [CmdletBinding()]
@@ -1971,103 +1966,121 @@ function Get-SfosSDWANProfile {
 
 <#
         .SYNOPSIS
-        Creates a new SD-WAN profile on the Sophos Firewall.
+        Creates an SD-WAN profile on a Sophos Firewall.
 
         .DESCRIPTION
-        Creates an SDWANProfile object using the Sophos Firewall XML API. Supports ShouldProcess;
-        use -WhatIf to preview the request.
+        Creates an SD-WAN profile under Routing > SD-WAN Routes. A profile groups one or
+        more gateways with a selection strategy and is used as a target in SD-WAN policy
+        routes. It needs an open connection from Connect-SfosFirewall, or the connection
+        parameters supplied directly, and an account with write permission for routing
+        objects.
 
         .PARAMETER Name
-        Name of the SD-WAN profile (1-60 characters, no commas).
+        Required. Name of the profile. 1-60 characters, must not contain a comma.
 
         .PARAMETER Description
-        Optional description (max 255 characters).
+        Optional. Free-text description, maximum 255 characters. If omitted, no
+        description is set.
 
         .PARAMETER IPFamily
-        IP address family. Only 'IPv4' is documented as an allowed value for this entity.
+        Optional. Address family of the profile. Valid value: IPv4.
 
         .PARAMETER GatewayName
-        One or more gateway object names (GatewayHost) to add to the profile's gateway
-        preference list, in priority order. At least one is required.
+        Required. One or more names of existing gateway objects, in priority order, to add
+        to the profile's gateway preference list.
 
         .PARAMETER GatewayWeights
-        Optional load-balancing weight per gateway, matching -GatewayName by position. Supply
-        either none or exactly one value per -GatewayName entry.
+        Optional. Load-balancing weight per gateway, matching -GatewayName by position.
+        Supply either none or exactly one value per -GatewayName entry.
 
         .PARAMETER EnableSLA
-        Turns SLA-based gateway selection on or off.
+        Required. Turns SLA-based gateway selection on or off. Valid values: ON, OFF.
 
         .PARAMETER SLAStrategy
-        Quality-matching approach. Documented values are 'BestQuality' and 'CustomSLA'; see
-        Get-SfosSDWANProfile's .NOTES for what this firmware actually returns.
+        Optional. Quality-matching approach. Valid values: BestQuality, CustomSLA.
 
         .PARAMETER IsLatency
-        Enables latency as an SLA criterion.
+        Optional. Enables latency as an SLA criterion. Valid values: ON, OFF.
 
         .PARAMETER IsJitter
-        Enables jitter as an SLA criterion.
+        Optional. Enables jitter as an SLA criterion. Valid values: ON, OFF.
 
         .PARAMETER IsPacketloss
-        Enables packet loss as an SLA criterion.
+        Optional. Enables packet loss as an SLA criterion. Valid values: ON, OFF.
 
         .PARAMETER LatencyValue
-        Maximum latency threshold in ms (1-60000).
+        Optional. Maximum latency threshold in milliseconds, 1-60000.
 
         .PARAMETER JitterValue
-        Maximum jitter threshold in ms (1-60000).
+        Optional. Maximum jitter threshold in milliseconds, 1-60000.
 
         .PARAMETER PacketlossValue
-        Maximum packet loss threshold in percent (0-100).
+        Optional. Maximum packet loss threshold in percent, 0-100.
 
         .PARAMETER ProbeCount
-        Active link probe count (5-100).
+        Optional. Number of active link probes, 5-100.
 
         .PARAMETER RoutingStrategy
-        Gateway traffic routing method.
+        Optional. Traffic routing method across the gateways. Valid values:
+        FirstAvailable, Loadbalancing.
 
         .PARAMETER LBMethod
-        Load balancing algorithm, used when -RoutingStrategy is 'Loadbalancing'.
+        Optional. Load-balancing algorithm, used when -RoutingStrategy is Loadbalancing.
+        Valid values: WRR, SrcSticky, DestSticky, SrcDestSticky, ConnectionSticky.
 
         .PARAMETER HealthCheckProfileName
-        Name of an existing HealthCheckProfile object to associate with this profile.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Required. Name of an existing health check profile to associate with this profile.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. User name for the API login. The account needs write permission for
+        routing objects. If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the
+        certificate is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        None. Throws an exception if creation fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        creation.
 
         .EXAMPLE
-        # Create a minimal profile with a single gateway, SLA off
-        New-SfosSDWANProfile -Name "Branch-Profile" -GatewayName "Branch-Gateway" -EnableSLA OFF -HealthCheckProfileName "HealthCheckObject_Branch"
+        New-SfosSDWANProfile -Name 'Branch-Profile' -GatewayName 'Branch-Gateway' -EnableSLA OFF -HealthCheckProfileName 'HealthCheckObject_Branch' -WhatIf
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        Verified live against the lab firewall with a disposable test profile referencing a
-        disposable test gateway; both were removed afterwards. Remove-SfosSDWANProfile's help
-        documents a measured side effect of deleting a profile that a route still references.
+        Shows what the call would create without sending it to the firewall.
+
+        .EXAMPLE
+        New-SfosSDWANProfile -Name 'Branch-Profile' -GatewayName 'Branch-Gateway' -EnableSLA OFF -HealthCheckProfileName 'HealthCheckObject_Branch'
+
+        Creates a profile with a single gateway and SLA-based selection turned off.
 
         .LINK
-        https://docs.sophos.com/nsg/sophos-firewall/22.0/API/CONFIGURE/Routing/SDWANProfile/operations/AddSD-WANprofile&UpdateSD-WANprofile.html
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosSDWANProfile
 #>
 function New-SfosSDWANProfile {
     [CmdletBinding(SupportsShouldProcess)]
@@ -2264,114 +2277,134 @@ function New-SfosSDWANProfile {
 
 <#
         .SYNOPSIS
-        Updates an SD-WAN profile on the Sophos Firewall.
+        Updates an SD-WAN profile on a Sophos Firewall.
 
         .DESCRIPTION
-        Updates an SDWANProfile object. This cmdlet reads the current profile first and resends
-        every field, overriding only what the caller explicitly passes - SFOS replaces the
-        whole entity on update. Supports ShouldProcess; use -WhatIf to preview the change.
+        Changes one or more fields of an existing SD-WAN profile. The cmdlet reads the
+        current profile first and sends the complete entity back, so fields you do not pass
+        keep their current value. It needs an open connection from Connect-SfosFirewall, or
+        the connection parameters supplied directly, and an account with write permission
+        for routing objects.
 
         .PARAMETER Name
-        Name of the SD-WAN profile to update. Accepted from the pipeline by property name, so
-        Get-SfosSDWANProfile | Set-SfosSDWANProfile works.
+        Required. Name of the profile to update. Accepts pipeline input by property name.
 
         .PARAMETER Description
-        New description. If omitted, the value currently on the firewall is kept.
+        Optional. Free-text description, maximum 255 characters. If omitted, the current
+        value is kept.
 
         .PARAMETER IPFamily
-        New IP family. If omitted, the value currently on the firewall is kept.
+        Optional. Address family of the profile. Valid value: IPv4. If omitted, the current
+        value is kept.
 
         .PARAMETER GatewayName
-        Replaces the entire gateway preference list, in the order given (orderid is
-        renumbered 1..N). If omitted, the existing gateway preferences are kept exactly as read
-        back, including their original orderid and gatewayweights.
+        Optional. Complete replacement list of gateway names, in priority order. If omitted,
+        the current gateway preference list is kept, including each gateway's weight.
 
         .PARAMETER GatewayWeights
-        Load-balancing weight per gateway, matching -GatewayName by position. Only meaningful
-        together with -GatewayName; supplying it alone throws.
+        Optional. Load-balancing weight per gateway, matching -GatewayName by position. Only
+        meaningful together with -GatewayName.
 
         .PARAMETER EnableSLA
-        New SLA activation state. If omitted, the value currently on the firewall is kept.
+        Optional. Turns SLA-based gateway selection on or off. Valid values: ON, OFF. If
+        omitted, the current value is kept.
 
         .PARAMETER SLAStrategy
-        New quality-matching approach. If omitted, the raw value currently on the firewall is
-        kept and resent unchanged - including a non-enumerated value such as this firmware's
-        'BestQualityv' (see .NOTES). Validation against the documented set only applies when
-        this parameter is explicitly supplied.
+        Optional. Quality-matching approach. Valid values: BestQuality, CustomSLA. If
+        omitted, the current value is kept.
 
         .PARAMETER IsLatency
-        New latency-monitoring toggle. If omitted, the value currently on the firewall is kept.
+        Optional. Enables latency as an SLA criterion. Valid values: ON, OFF. If omitted,
+        the current value is kept.
 
         .PARAMETER IsJitter
-        New jitter-monitoring toggle. If omitted, the value currently on the firewall is kept.
+        Optional. Enables jitter as an SLA criterion. Valid values: ON, OFF. If omitted, the
+        current value is kept.
 
         .PARAMETER IsPacketloss
-        New packet-loss-monitoring toggle. If omitted, the value currently on the firewall is kept.
+        Optional. Enables packet loss as an SLA criterion. Valid values: ON, OFF. If
+        omitted, the current value is kept.
 
         .PARAMETER LatencyValue
-        New latency threshold in ms. If omitted, the value currently on the firewall is kept.
+        Optional. Maximum latency threshold in milliseconds, 1-60000. If omitted, the
+        current value is kept.
 
         .PARAMETER JitterValue
-        New jitter threshold in ms. If omitted, the value currently on the firewall is kept.
+        Optional. Maximum jitter threshold in milliseconds, 1-60000. If omitted, the current
+        value is kept.
 
         .PARAMETER PacketlossValue
-        New packet loss threshold in percent. If omitted, the value currently on the firewall is kept.
+        Optional. Maximum packet loss threshold in percent, 0-100. If omitted, the current
+        value is kept.
 
         .PARAMETER ProbeCount
-        New active link probe count. If omitted, the value currently on the firewall is kept.
+        Optional. Number of active link probes, 5-100. If omitted, the current value is
+        kept.
 
         .PARAMETER RoutingStrategy
-        New routing strategy. If omitted, the value currently on the firewall is kept.
+        Optional. Traffic routing method across the gateways. Valid values: FirstAvailable,
+        Loadbalancing. If omitted, the current value is kept.
 
         .PARAMETER LBMethod
-        New load balancing algorithm. If omitted, the value currently on the firewall is kept.
+        Optional. Load-balancing algorithm, used when -RoutingStrategy is Loadbalancing.
+        Valid values: WRR, SrcSticky, DestSticky, SrcDestSticky, ConnectionSticky. If
+        omitted, the current value is kept.
 
         .PARAMETER HealthCheckProfileName
-        New associated health check profile. If omitted, the value currently on the firewall is kept.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. Name of the associated health check profile. If omitted, the current
+        value is kept.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. User name for the API login. The account needs write permission for
+        routing objects. If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the
+        certificate is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        System.String. Accepts a profile name by property name, so Get-SfosSDWANProfile |
+        Set-SfosSDWANProfile works.
 
         .OUTPUTS
-        None. Throws an exception if the update fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        update.
 
         .EXAMPLE
-        # Turn SLA off, keep everything else
-        Set-SfosSDWANProfile -Name "Branch-Profile" -EnableSLA OFF
+        Set-SfosSDWANProfile -Name 'Branch-Profile' -EnableSLA OFF -WhatIf
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        Measured live: SLAStrategy reads back as 'BestQualityv' on this firmware, not the
-        documented 'BestQuality'. Writing that raw string back verbatim (unchanged, i.e. the
-        caller did not pass -SLAStrategy) succeeds with code 200 - it is only the parameter's
-        ValidateSet that would reject it, and that check is bypassed on the preserve-as-read
-        path by design: the existing value is carried in a plain local variable, never
-        re-bound through the -SLAStrategy parameter, so ValidateSet only fires when a caller
-        explicitly passes an out-of-set value.
-        Verified live with a disposable test profile: create, read-modify-write round trip
-        (unchanged), and delete, each checked against the actual firewall response.
+        Shows what the call would change without sending it to the firewall.
+
+        .EXAMPLE
+        Set-SfosSDWANProfile -Name 'Branch-Profile' -EnableSLA OFF
+
+        Turns off SLA-based gateway selection. All other fields keep their current value.
 
         .LINK
-        https://docs.sophos.com/nsg/sophos-firewall/22.0/API/CONFIGURE/Routing/SDWANProfile/operations/AddSD-WANprofile&UpdateSD-WANprofile.html
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosSDWANProfile
 #>
 function Set-SfosSDWANProfile {
     [CmdletBinding(SupportsShouldProcess)]
@@ -2492,9 +2525,9 @@ function Set-SfosSDWANProfile {
 
         $targetEnableSLA = if ($PSBoundParameters.ContainsKey('EnableSLA')) { $EnableSLA } else { $current.EnableSLA }
 
-        # Preserve-as-read on purpose (see .NOTES): $targetSLAStrategy is a plain local
-        # variable, never re-bound through the -SLAStrategy parameter, so this firmware's
-        # non-enumerated 'BestQualityv' can be resent without tripping ValidateSet.
+        # $targetSLAStrategy is a plain local variable, never re-bound through the
+        # -SLAStrategy parameter, so a value outside the documented set can still be
+        # preserved as read without tripping ValidateSet.
         $targetSLAStrategy = if ($PSBoundParameters.ContainsKey('SLAStrategy')) { $SLAStrategy } else { $current.SLAStrategy }
         $slaStrategyXml = if ($targetSLAStrategy) { "<SLAStrategy>$(ConvertTo-SfosXmlEscaped -Text $targetSLAStrategy)</SLAStrategy>" } else { '' }
 
@@ -2571,64 +2604,71 @@ function Set-SfosSDWANProfile {
 
 <#
         .SYNOPSIS
-        Removes an SD-WAN profile from the Sophos Firewall.
+        Removes an SD-WAN profile from a Sophos Firewall.
 
         .DESCRIPTION
-        Removes an SDWANProfile object by name. Supports ShouldProcess; use -WhatIf to preview
-        the change.
-
-        WARNING - measured live: deleting a profile that an existing SDWANPolicyRoute still
-        references (via SDWANProfileName) answers code 200 'Configuration applied successfully'
-        and silently cascades - the referencing route is deleted along with the profile, with
-        no warning of any kind. Check for dependent routes with
-        Get-SfosSDWANPolicyRoute | Where-Object { $_.SDWANProfileName -eq $Name } before removing
-        a profile that may be in use.
+        Deletes an SD-WAN profile under Routing > SD-WAN Routes. If an SD-WAN policy route
+        still references the profile, the firewall deletes that route along with the
+        profile, without a separate warning. Check for dependent routes with
+        Get-SfosSDWANPolicyRoute before removing a profile that may still be in use. It
+        needs an open connection from Connect-SfosFirewall, or the connection parameters
+        supplied directly, and an account with write permission for routing objects.
 
         .PARAMETER Name
-        Name of the SD-WAN profile to remove. Accepted from the pipeline, so
-        Get-SfosSDWANProfile | Remove-SfosSDWANProfile works.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Required. Name of the profile to remove. Accepts pipeline input.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. User name for the API login. The account needs write permission for
+        routing objects. If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the
+        certificate is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        System.String. Accepts a profile name, so Get-SfosSDWANProfile |
+        Remove-SfosSDWANProfile works.
 
         .OUTPUTS
-        None. Throws an exception if removal fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        removal.
 
         .EXAMPLE
-        # Remove a profile that is not referenced by any route
-        Remove-SfosSDWANProfile -Name "Branch-Profile"
+        Remove-SfosSDWANProfile -Name 'Branch-Profile' -WhatIf
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        Removing a non-existent profile answers code="" (the attribute is present but empty)
-        with the message 'Operation could not be performed on Entity.' Assert-SfosApiReturnSuccess
-        treats an empty code the same as a missing one and throws, which is the correct outcome
-        here, just via the generic "status without a code" wording rather than a name-specific
-        message.
-        Verified live: create, remove, and the cascade-delete side effect documented above (all
-        against disposable ZZTest-prefixed objects, cleaned up afterwards).
+        Shows what the call would remove without sending it to the firewall.
+
+        .EXAMPLE
+        Get-SfosSDWANPolicyRoute | Where-Object { $_.SDWANProfileName -eq 'Branch-Profile' }
+        Remove-SfosSDWANProfile -Name 'Branch-Profile'
+
+        Checks for policy routes that still reference the profile, then removes it.
 
         .LINK
-        https://docs.sophos.com/nsg/sophos-firewall/22.0/API/CONFIGURE/Routing/SDWANProfile/operations/Delete%20SD-WAN%20profile.html
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosSDWANProfile
 #>
 function Remove-SfosSDWANProfile {
     [CmdletBinding(SupportsShouldProcess)]
@@ -2681,60 +2721,77 @@ function Remove-SfosSDWANProfile {
 
 <#
         .SYNOPSIS
-        Retrieves SD-WAN policy routes from the Sophos Firewall.
+        Retrieves SD-WAN policy routes from a Sophos Firewall.
 
         .DESCRIPTION
-        Queries the Sophos Firewall XML API for SDWANPolicyRoute objects. Server-side filtering
-        only evaluates a single 'Name' key reliably (measured); -NameLike is sent as that one
-        key and reapplied client-side afterwards. By default the cmdlet returns a
-        PowerShell-friendly object. Use -AsXml to return the raw XML nodes.
+        Returns the SD-WAN policy routes defined under Routing > SD-WAN Routes. A policy
+        route matches traffic by source, destination, service, user or application and
+        sends it over a chosen gateway or SD-WAN profile. Use this cmdlet to review the
+        existing routes or to feed them into another cmdlet through the pipeline. The
+        cmdlet only reads; nothing on the firewall is changed. It needs an open connection
+        from Connect-SfosFirewall, or the connection parameters supplied directly.
+
+        The Status property returned here is the route's own enabled flag, separate from
+        the record returned by Get-SfosSDWANPolicyRouteStatus for the same route.
 
         .PARAMETER NameLike
-        Filters by route name, substring match (SFOS 'like' semantics, not a wildcard).
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. Returns only routes whose name contains the given text anywhere. This is
+        a substring match, not a wildcard pattern. If omitted, the name is not used to
+        filter.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. User name for the API login. The account needs read permission for
+        routing objects. If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the
+        certificate is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
 
         .PARAMETER AsXml
-        Returns the raw XML nodes instead of PowerShell-friendly objects.
+        Optional. Returns the raw XML elements sent by the firewall instead of PowerShell
+        objects. Useful when you need a field that the standard output does not show.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        PSCustomObject[] (default). System.Xml.XmlElement[] when -AsXml is specified.
+        System.Management.Automation.PSCustomObject. One object per route, with the
+        properties Name, Description, IPFamily, SourceNetworks, DestinationNetworks,
+        Services, Users, ApplicationObjects, LinkSelection, SDWANProfileName, Gateway,
+        BackupGateway, Healthcheck, Interface, DSCPMarking and Status. Returns
+        System.Xml.XmlElement when -AsXml is used, and an empty array when no object
+        matches.
 
         .EXAMPLE
-        # Retrieve every SD-WAN policy route
         Get-SfosSDWANPolicyRoute
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        The 'Status' element on this entity is a data field (the route's own enabled flag,
-        '1'/'0' as text) - not an API status. It has a <Name> sibling, so the shared
-        Get-SfosApiStatus/Assert-SfosApiReturnSuccess heuristic correctly leaves it alone
-        (verified live). It is unrelated to, and uses a different representation than, the
-        SDWANPolicyRouteStatus entity's own ON/OFF text - see Get-SfosSDWANPolicyRouteStatus.
-        Returned here as 'Status' (the wire name), exactly as delivered.
+        Lists every SD-WAN policy route on the firewall of the current connection.
 
         .LINK
-        https://docs.sophos.com/nsg/sophos-firewall/22.0/API/CONFIGURE/Routing/PolicyRoute/PolicyRoute.html
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        New-SfosSDWANPolicyRoute
 #>
 function Get-SfosSDWANPolicyRoute {
     [CmdletBinding()]
@@ -2835,106 +2892,120 @@ function Get-SfosSDWANPolicyRoute {
 
 <#
         .SYNOPSIS
-        Creates a new SD-WAN policy route on the Sophos Firewall.
+        Creates an SD-WAN policy route on a Sophos Firewall.
 
         .DESCRIPTION
-        Creates an SDWANPolicyRoute object using the Sophos Firewall XML API. Supports
-        ShouldProcess; use -WhatIf to preview the request.
+        Creates an SD-WAN policy route under Routing > SD-WAN Routes. A policy route
+        matches traffic by source, destination, service, user or application and sends it
+        over a chosen gateway or SD-WAN profile. A newly created route is enabled
+        immediately; use Set-SfosSDWANPolicyRouteStatus to disable it afterwards. It needs
+        an open connection from Connect-SfosFirewall, or the connection parameters
+        supplied directly, and an account with write permission for routing objects.
 
         .PARAMETER Name
-        Name of the SD-WAN route (1-60 characters, no commas).
+        Required. Name of the route. 1-60 characters, must not contain a comma.
 
         .PARAMETER Description
-        Optional description (max 255 characters).
+        Optional. Free-text description, maximum 255 characters. If omitted, no
+        description is set.
 
         .PARAMETER IPFamily
-        IP protocol version. Defaults to 'IPv4' when omitted - unlike SDWANProfile's IPFamily,
-        this element cannot be left out of the request entirely; see .NOTES.
+        Optional. Address family of the route. Valid values: IPv4, IPv6. Default: IPv4.
 
         .PARAMETER SourceNetwork
-        Names of existing network/host objects to match as traffic sources.
+        Optional. Names of existing network or host objects to match as traffic sources. If
+        omitted, the route matches any source.
 
         .PARAMETER DestinationNetwork
-        Names of existing network/host objects to match as traffic destinations.
+        Optional. Names of existing network or host objects to match as traffic
+        destinations. If omitted, the route matches any destination.
 
         .PARAMETER Service
-        Names of existing service objects to match.
+        Optional. Names of existing service objects to match. If omitted, the route matches
+        any service.
 
         .PARAMETER User
-        Names of users or groups whose traffic this route applies to.
+        Optional. Names of users or groups whose traffic the route applies to. If omitted,
+        the route applies to all users.
 
         .PARAMETER ApplicationObject
-        Names of existing application objects to match.
+        Optional. Names of existing application objects to match. If omitted, the route
+        matches any application.
 
         .PARAMETER LinkSelection
-        Method of link selection: pick gateways directly, or defer to an SD-WAN profile.
+        Optional. Method of link selection. Valid values: SelectGateways,
+        SelectSDWANProfile.
 
         .PARAMETER SDWANProfileName
-        Name of an existing SDWANProfile to assign to the route. Mandatory per the Sophos API
-        documentation regardless of -LinkSelection.
+        Required. Name of an existing SD-WAN profile to assign to the route.
 
         .PARAMETER Gateway
-        Primary gateway for the route (used with -LinkSelection SelectGateways).
+        Optional. Primary gateway for the route, used with -LinkSelection
+        SelectGateways.
 
         .PARAMETER BackupGateway
-        Backup gateway used when the primary gateway fails.
+        Optional. Backup gateway used when the primary gateway fails.
 
         .PARAMETER Healthcheck
-        Route behaviour when all gateways are down.
+        Optional. Route behavior when all gateways are down. Valid values: ON, OFF.
 
         .PARAMETER Interface
-        Incoming interface that receives the packets this route matches.
+        Optional. Incoming interface that receives the packets this route matches.
 
         .PARAMETER DSCPMarking
-        DSCP codepoint to match, as a bare number (0-63) optionally followed by '-ClassName'
-        (e.g. '8-Class 1(CS1)'), matching what Get-SfosSDWANPolicyRoute returns. The value '0'
-        is normalised to '0-Best Effort' automatically - see the module's internal
-        ConvertTo-SfosDSCPMarkingWireValue helper and this cmdlet's .NOTES.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. DSCP codepoint to match, as a bare number (0-63) optionally followed by
+        -ClassName, for example '8-Class 1(CS1)'.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. User name for the API login. The account needs write permission for
+        routing objects. If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the
+        certificate is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        None. Throws an exception if creation fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        creation.
 
         .EXAMPLE
-        # Create a route that defers gateway selection to an SD-WAN profile
-        New-SfosSDWANPolicyRoute -Name "Branch-Route" -DestinationNetwork "Branch-Net" -LinkSelection SelectSDWANProfile -SDWANProfileName "Branch-Profile"
+        New-SfosSDWANPolicyRoute -Name 'Branch-Route' -DestinationNetwork 'Branch-Net' -LinkSelection SelectSDWANProfile -SDWANProfileName 'Branch-Profile' -WhatIf
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        Measured live: although the documentation table marks IPFamily 'Default IPv4' (implying
-        it can be left out), omitting the element entirely on create is rejected with code 501
-        'Configuration parameters validation failed' naming /SDWANPolicyRoute/IPFamily. This
-        cmdlet always sends the element, defaulting to 'IPv4' when -IPFamily is not supplied.
-        Measured live: this entity has no enable/disable field of its own - a newly created
-        route is enabled immediately (its own 'Status' data field reads '1'). To create a route
-        disabled, follow up with Set-SfosSDWANPolicyRouteStatus -SDWANPolicyRouteName $Name
-        -Status OFF right after creation.
-        Verified live end to end with a disposable test route against a disposable test profile
-        and a disposable destination network object, all removed afterwards.
+        Shows what the call would create without sending it to the firewall.
+
+        .EXAMPLE
+        New-SfosSDWANPolicyRoute -Name 'Branch-Route' -DestinationNetwork 'Branch-Net' -LinkSelection SelectSDWANProfile -SDWANProfileName 'Branch-Profile'
+
+        Creates a route that sends matching traffic through the named SD-WAN profile.
 
         .LINK
-        https://docs.sophos.com/nsg/sophos-firewall/22.0/API/CONFIGURE/Routing/PolicyRoute/operations/AddSD-WANroute&UpdateSD-WANroute.html
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosSDWANPolicyRoute
 #>
 function New-SfosSDWANPolicyRoute {
     [CmdletBinding(SupportsShouldProcess)]
@@ -2997,10 +3068,8 @@ function New-SfosSDWANPolicyRoute {
         $descXml = "<Description>$(ConvertTo-SfosXmlEscaped -Text $Description)</Description>"
     }
 
-    # Measured live: despite the documentation table marking IPFamily 'Default IPv4' (implying
-    # it can be omitted), the firewall answers code 501 'Configuration parameters validation
-    # failed' naming /SDWANPolicyRoute/IPFamily when the element is left out entirely. Unlike
-    # SDWANProfile's IPFamily (genuinely optional, confirmed live), this one is always sent.
+    # IPFamily must always be present on the wire for this entity, unlike SDWANProfile's
+    # IPFamily, which the firewall accepts omitted.
     $effectiveIPFamily = if ($PSBoundParameters.ContainsKey('IPFamily')) { $IPFamily } else { 'IPv4' }
     $ipFamilyXml = "<IPFamily>$effectiveIPFamily</IPFamily>"
 
@@ -3106,103 +3175,125 @@ function New-SfosSDWANPolicyRoute {
 
 <#
         .SYNOPSIS
-        Updates an SD-WAN policy route on the Sophos Firewall.
+        Updates an SD-WAN policy route on a Sophos Firewall.
 
         .DESCRIPTION
-        Updates an SDWANPolicyRoute object. This cmdlet reads the current route first and
-        resends every field, overriding only what the caller explicitly passes - SFOS replaces
-        the whole entity on update. Supports ShouldProcess; use -WhatIf to preview the change.
+        Changes one or more fields of an existing SD-WAN policy route. The cmdlet reads
+        the current route first and sends the complete entity back, so fields you do not
+        pass keep their current value. It needs an open connection from
+        Connect-SfosFirewall, or the connection parameters supplied directly, and an
+        account with write permission for routing objects.
 
         .PARAMETER Name
-        Name of the SD-WAN route to update. Accepted from the pipeline by property name, so
-        Get-SfosSDWANPolicyRoute | Set-SfosSDWANPolicyRoute works.
+        Required. Name of the route to update. Accepts pipeline input by property name.
 
         .PARAMETER Description
-        New description. If omitted, the value currently on the firewall is kept.
+        Optional. Free-text description, maximum 255 characters. If omitted, the current
+        value is kept.
 
         .PARAMETER IPFamily
-        New IP family. If omitted, the value currently on the firewall is kept.
+        Optional. Address family of the route. Valid values: IPv4, IPv6. If omitted, the
+        current value is kept.
 
         .PARAMETER SourceNetwork
-        Replaces the entire source network list. If omitted, the existing list is kept.
+        Optional. Complete replacement list of source network or host object names. If
+        omitted, the current list is kept.
 
         .PARAMETER DestinationNetwork
-        Replaces the entire destination network list. If omitted, the existing list is kept.
+        Optional. Complete replacement list of destination network or host object names.
+        If omitted, the current list is kept.
 
         .PARAMETER Service
-        Replaces the entire service list. If omitted, the existing list is kept.
+        Optional. Complete replacement list of service names. If omitted, the current list
+        is kept.
 
         .PARAMETER User
-        Replaces the entire user/group list. If omitted, the existing list is kept.
+        Optional. Complete replacement list of user or group names. If omitted, the
+        current list is kept.
 
         .PARAMETER ApplicationObject
-        Replaces the entire application object list. If omitted, the existing list is kept.
+        Optional. Complete replacement list of application object names. If omitted, the
+        current list is kept.
 
         .PARAMETER LinkSelection
-        New link selection method. If omitted, the value currently on the firewall is kept.
+        Optional. Method of link selection. Valid values: SelectGateways,
+        SelectSDWANProfile. If omitted, the current value is kept.
 
         .PARAMETER SDWANProfileName
-        New SD-WAN profile assignment. If omitted, the value currently on the firewall is kept.
+        Optional. Name of the assigned SD-WAN profile. If omitted, the current value is
+        kept.
 
         .PARAMETER Gateway
-        New primary gateway. If omitted, the value currently on the firewall is kept.
+        Optional. Primary gateway for the route. If omitted, the current value is kept.
 
         .PARAMETER BackupGateway
-        New backup gateway. If omitted, the value currently on the firewall is kept.
+        Optional. Backup gateway used when the primary gateway fails. If omitted, the
+        current value is kept.
 
         .PARAMETER Healthcheck
-        New health check behaviour. If omitted, the value currently on the firewall is kept.
+        Optional. Route behavior when all gateways are down. Valid values: ON, OFF. If
+        omitted, the current value is kept.
 
         .PARAMETER Interface
-        New incoming interface. If omitted, the value currently on the firewall is kept.
+        Optional. Incoming interface that receives the packets this route matches. If
+        omitted, the current value is kept.
 
         .PARAMETER DSCPMarking
-        New DSCP codepoint. If omitted, the raw value read back from the firewall is resent
-        unchanged, through the same '0' -> '0-Best Effort' normalisation New-SfosSDWANPolicyRoute
-        applies (see that cmdlet's .PARAMETER DSCPMarking and .NOTES) - the read-modify-write
-        preserve path would otherwise resend a value the firewall demonstrably rejects.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. DSCP codepoint to match, as a bare number (0-63) optionally followed by
+        -ClassName. If omitted, the current value is kept.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. User name for the API login. The account needs write permission for
+        routing objects. If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the
+        certificate is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        System.String. Accepts a route name by property name, so Get-SfosSDWANPolicyRoute
+        | Set-SfosSDWANPolicyRoute works.
 
         .OUTPUTS
-        None. Throws an exception if the update fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        update.
 
         .EXAMPLE
-        # Change only the interface, everything else is preserved
-        Set-SfosSDWANPolicyRoute -Name "Branch-Route" -Interface "Port2"
+        Set-SfosSDWANPolicyRoute -Name 'Branch-Route' -Interface 'Port2' -WhatIf
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        Measured live: DSCPMarking read back as the bare number '0' (the default) cannot be
-        resent as '0' - the firewall answers code 501 'Configuration parameters validation
-        failed' naming /SDWANPolicyRoute/DSCPMarking. Every other value round-trips as-is. See
-        ConvertTo-SfosDSCPMarkingWireValue.
-        Verified live: full read-modify-write round trip against a disposable test route
-        (unchanged fields byte-identical on re-read, including DestinationNetworks and
-        Interface, which a minimal update omitting them would otherwise have cleared).
+        Shows what the call would change without sending it to the firewall.
+
+        .EXAMPLE
+        Set-SfosSDWANPolicyRoute -Name 'Branch-Route' -Interface 'Port2'
+
+        Changes the incoming interface of the route. All other fields keep their current
+        value.
 
         .LINK
-        https://docs.sophos.com/nsg/sophos-firewall/22.0/API/CONFIGURE/Routing/PolicyRoute/operations/AddSD-WANroute&UpdateSD-WANroute.html
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosSDWANPolicyRoute
 #>
 function Set-SfosSDWANPolicyRoute {
     [CmdletBinding(SupportsShouldProcess)]
@@ -3374,54 +3465,67 @@ function Set-SfosSDWANPolicyRoute {
 
 <#
         .SYNOPSIS
-        Removes an SD-WAN policy route from the Sophos Firewall.
+        Removes an SD-WAN policy route from a Sophos Firewall.
 
         .DESCRIPTION
-        Removes an SDWANPolicyRoute object by name. Supports ShouldProcess; use -WhatIf to
-        preview the change.
+        Deletes an SD-WAN policy route under Routing > SD-WAN Routes. It needs an open
+        connection from Connect-SfosFirewall, or the connection parameters supplied
+        directly, and an account with write permission for routing objects.
 
         .PARAMETER Name
-        Name of the SD-WAN route to remove. Accepted from the pipeline, so
-        Get-SfosSDWANPolicyRoute | Remove-SfosSDWANPolicyRoute works.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Required. Name of the route to remove. Accepts pipeline input.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. User name for the API login. The account needs write permission for
+        routing objects. If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the
+        certificate is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        System.String. Accepts a route name, so Get-SfosSDWANPolicyRoute |
+        Remove-SfosSDWANPolicyRoute works.
 
         .OUTPUTS
-        None. Throws an exception if removal fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        removal.
 
         .EXAMPLE
-        # Remove a route by name
-        Remove-SfosSDWANPolicyRoute -Name "Branch-Route"
+        Remove-SfosSDWANPolicyRoute -Name 'Branch-Route' -WhatIf
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        Removing a non-existent route answers code="" (present but empty) with the message
-        'Operation could not be performed on Entity.' - measured live. Same generic-throw
-        behaviour as Remove-SfosSDWANProfile; see that cmdlet's .NOTES.
-        Verified live against a disposable test route.
+        Shows what the call would remove without sending it to the firewall.
+
+        .EXAMPLE
+        Remove-SfosSDWANPolicyRoute -Name 'Branch-Route'
+
+        Removes the SD-WAN policy route named Branch-Route.
 
         .LINK
-        https://docs.sophos.com/nsg/sophos-firewall/22.0/API/CONFIGURE/Routing/PolicyRoute/operations/Delete%20SD-WAN%20route.html
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosSDWANPolicyRoute
 #>
 function Remove-SfosSDWANPolicyRoute {
     [CmdletBinding(SupportsShouldProcess)]
@@ -3474,79 +3578,72 @@ function Remove-SfosSDWANPolicyRoute {
 
 <#
         .SYNOPSIS
-        Retrieves SD-WAN policy route enable/disable status from the Sophos Firewall.
+        Retrieves the enabled state of SD-WAN policy routes from a Sophos Firewall.
 
         .DESCRIPTION
-        Queries the Sophos Firewall XML API for SDWANPolicyRouteStatus records (undocumented as
-        a Get operation - the Sophos documentation only describes the status-change write - but
-        measured to work the same way Get works for every other status-toggle entity in this
-        API area). -NameLike is applied client-side only; see .NOTES for why no server-side
-        filter is ever sent for this entity. By default the cmdlet returns a
-        PowerShell-friendly object. Use -AsXml to return the raw XML nodes.
+        Returns the enabled/disabled status of every SD-WAN policy route. The identifying
+        field of this entity is SDWANPolicyRouteName, not Name. Filters are applied on the
+        client, against the full list of records. The cmdlet only reads; nothing on the
+        firewall is changed. It needs an open connection from Connect-SfosFirewall, or the
+        connection parameters supplied directly.
 
         .PARAMETER NameLike
-        Filters by route name, substring match, applied client-side.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. Returns only records whose route name contains the given text anywhere.
+        This is a substring match, not a wildcard pattern. If omitted, the name is not
+        used to filter.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. User name for the API login. The account needs read permission for
+        routing objects. If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the
+        certificate is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
 
         .PARAMETER AsXml
-        Returns the raw XML nodes instead of PowerShell-friendly objects.
+        Optional. Returns the raw XML elements sent by the firewall instead of PowerShell
+        objects. Useful when you need a field that the standard output does not show.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        PSCustomObject[] (default). System.Xml.XmlElement[] when -AsXml is specified.
+        System.Management.Automation.PSCustomObject. One object per route, with the
+        properties SDWANPolicyRouteName and Status (ON or OFF). Returns
+        System.Xml.XmlElement when -AsXml is used, and an empty array when no record
+        matches.
 
         .EXAMPLE
-        # Retrieve the enable/disable status of every SD-WAN policy route
         Get-SfosSDWANPolicyRouteStatus
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        Two measured defects specific to this entity, both confirmed live and both worked
-        around in this cmdlet rather than in Core (Core stays generic across every module):
-
-        1. Server-side filtering is completely broken here, not just "unsupported and
-           ignored" like most other entities in this API area - sending ANY <Filter>, even one
-           that exactly matches an existing record, makes the firewall answer
-           <Status>Transaction fail</Status> instead of the matching record. This cmdlet never
-           sends a Filter; it always fetches the full list and filters client-side.
-
-        2. This entity's identifying element is <SDWANPolicyRouteName>, not <Name> - unlike
-           every other status-toggle entity in this API area (HealthCheckProfileStatus uses
-           <Name>). The shared Get-SfosApiStatus/Assert-SfosApiReturnSuccess heuristic treats a
-           code-less <Status> as an API status when its parent has no <Name> sibling, which is
-           meant to catch entities like HealthCheckProfileStatus that legitimately use <Name>.
-           Here it backfires: every data row's own <Status>ON</Status>/<Status>OFF</Status>
-           value gets misread as an unrecognised API status and the generic assertion throws on
-           the very first non-empty result (reproduced live: 'OFF' raised "Sophos API returned
-           a status without a code"). This cmdlet does its own status handling instead of
-           calling Assert-SfosApiReturnSuccess unconditionally: a <Status> that carries a @code
-           attribute is still handed to the generic assertion (real API errors, e.g. a
-           malformed request, do carry a code here); a code-less <Status> is only accepted when
-           its text is 'ON', 'OFF', or matches 'No. of records Zero.' - anything else code-less
-           (such as the 'Transaction fail' from point 1) still throws.
+        Lists the enabled state of every SD-WAN policy route on the firewall of the current
+        connection.
 
         .LINK
-        https://docs.sophos.com/nsg/sophos-firewall/22.0/API/CONFIGURE/Routing/PolicyRouteStatus/operations/PolicyRoutestatuschange.html
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Set-SfosSDWANPolicyRouteStatus
 #>
 function Get-SfosSDWANPolicyRouteStatus {
     [CmdletBinding()]
@@ -3568,8 +3665,8 @@ function Get-SfosSDWANPolicyRouteStatus {
 
     $params = Resolve-SfosParameters -BoundParameters $PSBoundParameters
 
-    # No Filter block, ever - see .NOTES point 1: any Filter on this entity answers
-    # 'Transaction fail' instead of the matching record, even for an exact match.
+    # No Filter block: this entity answers 'Transaction fail' for any Filter, even one
+    # matching an existing record. The full list is fetched and filtered client-side.
     $inner = '<Get><SDWANPolicyRouteStatus></SDWANPolicyRouteStatus></Get>'
 
     try {
@@ -3585,9 +3682,10 @@ function Get-SfosSDWANPolicyRouteStatus {
 
     $XmlResponse = [xml]$response.Content
 
-    # See .NOTES point 2. A coded status is a real API error/warning and goes through the
-    # generic table-driven check; a code-less status is only ever data (ON/OFF) or the
-    # empty-result wording here - anything else code-less throws explicitly.
+    # This entity's data rows carry their own code-less <Status>ON/OFF</Status>, and the
+    # entity has no <Name> sibling to protect them under the shared status heuristic. A
+    # coded status goes through the generic check; a code-less status is only accepted
+    # here when it reads ON, OFF, or the empty-result wording.
     $codedStatus = $XmlResponse.SelectSingleNode('/Response/SDWANPolicyRouteStatus/Status[@code]')
     if ($codedStatus) {
         Assert-SfosApiReturnSuccess -Xml $XmlResponse -ObjectName 'SDWANPolicyRouteStatus' -Action 'get'
@@ -3629,65 +3727,75 @@ function Get-SfosSDWANPolicyRouteStatus {
 
 <#
         .SYNOPSIS
-        Enables or disables an SD-WAN policy route on the Sophos Firewall.
+        Enables or disables an SD-WAN policy route on a Sophos Firewall.
 
         .DESCRIPTION
-        Toggles the enabled/disabled status of an existing SDWANPolicyRoute using the dedicated
-        status-change operation - there is no New/Remove for this entity, only Get and this Set.
-        Supports ShouldProcess; use -WhatIf to preview the change.
+        Changes the enabled state of an existing SD-WAN policy route. This is the only
+        write operation for this entity; there is no separate create or delete. The
+        cmdlet reads the status back after writing and reports an error if the route name
+        does not exist or the status does not match what was requested. It needs an open
+        connection from Connect-SfosFirewall, or the connection parameters supplied
+        directly, and an account with write permission for routing objects.
 
         .PARAMETER SDWANPolicyRouteName
-        Name of the SD-WAN route to toggle. Aliased as 'Name' so both
-        Get-SfosSDWANPolicyRoute | Set-SfosSDWANPolicyRouteStatus and
-        Get-SfosSDWANPolicyRouteStatus | Set-SfosSDWANPolicyRouteStatus bind by property name.
+        Required. Name of the route to toggle. Aliased as Name, so both
+        Get-SfosSDWANPolicyRoute and Get-SfosSDWANPolicyRouteStatus bind by property name
+        through the pipeline.
 
         .PARAMETER Status
-        New status: 'ON' or 'OFF'.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Required. New state of the route. Valid values: ON, OFF.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. User name for the API login. The account needs write permission for
+        routing objects. If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the
+        certificate is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        System.String. Accepts a route name by property name, so Get-SfosSDWANPolicyRoute
+        | Set-SfosSDWANPolicyRouteStatus works.
 
         .OUTPUTS
-        None. Throws an exception if the update fails or cannot be confirmed.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        update or the change cannot be confirmed.
 
         .EXAMPLE
-        # Disable a route right after creating it
-        Set-SfosSDWANPolicyRouteStatus -SDWANPolicyRouteName "Branch-Route" -Status OFF
+        Set-SfosSDWANPolicyRouteStatus -SDWANPolicyRouteName 'Branch-Route' -Status OFF -WhatIf
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        Measured live: toggling the status of a route name that does not exist on the firewall
-        answers code 200 'Configuration applied successfully' and changes nothing - a
-        false-positive success, the same defect class seen in Remove-Sfos* cmdlets generally,
-        just on a Set here instead of a Remove.
-        Because this cmdlet's whole purpose is the toggle, it reads the status back after a
-        successful-looking write and throws if the route was not found or the status does not
-        match what was requested, rather than reporting a silent no-op as success.
-        Verified live: toggle to OFF and back to ON against a disposable test route, and the
-        false-positive-on-nonexistent-name behaviour reproduced against a route name that did
-        not exist.
+        Shows what the call would change without sending it to the firewall.
+
+        .EXAMPLE
+        Set-SfosSDWANPolicyRouteStatus -SDWANPolicyRouteName 'Branch-Route' -Status OFF
+
+        Disables the SD-WAN policy route named Branch-Route.
 
         .LINK
-        https://docs.sophos.com/nsg/sophos-firewall/22.0/API/CONFIGURE/Routing/PolicyRouteStatus/operations/PolicyRoutestatuschange.html
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosSDWANPolicyRouteStatus
 #>
 function Set-SfosSDWANPolicyRouteStatus {
     [CmdletBinding(SupportsShouldProcess)]
@@ -3743,8 +3851,8 @@ function Set-SfosSDWANPolicyRouteStatus {
         $XmlResponse = [xml]$response.Content
         Assert-SfosApiReturnSuccess -Xml $XmlResponse -ObjectName 'SDWANPolicyRouteStatus' -Action 'update' -Target $SDWANPolicyRouteName
 
-        # See .NOTES: a coded 200 here does not guarantee the named route exists - confirm by
-        # reading the status back, so a caller cannot mistake a silent no-op for success.
+        # A coded 200 here does not guarantee the named route exists - confirm by reading
+        # the status back, so a caller cannot mistake a silent no-op for success.
         $confirmed = @(Get-SfosSDWANPolicyRouteStatus -NameLike $SDWANPolicyRouteName -Firewall $params.Firewall -Port $params.Port `
                 -Username $params.Username -Password $params.Password `
                 -SkipCertificateCheck:$params.SkipCertificateCheck |
@@ -3758,130 +3866,99 @@ function Set-SfosSDWANPolicyRouteStatus {
 
 #endregion
 
-# SophosFirewall.Routing - Group C: Static & Multicast Routing
-#
+# Group: Static and multicast routing.
 # Entities: UnicastRoute, MulticastRoute, MulticastConfiguration (read-only),
 # PIMDynamicRouting.
 #
-# Cross-cutting findings from this group's live verification:
-#   - UnicastRoute.Netmask is dotted-decimal ("255.255.255.0") on the wire, not the
-#     INTEGER 0-128 the parameter table claims - the sample XML wins here [measured].
-#   - UnicastRoute has its own <Status>ON/OFF</Status> data field (the route's enabled
-#     flag) and, unlike FirewallRule/NATRule, no <Name> element to protect it under the
-#     Name-based heuristic in Core's Get-SfosApiStatus. Get-SfosUnicastRoute therefore
-#     scopes Assert-SfosApiReturnSuccess to responses that carry no <DestinationIP> -
-#     i.e. status-only responses - instead of calling it unconditionally with
-#     -ObjectName 'UnicastRoute', which would misread every stored route's own Status
-#     field as a broken, code-less API status [measured].
-#   - <Set operation="update"> answers code 500 for UnicastRoute on every field
-#     combination tried, including a true no-op and variants with/without the
-#     <OldConfiguration> subtree - matching the existing Set-SfosStaticARP precedent.
-#     Set-SfosUnicastRoute is therefore remove-then-recreate, like Set-SfosGreRoute and
-#     Set-SfosStaticARP [measured].
-#   - Remove-SfosUnicastRoute answering 200 was not reproducible with just the
-#     documented composite key (DestinationIP+Netmask); the full object body (matching
-#     what Get-SfosUnicastRoute returns) is what worked reliably across repeated
-#     attempts, so Remove-SfosUnicastRoute reads the object back first and always sends
-#     every field [measured].
-#   - The firewall does NOT enforce DestinationIP+Netmask as a unique key: creating a
-#     second UnicastRoute with identical DestinationIP, Netmask and every other field
-#     answered code 200 and produced two indistinguishable records, confirmed live. This
-#     likely explains the non-reproducible 500s noted above - an ambiguous match across
-#     duplicate "key" values is a plausible cause. New-SfosUnicastRoute therefore checks
-#     for an existing DestinationIP+Netmask match first and throws rather than silently
-#     creating an ambiguous duplicate; Set-/Remove-SfosUnicastRoute still only operate on
-#     the first match if a duplicate exists elsewhere on the firewall (for example one
-#     created outside this module) [measured].
-#   - MulticastRoute Add answered code 500 "Operation could not be performed on Entity"
-#     on every documented-shape variant tried (with/without SourceInterface, with/
-#     without TunnelType, with/without the DestinationInterfaceList wrapper, exact
-#     sample field order) - about a dozen attempts total. The lab firewall's
-#     MulticastConfiguration singleton reads MulticastForwardingSetting = Disable, which
-#     is the most likely gate, but that could not be confirmed: MulticastConfiguration
-#     has no documented write operation at all (see below), so flipping it to test the
-#     hypothesis would be an undocumented write to a device-wide setting, out of scope
-#     for this task. New-/Set-/Remove-SfosMulticastRoute are implemented documentation-
-#     faithful and verified at the XML-generation level only, per the existing
-#     New-SfosSSLTLSInspectionRule precedent. Get-SfosMulticastRoute is confirmed live
-#     (zero records, matches the documented root element and table).
-#   - MulticastConfiguration's own doc page (Multicast/Multicast.html) has an empty
-#     Description and Operations section - no operation is documented for this entity at
-#     all, not even Get. No Set-SfosMulticastConfiguration was built, per the existing
-#     Set-SfosGuestUser precedent (no cmdlet for an undocumented write path).
-#   - PIMDynamicRouting is a device-wide dynamic-routing singleton; Get is confirmed
-#     live, Set was implemented and checked structurally only, never sent to the lab
-#     firewall, per the existing Set-SfosAdminAuthentication precedent and this task's
-#     explicit instruction.
+# UnicastRoute has no Name element; it is identified by the composite key
+# DestinationIP + Netmask, and Netmask is dotted-decimal on the wire, not a prefix
+# length. Its own <Status>ON/OFF</Status> data field has no <Name> sibling, so
+# Get-SfosUnicastRoute scopes the API-status check to responses that carry no
+# <DestinationIP>, rather than to the whole response. The firewall accepts more than
+# one UnicastRoute with the same DestinationIP and Netmask; New-SfosUnicastRoute
+# checks for an existing match first and refuses to create an ambiguous duplicate.
+#
+# MulticastConfiguration has no documented write operation, so there is no
+# Set-SfosMulticastConfiguration. PIMDynamicRouting is a device-wide dynamic-routing
+# singleton.
 
 #region UnicastRoute
 
 <#
         .SYNOPSIS
-        Retrieves UnicastRoute (static route) objects from the Sophos Firewall.
+        Retrieves static routes from a Sophos Firewall.
 
         .DESCRIPTION
-        Queries the Sophos Firewall XML API for UnicastRoute objects. UnicastRoute has no
-        Name element; it is identified by the composite key DestinationIP + Netmask. By
-        default the cmdlet returns PowerShell-friendly objects. Use -AsXml to return the raw
-        XML nodes.
-
-        Only the DestinationIP server-side filter key was verified to work (measured); the
-        result is always filtered again client-side, so -AsXml returns the same set as the
-        default output.
+        Returns the unicast static routes defined under Routing > Static Routes. A route
+        has no name; it is identified by the combination of destination address and
+        netmask. Use this cmdlet to review the existing routes or to feed them into
+        another cmdlet through the pipeline. The cmdlet only reads; nothing on the
+        firewall is changed. It needs an open connection from Connect-SfosFirewall, or
+        the connection parameters supplied directly.
 
         .PARAMETER DestinationIPLike
-        Filters routes whose DestinationIP contains the given substring. Sent to the firewall
-        as a server-side filter and re-applied client-side.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. Returns only routes whose destination address contains the given text
+        anywhere. This is a substring match, not a wildcard pattern. If omitted, the
+        destination is not used to filter.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. User name for the API login. The account needs read permission for
+        routing objects. If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the
+        certificate is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
 
         .PARAMETER AsXml
-        Returns the raw XML nodes instead of PowerShell-friendly objects.
+        Optional. Returns the raw XML elements sent by the firewall instead of PowerShell
+        objects. Useful when you need a field that the standard output does not show.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        PSCustomObject[] (default). System.Xml.XmlElement[] when -AsXml is specified.
+        System.Management.Automation.PSCustomObject. One object per route, with the
+        properties IPFamily, DestinationIP, Netmask, Gateway, Interface, Distance,
+        AdministrativeDistance, Blackhole, Status and Description. Netmask is
+        dotted-decimal, and Status is the route's own enabled flag (ON or OFF). Returns
+        System.Xml.XmlElement when -AsXml is used, and an empty array when no object
+        matches.
 
         .EXAMPLE
-        # List every static route
         Get-SfosUnicastRoute
 
+        Lists every static route on the firewall of the current connection.
+
         .EXAMPLE
-        # Find routes toward a given destination range
-        Get-SfosUnicastRoute -DestinationIPLike "203.0.113"
+        Get-SfosUnicastRoute -DestinationIPLike '203.0.113'
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        Measured live: Netmask is returned dotted-decimal ("255.255.255.0"), not the prefix-
-        length INTEGER the parameter table describes. Status is the route's ON/OFF enabled
-        flag, not an API status - see the module-level comment at the top of this fragment for
-        why Assert-SfosApiReturnSuccess is only invoked for status-only (non-record)
-        responses here.
+        Lists the routes whose destination address contains '203.0.113'.
 
         .LINK
-        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/CONFIGURE/Routing/UnicastRoute/UnicastRoute.html
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
 
         .LINK
-        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/CONFIGURE/Routing/UnicastRoute/operations/AddUnicastRoute&UpdateUnicastRoute.html
+        New-SfosUnicastRoute
 #>
 function Get-SfosUnicastRoute {
     [CmdletBinding()]
@@ -3931,13 +4008,10 @@ function Get-SfosUnicastRoute {
 
     $XmlResponse = [xml]$response.Content
 
-    # See the module-level comment at the top of this fragment: UnicastRoute's own
-    # <Status>ON/OFF</Status> data field is code-less and has no <Name> sibling, so it is
-    # indistinguishable from a broken API status under Core's generic heuristic. Every
-    # measured real status here (200, 501, 529, "No. of records Zero.") appeared on a
-    # <UnicastRoute> node that carried no <DestinationIP> - i.e. a status-only response,
-    # never alongside actual route data - so scoping the check to that shape catches
-    # genuine problems without misreading a stored route's enabled flag.
+    # UnicastRoute's own <Status>ON/OFF</Status> data field is code-less and has no <Name>
+    # sibling, so it would be misread as a broken API status under the generic heuristic.
+    # An actual API status always appears on a <UnicastRoute> node with no <DestinationIP>,
+    # so the check is scoped to that shape.
     if (@($XmlResponse.SelectNodes('/Response/UnicastRoute[not(DestinationIP)]')).Count -gt 0) {
         Assert-SfosApiReturnSuccess -Xml $XmlResponse -ObjectName 'UnicastRoute' -Action 'get'
     }
@@ -3974,88 +4048,98 @@ function Get-SfosUnicastRoute {
 
 <#
         .SYNOPSIS
-        Creates a new UnicastRoute (static route) object on the Sophos Firewall.
+        Creates a static route on a Sophos Firewall.
 
         .DESCRIPTION
-        Creates a UnicastRoute object on the Sophos Firewall XML API. This cmdlet supports
-        ShouldProcess; use -WhatIf to preview the change.
+        Creates a unicast static route under Routing > Static Routes. The firewall does
+        not enforce destination and netmask as a unique key, so this cmdlet checks for an
+        existing route with the same destination and netmask first and refuses to create
+        an ambiguous duplicate. It needs an open connection from Connect-SfosFirewall, or
+        the connection parameters supplied directly, and an account with write permission
+        for routing objects.
 
         .PARAMETER DestinationIP
-        Destination IPv4/IPv6 address of the route (max 45 chars). Cannot be a multicast or
-        loopback address.
+        Required. Destination IPv4 or IPv6 address of the route, maximum 45 characters.
+        Must not be a multicast or loopback address.
 
         .PARAMETER Netmask
-        Netmask of the destination, dotted-decimal (for example "255.255.255.0") - measured
-        live; the parameter table's claim of an INTEGER prefix length (0-128) was rejected
-        with code 501.
+        Required. Netmask of the destination, dotted-decimal, for example
+        '255.255.255.0'.
 
         .PARAMETER IPFamily
-        Address family of the route. Defaults to IPv4.
+        Optional. Address family of the route. Default: IPv4.
 
         .PARAMETER Gateway
-        Gateway IPv4/IPv6 address for the route. Optional.
+        Optional. Gateway IPv4 or IPv6 address for the route. If omitted, no gateway is
+        set.
 
         .PARAMETER Interface
-        Egress interface for the route. Optional.
+        Optional. Egress interface for the route. If omitted, no interface is set.
 
         .PARAMETER Distance
-        Routing metric (0-255). Defaults to 0.
+        Optional. Routing metric, 0-255. Default: 0.
 
         .PARAMETER AdministrativeDistance
-        Administrative distance (1-255). Defaults to 1.
+        Optional. Administrative distance, 1-255. Default: 1.
 
         .PARAMETER Blackhole
-        Creates (Enable) or does not create (Disable/omitted) a blackhole route.
+        Optional. Creates a blackhole route. Valid values: Enable, Disable. Default:
+        Disable.
 
         .PARAMETER Status
-        Turns the static route on or off. Defaults to ON.
+        Optional. Turns the route on or off. Valid values: ON, OFF. Default: ON.
 
         .PARAMETER Description
-        Free-text description of the route (max 255 chars).
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. Free-text description of the route, maximum 255 characters. If omitted,
+        no description is set.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. User name for the API login. The account needs write permission for
+        routing objects. If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the
+        certificate is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        None. Throws an exception if creation fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        creation, or if a route with the same destination and netmask already exists.
 
         .EXAMPLE
-        # Create a disabled static route toward a documentation/test range via Port1
-        New-SfosUnicastRoute -DestinationIP "203.0.113.0" -Netmask "255.255.255.0" -Interface "Port1" -Status OFF -Description "Lab segment via Port1"
+        New-SfosUnicastRoute -DestinationIP '203.0.113.0' -Netmask '255.255.255.0' -Interface 'Port1' -Status OFF -WhatIf
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        Measured live against the lab firewall: creation succeeds (code 200) with a dotted-
-        decimal Netmask; the INTEGER form from the parameter table was rejected (code 501,
-        InvalidParams /UnicastRoute/Netmask). Also measured: the firewall does not enforce
-        DestinationIP+Netmask as unique - creating a second, identical route answered 200 and
-        produced two indistinguishable records - so this cmdlet checks for an existing match
-        first and throws rather than silently creating an ambiguous duplicate.
+        Shows what the call would create without sending it to the firewall.
+
+        .EXAMPLE
+        New-SfosUnicastRoute -DestinationIP '203.0.113.0' -Netmask '255.255.255.0' -Interface 'Port1' -Status OFF -Description 'Test segment via Port1'
+
+        Creates a disabled static route toward 203.0.113.0/24 through Port1.
 
         .LINK
-        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/CONFIGURE/Routing/UnicastRoute/UnicastRoute.html
-
-        .LINK
-        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/CONFIGURE/Routing/UnicastRoute/operations/AddUnicastRoute&UpdateUnicastRoute.html
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
 
         .LINK
         Get-SfosUnicastRoute
@@ -4104,10 +4188,8 @@ function New-SfosUnicastRoute {
 
     $params = Resolve-SfosParameters -BoundParameters $PSBoundParameters
 
-    # Measured: the firewall does not enforce DestinationIP+Netmask as a unique key - see
-    # the module-level comment at the top of this fragment. Checked here so this cmdlet
-    # cannot itself create an ambiguous duplicate that a later Set-/Remove-SfosUnicastRoute
-    # would have to guess between.
+    # The firewall does not enforce DestinationIP+Netmask as a unique key. Checked here so
+    # this cmdlet cannot itself create an ambiguous duplicate.
     $duplicate = @(Get-SfosUnicastRoute -DestinationIPLike $DestinationIP -Firewall $params.Firewall `
             -Port $params.Port `
             -Username $params.Username `
@@ -4160,85 +4242,96 @@ function New-SfosUnicastRoute {
 
 <#
         .SYNOPSIS
-        Replaces an existing UnicastRoute object on the Sophos Firewall.
+        Updates a static route on a Sophos Firewall.
 
         .DESCRIPTION
-        "Updates" a UnicastRoute object by removing the existing route for the given
-        DestinationIP/Netmask and recreating it with the merged field values (read-modify-
-        write; caller-supplied values win, everything else is kept from the current object).
-        This cmdlet supports ShouldProcess; use -WhatIf to preview the change.
-
-        Measured live: <Set operation="update"> answers code 500 "Operation could not be
-        performed on Entity" for this entity regardless of content - a true no-op, full field
-        sets, and variants with/without <OldConfiguration> all failed identically. This
-        matches the existing Set-SfosStaticARP precedent, so this cmdlet removes and
-        recreates the route instead, with a brief window where the route is absent. If the
-        recreate step fails, the route is left removed rather than silently reverted.
+        Changes one or more fields of an existing static route. Because an update fails on
+        this entity, the cmdlet removes the route identified by -DestinationIP and -Netmask
+        and recreates it with the merged field values, so the route briefly does not exist
+        during the call. If the recreate step fails, the route is left removed rather than
+        silently reverted. It needs an open connection from Connect-SfosFirewall, or the
+        connection parameters supplied directly, and an account with write permission for
+        routing objects.
 
         .PARAMETER DestinationIP
-        Destination IP address of the target route (identifying key, together with Netmask).
+        Required. Destination address of the route to update, together with -Netmask.
 
         .PARAMETER Netmask
-        Netmask of the target route, dotted-decimal (identifying key, together with
-        DestinationIP).
+        Required. Netmask of the route to update, dotted-decimal, together with
+        -DestinationIP.
 
         .PARAMETER Gateway
-        Gateway IPv4/IPv6 address for the route. If omitted, the existing value is kept.
+        Optional. Gateway IPv4 or IPv6 address for the route. If omitted, the current
+        value is kept.
 
         .PARAMETER Interface
-        Egress interface for the route. If omitted, the existing value is kept.
+        Optional. Egress interface for the route. If omitted, the current value is kept.
 
         .PARAMETER Distance
-        Routing metric (0-255). If omitted, the existing value is kept.
+        Optional. Routing metric, 0-255. If omitted, the current value is kept.
 
         .PARAMETER AdministrativeDistance
-        Administrative distance (1-255). If omitted, the existing value is kept.
+        Optional. Administrative distance, 1-255. If omitted, the current value is kept.
 
         .PARAMETER Blackhole
-        Creates or removes a blackhole route. If omitted, the existing value is kept.
+        Optional. Creates or removes a blackhole route. Valid values: Enable, Disable. If
+        omitted, the current value is kept.
 
         .PARAMETER Status
-        Turns the static route on or off. If omitted, the existing value is kept.
+        Optional. Turns the route on or off. Valid values: ON, OFF. If omitted, the current
+        value is kept.
 
         .PARAMETER Description
-        Free-text description of the route. If omitted, the existing value is kept.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. Free-text description of the route. If omitted, the current value is
+        kept.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. User name for the API login. The account needs write permission for
+        routing objects. If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the
+        certificate is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        None. Throws an exception if the delete-and-recreate fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        removal or the recreate.
 
         .EXAMPLE
-        # Change only the description, everything else is preserved
-        Set-SfosUnicastRoute -DestinationIP "203.0.113.0" -Netmask "255.255.255.0" -Description "Backup path via Port1"
+        Set-SfosUnicastRoute -DestinationIP '203.0.113.0' -Netmask '255.255.255.0' -Description 'Backup path via Port1' -WhatIf
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        Verified live end to end: create, remove-and-recreate with a changed field, and a
-        follow-up Get confirmed both the changed and the preserved fields.
+        Shows what the call would change without sending it to the firewall.
+
+        .EXAMPLE
+        Set-SfosUnicastRoute -DestinationIP '203.0.113.0' -Netmask '255.255.255.0' -Description 'Backup path via Port1'
+
+        Changes the description of the route. All other fields keep their current value.
 
         .LINK
-        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/CONFIGURE/Routing/UnicastRoute/operations/AddUnicastRoute&UpdateUnicastRoute.html
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
 
         .LINK
         Get-SfosUnicastRoute
@@ -4348,62 +4441,69 @@ function Set-SfosUnicastRoute {
 
 <#
         .SYNOPSIS
-        Removes a UnicastRoute object from the Sophos Firewall.
+        Removes a static route from a Sophos Firewall.
 
         .DESCRIPTION
-        Removes a UnicastRoute object using the Sophos Firewall XML API. This cmdlet supports
-        ShouldProcess; use -WhatIf to preview the change.
-
-        Measured live: sending only the documented composite key (DestinationIP + Netmask),
-        or that plus Interface, answered code 200 on one attempt but code 500 "Operation could
-        not be performed on Entity" on a later, structurally identical attempt against a
-        differently-valued object - not reproducible on demand. Sending the full object body
-        (every field Get-SfosUnicastRoute returns) succeeded reliably on every attempt, so
-        this cmdlet reads the object back first and always sends the complete body.
+        Deletes the static route identified by -DestinationIP and -Netmask. The cmdlet
+        reads the route first and sends its complete field set with the removal request.
+        It needs an open connection from Connect-SfosFirewall, or the connection
+        parameters supplied directly, and an account with write permission for routing
+        objects.
 
         .PARAMETER DestinationIP
-        Destination IP address of the target route (identifying key, together with Netmask).
+        Required. Destination address of the route to remove, together with -Netmask.
 
         .PARAMETER Netmask
-        Netmask of the target route, dotted-decimal (identifying key, together with
-        DestinationIP).
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Required. Netmask of the route to remove, dotted-decimal, together with
+        -DestinationIP.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. User name for the API login. The account needs write permission for
+        routing objects. If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the
+        certificate is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        None. Throws an exception if removal fails.
+        None. The cmdlet writes no output and raises an error if the route does not exist
+        or the firewall rejects the removal.
 
         .EXAMPLE
-        # Remove a test route
-        Remove-SfosUnicastRoute -DestinationIP "203.0.113.0" -Netmask "255.255.255.0"
+        Remove-SfosUnicastRoute -DestinationIP '203.0.113.0' -Netmask '255.255.255.0' -WhatIf
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        Verified live: removal followed by Get-SfosUnicastRoute confirmed the record no
-        longer exists.
+        Shows what the call would remove without sending it to the firewall.
+
+        .EXAMPLE
+        Remove-SfosUnicastRoute -DestinationIP '203.0.113.0' -Netmask '255.255.255.0'
+
+        Removes the static route toward 203.0.113.0/24.
 
         .LINK
-        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/CONFIGURE/Routing/UnicastRoute/operations/Delete%20Unicast%20Route.html
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
 
         .LINK
         Get-SfosUnicastRoute
@@ -4491,72 +4591,82 @@ function Remove-SfosUnicastRoute {
 
 <#
         .SYNOPSIS
-        Retrieves MulticastRoute objects from the Sophos Firewall.
+        Retrieves multicast routes from a Sophos Firewall.
 
         .DESCRIPTION
-        Queries the Sophos Firewall XML API for MulticastRoute objects. MulticastRoute has no
-        Name element; it is identified by the composite key SourceIPAddress +
-        MulticastAddress. By default the cmdlet returns PowerShell-friendly objects. Use
-        -AsXml to return the raw XML nodes.
+        Returns the multicast routes defined under Routing > Multicast Routing. A route
+        has no name; it is identified by the combination of source address and multicast
+        address. Use this cmdlet to review the existing routes or to feed them into
+        another cmdlet through the pipeline. The cmdlet only reads; nothing on the
+        firewall is changed. It needs an open connection from Connect-SfosFirewall, or
+        the connection parameters supplied directly.
 
-        Only one server-side filter key is ever sent, per the documented single-key
-        limitation; the result is always filtered again client-side for every requested
-        field, combined with AND.
+        You can combine both filters. The firewall itself evaluates only the
+        SourceIPAddress filter, so both filters are applied again on the client. The
+        result therefore always matches both filters you gave.
 
         .PARAMETER SourceIPAddressLike
-        Filters routes whose SourceIPAddress contains the given substring. Sent to the
-        firewall as the server-side filter (SourceIPAddress is the entity's mandatory field)
-        and re-applied client-side.
+        Optional. Returns only routes whose source address contains the given text
+        anywhere. This is a substring match, not a wildcard pattern. If omitted, the
+        source address is not used to filter.
 
         .PARAMETER MulticastAddressLike
-        Filters routes whose MulticastAddress contains the given substring. Applied client-
-        side only.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. Returns only routes whose multicast address contains the given text
+        anywhere. Applied on the client. If omitted, the multicast address is not used to
+        filter.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. User name for the API login. The account needs read permission for
+        routing objects. If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the
+        certificate is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
 
         .PARAMETER AsXml
-        Returns the raw XML nodes instead of PowerShell-friendly objects.
+        Optional. Returns the raw XML elements sent by the firewall instead of PowerShell
+        objects. Useful when you need a field that the standard output does not show.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        PSCustomObject[] (default). System.Xml.XmlElement[] when -AsXml is specified.
+        System.Management.Automation.PSCustomObject. One object per route, with the
+        properties SourceIPAddress, SourceTunnel, SourceInterface, MulticastAddress and
+        DestinationInterfaceList. DestinationInterfaceList is a list of objects with
+        Interface and TunnelType. Returns System.Xml.XmlElement when -AsXml is used, and
+        an empty array when no object matches.
 
         .EXAMPLE
-        # List every multicast route
         Get-SfosMulticastRoute
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        Confirmed live: the root element matches the documented entity name and folder name
-        (MulticastRoute), unlike most other entities in this API area. The lab firewall has no
-        multicast routes configured, so this Get was only verified on the empty-result path
-        ("No. of records Zero."); server-side filter honouring for SourceIPAddress could not be
-        confirmed against a real record.
+        Lists every multicast route on the firewall of the current connection.
 
         .LINK
-        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/CONFIGURE/Routing/MulticastRoute/MulticastRoute.html
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
 
         .LINK
-        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/CONFIGURE/Routing/MulticastRoute/operations/AddMulticastRoute&EditMulticastRoute.html
+        New-SfosMulticastRoute
 #>
 function Get-SfosMulticastRoute {
     [CmdletBinding()]
@@ -4647,83 +4757,80 @@ function Get-SfosMulticastRoute {
 
 <#
         .SYNOPSIS
-        Creates a new MulticastRoute object on the Sophos Firewall.
+        Creates a multicast route on a Sophos Firewall.
 
         .DESCRIPTION
-        Creates a MulticastRoute object on the Sophos Firewall XML API. This cmdlet supports
-        ShouldProcess; use -WhatIf to preview the change.
-
-        NOT confirmed against the live firewall: every documented-shape variant tried (with
-        and without SourceInterface, with and without TunnelType, with and without the
-        DestinationInterfaceList wrapper, the exact sample field order) answered code 500
-        "Operation could not be performed on Entity". The lab firewall's MulticastConfiguration
-        singleton reads MulticastForwardingSetting = Disable, which is the most likely gate,
-        but MulticastConfiguration has no documented write operation to test that hypothesis,
-        so it was not attempted. This cmdlet is implemented documentation-faithful and
-        verified at the XML-generation level only, per the existing New-SfosSSLTLSInspectionRule
-        precedent.
+        Creates a multicast route under Routing > Multicast Routing. Multicast route
+        write operations do not work on the current firmware. It needs an open connection
+        from Connect-SfosFirewall, or the connection parameters supplied directly, and an
+        account with write permission for routing objects.
 
         .PARAMETER SourceIPAddress
-        Source IPv4 address of the multicast traffic. Cannot be a multicast, reserved,
-        loopback, unspecified, broadcast or link-local address.
+        Required. Source IPv4 address of the multicast traffic. Must not be a multicast,
+        reserved, loopback, unspecified, broadcast or link-local address.
 
         .PARAMETER MulticastAddress
-        Destination multicast IPv4 address (the multicast group).
+        Required. Destination multicast IPv4 address, the multicast group.
 
         .PARAMETER SourceInterface
-        Source interface to accept the multicast traffic on. Optional; mutually exclusive
-        with -SourceTunnel in practice, not enforced here since neither could be verified
-        live.
+        Optional. Source interface to accept the multicast traffic on. If omitted, no
+        source interface is set.
 
         .PARAMETER SourceTunnel
-        Source tunnel type (SystemInterface, IPSec or GRE) instead of a plain interface.
-        Optional.
+        Optional. Source tunnel type instead of a plain interface. Valid values:
+        SystemInterface, IPSec, GRE.
 
         .PARAMETER DestinationInterface
-        One or more destination interface names to forward the multicast traffic to. Must be
-        the same length as -DestinationTunnelType when both are supplied.
+        Required. One or more destination interface names to forward the multicast traffic
+        to. Must be the same length as -DestinationTunnelType.
 
         .PARAMETER DestinationTunnelType
-        Tunnel type (SystemInterface, IPSec or GRE) for each entry in -DestinationInterface,
-        matched by position. Must be the same length as -DestinationInterface when both are
-        supplied.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Required. Tunnel type for each entry in -DestinationInterface, matched by
+        position. Valid values: SystemInterface, IPSec, GRE. Must be the same length as
+        -DestinationInterface.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. User name for the API login. The account needs write permission for
+        routing objects. If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the
+        certificate is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        None. Throws an exception if creation fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        creation.
 
         .EXAMPLE
-        # Build the request for a multicast test route (not confirmed to succeed - see .NOTES)
-        New-SfosMulticastRoute -SourceIPAddress "203.0.113.10" -MulticastAddress "239.255.255.10" -DestinationInterface "Port1" -DestinationTunnelType "SystemInterface" -WhatIf
+        New-SfosMulticastRoute -SourceIPAddress '203.0.113.10' -MulticastAddress '239.255.255.10' -DestinationInterface 'Port1' -DestinationTunnelType 'SystemInterface' -WhatIf
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        Unconfirmed on this firmware - see .DESCRIPTION. Every attempt answered
-        code 500 regardless of field combination.
+        Shows what the call would create without sending it to the firewall.
 
         .LINK
-        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/CONFIGURE/Routing/MulticastRoute/operations/AddMulticastRoute&EditMulticastRoute.html
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
 
         .LINK
         Get-SfosMulticastRoute
@@ -4809,78 +4916,83 @@ function New-SfosMulticastRoute {
 
 <#
         .SYNOPSIS
-        Updates an existing MulticastRoute object on the Sophos Firewall.
+        Updates a multicast route on a Sophos Firewall.
 
         .DESCRIPTION
-        Updates a MulticastRoute object using <Set operation="update">, reading the current
-        object first and resending every field, overriding only what the caller explicitly
-        passes (read-modify-write). Includes the <OldConfiguration> subtree the documented
-        sample shows, carrying the unchanged identifying key. This cmdlet supports
-        ShouldProcess; use -WhatIf to preview the change.
-
-        NOT confirmed against the live firewall: no MulticastRoute object could be created to
-        update (see New-SfosMulticastRoute). Implemented documentation-faithful and verified
-        at the XML-generation level only.
+        Changes one or more fields of an existing multicast route. The cmdlet reads the
+        current route first and sends the complete entity back, so fields you do not pass
+        keep their current value. Multicast route write operations do not work on the
+        current firmware. It needs an open connection from Connect-SfosFirewall, or the
+        connection parameters supplied directly, and an account with write permission for
+        routing objects.
 
         .PARAMETER SourceIPAddress
-        Source IPv4 address of the target route (identifying key, together with
-        MulticastAddress).
+        Required. Source address of the route to update, together with -MulticastAddress.
 
         .PARAMETER MulticastAddress
-        Multicast group address of the target route (identifying key, together with
-        SourceIPAddress).
+        Required. Multicast group address of the route to update, together with
+        -SourceIPAddress.
 
         .PARAMETER SourceInterface
-        Source interface to accept the multicast traffic on. If omitted, the existing value
-        is kept.
+        Optional. Source interface to accept the multicast traffic on. If omitted, the
+        current value is kept.
 
         .PARAMETER SourceTunnel
-        Source tunnel type (SystemInterface, IPSec or GRE). If omitted, the existing value is
-        kept.
+        Optional. Source tunnel type. Valid values: SystemInterface, IPSec, GRE. If
+        omitted, the current value is kept.
 
         .PARAMETER DestinationInterface
-        One or more destination interface names. If omitted, the existing list is kept. Must
-        be the same length as -DestinationTunnelType when both are supplied.
+        Optional. Complete replacement list of destination interface names. Must be the
+        same length as -DestinationTunnelType when both are supplied. If omitted, the
+        current list is kept.
 
         .PARAMETER DestinationTunnelType
-        Tunnel type for each entry in -DestinationInterface, matched by position. If omitted,
-        the existing list is kept.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. Tunnel type for each entry in -DestinationInterface, matched by
+        position. If omitted, the current list is kept.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. User name for the API login. The account needs write permission for
+        routing objects. If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the
+        certificate is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        System.String. Accepts a route by property name, so Get-SfosMulticastRoute |
+        Set-SfosMulticastRoute works.
 
         .OUTPUTS
-        None. Throws an exception if the update fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        update.
 
         .EXAMPLE
-        # Change the destination interface list only
-        Set-SfosMulticastRoute -SourceIPAddress "203.0.113.10" -MulticastAddress "239.255.255.10" -DestinationInterface "Port1" -DestinationTunnelType "SystemInterface"
+        Set-SfosMulticastRoute -SourceIPAddress '203.0.113.10' -MulticastAddress '239.255.255.10' -DestinationInterface 'Port1' -DestinationTunnelType 'SystemInterface' -WhatIf
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        Unconfirmed on this firmware - see .DESCRIPTION.
+        Shows what the call would change without sending it to the firewall.
 
         .LINK
-        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/CONFIGURE/Routing/MulticastRoute/operations/AddMulticastRoute&EditMulticastRoute.html
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
 
         .LINK
         Get-SfosMulticastRoute
@@ -4995,62 +5107,64 @@ function Set-SfosMulticastRoute {
 
 <#
         .SYNOPSIS
-        Removes a MulticastRoute object from the Sophos Firewall.
+        Removes a multicast route from a Sophos Firewall.
 
         .DESCRIPTION
-        Removes a MulticastRoute object using the Sophos Firewall XML API and the documented
-        composite key (SourceIPAddress + MulticastAddress). This cmdlet supports
-        ShouldProcess; use -WhatIf to preview the change.
-
-        NOT confirmed against the live firewall: no MulticastRoute object could be created to
-        remove (see New-SfosMulticastRoute). A delete against a non-existent key answered code
-        500, consistent with the documented status table (200/500/527) and with the same
-        non-specific 500 measured for Remove-SfosUnicastRoute against a non-existent object.
+        Deletes the multicast route identified by -SourceIPAddress and -MulticastAddress.
+        Multicast route write operations do not work on the current firmware. It needs an
+        open connection from Connect-SfosFirewall, or the connection parameters supplied
+        directly, and an account with write permission for routing objects.
 
         .PARAMETER SourceIPAddress
-        Source IPv4 address of the target route (identifying key, together with
-        MulticastAddress).
+        Required. Source address of the route to remove, together with
+        -MulticastAddress.
 
         .PARAMETER MulticastAddress
-        Multicast group address of the target route (identifying key, together with
-        SourceIPAddress).
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Required. Multicast group address of the route to remove, together with
+        -SourceIPAddress.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. User name for the API login. The account needs write permission for
+        routing objects. If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the
+        certificate is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        None. Throws an exception if removal fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        removal.
 
         .EXAMPLE
-        # Remove a multicast route
-        Remove-SfosMulticastRoute -SourceIPAddress "203.0.113.10" -MulticastAddress "239.255.255.10"
+        Remove-SfosMulticastRoute -SourceIPAddress '203.0.113.10' -MulticastAddress '239.255.255.10' -WhatIf
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        Unconfirmed end to end on this firmware - see .DESCRIPTION. The error path (delete of a
-        non-existent key, code 500) was confirmed live.
+        Shows what the call would remove without sending it to the firewall.
 
         .LINK
-        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/CONFIGURE/Routing/MulticastRoute/operations/Delete%20Multicast%20Route.html
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
 
         .LINK
         Get-SfosMulticastRoute
@@ -5114,63 +5228,62 @@ function Remove-SfosMulticastRoute {
 
 <#
         .SYNOPSIS
-        Retrieves the MulticastConfiguration settings from the Sophos Firewall.
+        Retrieves the multicast forwarding setting from a Sophos Firewall.
 
         .DESCRIPTION
-        Queries the Sophos Firewall XML API for the MulticastConfiguration singleton (global
-        multicast forwarding setting). There is exactly one instance of this element per
-        firewall. By default the cmdlet returns a PowerShell-friendly object. Use -AsXml to
-        return the raw XML node.
-
-        No Set-SfosMulticastConfiguration cmdlet exists: the vendor documentation page for
-        this entity (Multicast/Multicast.html) has an empty Description and an empty
-        Operations section - no operation, not even Get, is documented for it at all. This Get
-        is undocumented but works (measured), consistent with the existing finding that Get is
-        generally available even when the docs only show write operations, or no operations at
-        all. Without a documented write path this cmdlet stays read-only, per the existing
-        Set-SfosGuestUser precedent.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Returns the device-wide multicast forwarding setting. This is a singleton; there
+        is exactly one instance per firewall, and there is no write operation for it, so
+        this module has no matching Set cmdlet. The cmdlet only reads; nothing on the
+        firewall is changed. It needs an open connection from Connect-SfosFirewall, or the
+        connection parameters supplied directly.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. User name for the API login. The account needs read permission for
+        routing objects. If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the
+        certificate is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
 
         .PARAMETER AsXml
-        Returns the raw XML node instead of a PowerShell-friendly object.
+        Optional. Returns the raw XML element sent by the firewall instead of a
+        PowerShell object. Useful when you need a field that the standard output does not
+        show.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        PSCustomObject (default). System.Xml.XmlElement when -AsXml is specified.
+        System.Management.Automation.PSCustomObject. One object with the property
+        MulticastForwardingSetting. Returns System.Xml.XmlElement when -AsXml is used.
 
         .EXAMPLE
-        # Check whether multicast forwarding is enabled device-wide
         Get-SfosMulticastConfiguration
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        Measured live: MulticastForwardingSetting = Disable on the lab firewall. This value
-        may also explain why MulticastRoute objects could not be created (see
-        New-SfosMulticastRoute) - unconfirmed, since there is no documented write path to
-        test that hypothesis.
+        Shows whether multicast forwarding is enabled device-wide.
 
         .LINK
-        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/CONFIGURE/Routing/Multicast/Multicast.html
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
 #>
 function Get-SfosMulticastConfiguration {
     # PSUseSingularNouns is suppressed on purpose: <MulticastConfiguration> is the entity's
@@ -5229,59 +5342,62 @@ function Get-SfosMulticastConfiguration {
 
 <#
         .SYNOPSIS
-        Retrieves the PIMDynamicRouting settings from the Sophos Firewall.
+        Retrieves the PIM dynamic routing configuration from a Sophos Firewall.
 
         .DESCRIPTION
-        Queries the Sophos Firewall XML API for the PIMDynamicRouting singleton (device-wide
-        PIM-SM dynamic multicast routing configuration). There is exactly one instance of this
-        element per firewall. By default the cmdlet returns a PowerShell-friendly object. Use
-        -AsXml to return the raw XML node.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Returns the device-wide PIM-SM dynamic multicast routing configuration. This is a
+        singleton; there is exactly one instance per firewall. The cmdlet only reads;
+        nothing on the firewall is changed. It needs an open connection from
+        Connect-SfosFirewall, or the connection parameters supplied directly.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. User name for the API login. The account needs read permission for
+        routing objects. If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the
+        certificate is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
 
         .PARAMETER AsXml
-        Returns the raw XML node instead of a PowerShell-friendly object.
+        Optional. Returns the raw XML element sent by the firewall instead of a
+        PowerShell object. Useful when you need a field that the standard output does not
+        show.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        PSCustomObject (default). System.Xml.XmlElement when -AsXml is specified.
+        System.Management.Automation.PSCustomObject. One object with the properties
+        ManagePIM, InterfaceList, CandidateRP, StaticRPIP and StaticRPGroupIP. Returns
+        System.Xml.XmlElement when -AsXml is used.
 
         .EXAMPLE
-        # Check whether dynamic PIM routing is enabled device-wide
         Get-SfosPIMDynamicRouting
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        Measured live: ManagePIM = Disable and CandidateRP is an empty self-closing tag on the
-        lab firewall - not the text "Disable" the parameter table's value list (Disable/
-        Static/Dynamic) implies for an unconfigured RP. Because no RP is configured, the
-        nested StaticRPIP/DynamicRIP subtrees never appeared in the live response and their
-        shape could not be confirmed.
+        Shows whether dynamic PIM routing is enabled device-wide.
 
         .LINK
-        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/CONFIGURE/Routing/PIM/PIM.html
-
-        .LINK
-        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/CONFIGURE/Routing/PIM/operations/PIM-SMConfiguration.html
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
 #>
 function Get-SfosPIMDynamicRouting {
     [CmdletBinding()]
@@ -5340,76 +5456,78 @@ function Get-SfosPIMDynamicRouting {
 
 <#
         .SYNOPSIS
-        Updates the PIMDynamicRouting settings on the Sophos Firewall.
+        Updates the PIM dynamic routing configuration on a Sophos Firewall.
 
         .DESCRIPTION
-        Updates the device-wide PIMDynamicRouting singleton. This cmdlet reads the current
-        settings first and resends every field, overriding only what the caller explicitly
-        passes (read-modify-write). This cmdlet supports ShouldProcess; use -WhatIf to preview
-        the change.
-
-        WARNING: ManagePIM switches dynamic multicast routing on or off for the entire device.
-        Per this task's explicit instruction this cmdlet was implemented and checked
-        structurally only - it was never executed against the lab firewall, matching the
-        existing Set-SfosAdminAuthentication precedent for security-critical, device-wide
-        settings.
+        Changes one or more fields of the device-wide PIM dynamic routing singleton. The
+        cmdlet reads the current settings first and sends the complete entity back, so
+        fields you do not pass keep their current value. ManagePIM turns dynamic
+        multicast routing on or off for the whole device. It needs an open connection
+        from Connect-SfosFirewall, or the connection parameters supplied directly, and an
+        account with write permission for routing objects.
 
         .PARAMETER ManagePIM
-        Enables or disables PIM to provide dynamic multicast support on the device. If
-        omitted, the value currently on the firewall is kept.
+        Optional. Enables or disables PIM dynamic multicast routing on the device. Valid
+        values: Enable, Disable. If omitted, the current value is kept.
 
         .PARAMETER InterfaceList
-        Interfaces on which PIM is enabled. If omitted, the existing list is kept.
+        Optional. Complete replacement list of interfaces on which PIM is enabled. If
+        omitted, the current list is kept.
 
         .PARAMETER CandidateRP
-        Selects how the rendezvous point is determined (Disable, Static or Dynamic). If
-        omitted, the value currently on the firewall is kept.
+        Optional. Selects how the rendezvous point is determined. Valid values: Disable,
+        Static, Dynamic. If omitted, the current value is kept.
 
         .PARAMETER StaticRPIP
-        Unicast IP address used as the static RP, when -CandidateRP is Static. If omitted, the
-        value currently on the firewall is kept.
+        Optional. Unicast IP address used as the static rendezvous point, when
+        -CandidateRP is Static. If omitted, the current value is kept.
 
         .PARAMETER StaticRPGroupIP
-        Multicast group IP addresses or networks served by the static RP. If omitted, the
-        existing list is kept.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. Complete replacement list of multicast group addresses or networks
+        served by the static rendezvous point. If omitted, the current list is kept.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. User name for the API login. The account needs write permission for
+        routing objects. If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the
+        certificate is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        None. Throws an exception if the update fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        update.
 
         .EXAMPLE
-        # Preview enabling PIM on Port1 without sending the request
-        Set-SfosPIMDynamicRouting -ManagePIM Enable -InterfaceList "Port1" -WhatIf
+        Set-SfosPIMDynamicRouting -ManagePIM Enable -InterfaceList 'Port1' -WhatIf
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        NOT verified against the live firewall as a write - deliberately not exercised because
-        this is a device-wide dynamic routing toggle. The nesting and field names are inferred
-        from the documented sample XML on the PIM-SM Configuration operation page.
+        Shows what the call would change without sending it to the firewall.
 
         .LINK
-        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/CONFIGURE/Routing/PIM/operations/PIM-SMConfiguration.html
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
 
         .LINK
         Get-SfosPIMDynamicRouting

@@ -24,13 +24,20 @@
 #region IPSPolicy
 
 function ConvertTo-SfosIPSPolicyRuleXml {
-    # Internal helper, not exported. Builds one <Rule> element for an IPSPolicy's RuleList.
-    #
-    # SignaturSelectionType is spelled exactly as the live firewall sends and accepts it -
-    # missing the "e" in "Signature" is not a documentation typo, it is the real wire element
-    # name, measured on both read and write against the lab appliance (create with the typo
-    # spelling succeeds and round-trips; the correctly spelled element was never tried, since
-    # the read side already proves what the firewall actually uses).
+    <#
+        .SYNOPSIS
+        Builds the XML for one IPSPolicy rule.
+
+        .DESCRIPTION
+        Converts a rule object into the Rule element used inside an IPSPolicy RuleList. The
+        wire element for signature selection is spelled SignaturSelectionType, missing the
+        letter e in Signature. This is the element name the firewall itself sends and
+        accepts on both read and write, not a spelling mistake in this module.
+
+        .PARAMETER Rule
+        Required. The rule object to convert, with the same properties as a rule returned by
+        Get-SfosIPSPolicy.
+    #>
     [CmdletBinding()]
     [OutputType([string])]
     param(
@@ -88,17 +95,26 @@ function ConvertTo-SfosIPSPolicyRuleXml {
 }
 
 function ConvertTo-SfosIPSPolicyEntityXml {
-    # Internal helper, not exported. Builds the <Set> inner XML for an IPSPolicy entity, so
-    # New-, Set-SfosIPSPolicy, Add-SfosIPSPolicyRule and Remove-SfosIPSPolicyRule all send an
-    # identical, complete entity body. SFOS replaces the whole entity on
-    # <Set operation="update">, so the caller merges every field it wants preserved into
-    # -Policy before calling this function; nothing is read back here.
-    #
-    # Deliberately never emits <Template>. It appears only in the vendor sample XML, has no
-    # row in the attribute table, and sending it - with any value - is rejected outright with
-    # a 501 naming /IPSPolicy/Template as invalid (measured against the lab firewall). Unlike
-    # the FileType/Template pattern elsewhere in this project (accepted on write, silently
-    # absent on read), this field is not accepted at all on this firmware.
+    <#
+        .SYNOPSIS
+        Builds the Set request XML for an IPSPolicy entity.
+
+        .DESCRIPTION
+        Builds a complete IPSPolicy entity body, used by New-SfosIPSPolicy,
+        Set-SfosIPSPolicy, Add-SfosIPSPolicyRule and Remove-SfosIPSPolicyRule so all four
+        send an identical request shape. The firewall replaces the whole entity on an
+        update, so the caller merges every field it wants to keep into -Policy before
+        calling this function; the function itself does not read the current object back.
+
+        The Template field is never sent. It appears only in the vendor sample XML, not in
+        the parameter table, and the firewall rejects it outright with any value.
+
+        .PARAMETER Operation
+        Required. The Set operation to perform: add or update.
+
+        .PARAMETER Policy
+        Required. The complete policy object to send, including every rule to keep.
+    #>
     [CmdletBinding()]
     [OutputType([string])]
     param(
@@ -134,79 +150,89 @@ function ConvertTo-SfosIPSPolicyEntityXml {
 
 <#
         .SYNOPSIS
-        Retrieves IPSPolicy objects from the Sophos Firewall.
+        Retrieves IPS policy objects from a Sophos Firewall.
 
         .DESCRIPTION
-        Queries the Sophos Firewall XML API for IPSPolicy objects. By default the cmdlet
-        returns PowerShell-friendly objects. Use -AsXml to return the raw XML nodes.
+        Returns the intrusion prevention policies defined on the firewall. An IPS policy
+        holds a list of rules that select which signatures apply, and is assigned to
+        firewall rules to inspect their traffic. Use this cmdlet to review existing
+        policies, to feed them into another cmdlet through the pipeline, or to copy them to
+        a second firewall. The cmdlet only reads; nothing on the firewall is changed. It
+        needs an open connection from Connect-SfosFirewall, or the connection parameters
+        supplied directly.
 
-        Each Rule in the returned RuleList mirrors the shape produced by
-        New-SfosIPSPolicyRule, so a rule read back from Get-SfosIPSPolicy can be reused
-        directly with Add-SfosIPSPolicyRule or passed to Set-SfosIPSPolicy -Rule.
+        Each rule in the returned RuleList has the same shape that New-SfosIPSPolicyRule
+        produces, so a rule read back here can be reused directly with
+        Add-SfosIPSPolicyRule or passed to Set-SfosIPSPolicy.
 
-        The 10 factory-default IPS policies on a fresh SFOS install (e.g. 'WAN TO LAN',
-        'lantowan_strict') are returned like any other object. Treat them as read-only in
-        your own scripts - Set-SfosIPSPolicy has no protection against overwriting them.
-
-        Note: Sophos GET responses can be inconsistent regarding status elements. This
-        cmdlet is designed to return an empty result when no records are found.
+        The factory-default IPS policies that ship with the firewall, for example
+        'WAN TO LAN' or 'lantowan_strict', are returned like any other object. Treat them
+        as read-only in your own scripts; Set-SfosIPSPolicy does not protect them from
+        being overwritten.
 
         .PARAMETER NameLike
-        Optional name filter. In Sophos SFOS, 'like' behaves as a substring match (the
-        supplied value may match anywhere in the object name). Sent to the firewall as the
-        server-side filter and re-applied client-side, per the project's filtering rules.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. Returns only policies whose name contains the given text anywhere. This
+        is a substring match, not a wildcard pattern. If omitted, the name is not used to
+        filter.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the
-        stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use
-        the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored
-        connection context.
+        Optional. User name for the API login. The account needs read permission for IPS
+        policies. If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored
-        connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the
+        certificate is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection
+        is used.
 
         .PARAMETER AsXml
-        Returns raw XML nodes instead of PowerShell-friendly objects.
+        Optional. Returns the raw XML elements sent by the firewall instead of PowerShell
+        objects. Useful when you need a field that the standard output does not show.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        PSCustomObject with Name, Description and RuleList (array of rule objects with
-        RuleName, SignaturSelectionType, CategoryList, SeverityList, PlatformList,
-        TargetList, SignatureList, SmartFilter, RuleType, Action). A policy with no rules
-        returns RuleList as @(). System.Xml.XmlElement when -AsXml is specified.
+        System.Management.Automation.PSCustomObject. One object per IPS policy, with the
+        properties Name, Description and RuleList. Each entry in RuleList carries RuleName,
+        SignaturSelectionType, CategoryList, SeverityList, TargetList, PlatformList,
+        SignatureList, SmartFilter, RuleType and Action. A policy with no rules returns
+        RuleList as an empty array. Returns System.Xml.XmlElement when -AsXml is used, and
+        an empty array when no object matches.
 
         .EXAMPLE
-        # Retrieve all IPS policies
         Get-SfosIPSPolicy
 
-        .EXAMPLE
-        # Filter by name (substring match)
-        Get-SfosIPSPolicy -NameLike "dmz"
+        Lists every IPS policy on the firewall of the current connection.
 
         .EXAMPLE
-        # Return raw XML for troubleshooting
-        Get-SfosIPSPolicy -NameLike "dmz" -AsXml
+        Get-SfosIPSPolicy -NameLike 'dmz'
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for
-        user input.
+        Lists all IPS policies whose name contains 'dmz'.
+
+        .EXAMPLE
+        Get-SfosIPSPolicy -NameLike 'dmz' -AsXml
+
+        Returns the raw XML of the matching policies, for example to check a field that the
+        standard output does not contain.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
@@ -275,9 +301,8 @@ function Get-SfosIPSPolicy {
 
     $policyObjects = foreach ($node in @($nodes)) {
         # A policy with no rules has no <RuleList> element at all (SFOS drops it rather than
-        # sending an empty wrapper, measured), so $node.RuleList is $null. Without the
-        # -FilterScript below, @($null.Rule) is a one-element array containing $null, not an
-        # empty array.
+        # sending an empty wrapper), so $node.RuleList is $null. Without the -FilterScript
+        # below, @($null.Rule) is a one-element array containing $null, not an empty array.
         $rules = foreach ($ruleNode in @($node.RuleList.Rule | Where-Object -FilterScript { $_ })) {
             [PSCustomObject]@{
                 RuleName              = [string]$ruleNode.RuleName
@@ -318,62 +343,81 @@ function Get-SfosIPSPolicy {
 
 <#
         .SYNOPSIS
-        Creates a new IPSPolicy on the Sophos Firewall.
+        Creates an IPS policy on a Sophos Firewall.
 
         .DESCRIPTION
-        Creates an IPSPolicy object, which groups IPS signature-matching rules into a policy
-        that can be assigned to a firewall rule. Rules can be supplied at creation time via
-        -Rule, built with New-SfosIPSPolicyRule, or added afterwards with
-        Add-SfosIPSPolicyRule. Creating a policy with no rules at all is accepted by the
-        firewall (measured) - -Rule is optional.
+        Creates an IPS policy, which groups intrusion prevention rules and can then be
+        assigned to a firewall rule. Rules can be supplied at creation time with -Rule,
+        built beforehand with New-SfosIPSPolicyRule, or added afterwards with
+        Add-SfosIPSPolicyRule. Creating a policy with no rules is accepted; -Rule is
+        optional. It needs an open connection from Connect-SfosFirewall, or the connection
+        parameters supplied directly, and an account with write permission for IPS
+        policies.
 
         .PARAMETER Name
-        Name of the IPS policy (1-60 characters, no commas).
+        Required. Name of the new IPS policy, 1 to 60 characters, no commas.
 
         .PARAMETER Description
-        Optional description.
+        Optional. Free-text description of the policy. If omitted, the policy is created
+        without a description.
 
         .PARAMETER Rule
-        Zero or more rule objects, in the order they should be evaluated. Build each entry
-        with New-SfosIPSPolicyRule. Omitting -Rule entirely creates a policy with an empty
-        RuleList (measured), which Get-SfosIPSPolicy then reports back as RuleList = @().
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. Zero or more rule objects, in the order they should be evaluated. Build
+        each entry with New-SfosIPSPolicyRule. If omitted, the policy is created with an
+        empty rule list.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, uses stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number. If omitted, uses stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, uses stored connection context.
+        Optional. User name for the API login. The account needs write permission for IPS
+        policies. If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, uses stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the
+        certificate is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection
+        is used.
+
+        .INPUTS
+        System.String. The Name and Description can be bound from pipeline objects by
+        property name.
 
         .OUTPUTS
-        None. Throws an exception if creation fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        creation.
 
         .EXAMPLE
-        # Create a policy with no rules yet
-        New-SfosIPSPolicy -Name "BranchOffice" -Description "Empty test policy"
+        New-SfosIPSPolicy -Name 'BranchOffice' -Description 'Empty test policy' -WhatIf
+
+        Shows what the call would create without sending it to the firewall.
 
         .EXAMPLE
-        # Create a policy with one rule
-        $rule = New-SfosIPSPolicyRule -RuleName "AllTraffic" -Category "All Categories" -Severity "All Severity" -Target "All Target" -Platform "All Platform"
-        New-SfosIPSPolicy -Name "BranchOfficeIPS" -Description "One-rule test policy" -Rule $rule
+        New-SfosIPSPolicy -Name 'BranchOffice' -Description 'Empty test policy'
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
+        Creates an IPS policy with no rules. Rules can be added later with
+        Add-SfosIPSPolicyRule.
+
+        .EXAMPLE
+        $rule = New-SfosIPSPolicyRule -RuleName 'AllTraffic' -Category 'All Categories' -Severity 'All Severity' -Target 'All Target' -Platform 'All Platform'
+        New-SfosIPSPolicy -Name 'BranchOfficeIPS' -Description 'One-rule policy' -Rule $rule
+
+        Creates an IPS policy with a single rule.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
@@ -443,85 +487,84 @@ function New-SfosIPSPolicy {
 
 <#
         .SYNOPSIS
-        Updates an existing IPSPolicy object on the Sophos Firewall.
+        Updates an IPS policy on a Sophos Firewall.
 
         .DESCRIPTION
-        Updates an IPSPolicy object using the Sophos Firewall XML API. You can supply the
-        target object name directly or via the pipeline.
+        Updates an existing IPS policy. You can supply the target name directly or through
+        the pipeline. The cmdlet reads the current policy first and keeps whatever the
+        caller does not explicitly pass, except for -Rule, which replaces the whole rule
+        list. It needs an open connection from Connect-SfosFirewall, or the connection
+        parameters supplied directly, and an account with write permission for IPS
+        policies.
 
-        SFOS replaces the whole entity on update - any element not sent in the request is
-        cleared on the firewall. This cmdlet reads the current policy first and keeps
-        whatever the caller does not explicitly pass.
-
-        IMPORTANT (measured): an unrecognized value inside a Rule's nested lists (for
-        example an invalid Severity) is not rejected by the firewall on update. The
-        firewall silently drops just that one nested list from the Rule and still answers
-        200 'Configuration applied successfully' - the top-level Add operation does reject
-        an invalid RuleType with a 501, but nested list values inside Update are not
-        validated the same way. Verify with Get-SfosIPSPolicy after any Set-SfosIPSPolicy
-        call that touches -Rule, especially when the rule content came from something other
-        than New-SfosIPSPolicyRule / a prior Get-SfosIPSPolicy.
+        The factory-default IPS policies that ship with the firewall carry no protection
+        flag. Updating one of them overwrites its rule list with no warning from the API;
+        check -Name before running this against a shared or production policy.
 
         .PARAMETER Name
-        Name of the target policy.
+        Required. Name of the policy to update.
 
         .PARAMETER Description
-        Optional description text. If omitted, the existing description is kept.
+        Optional. Free-text description of the policy. If omitted, the current description
+        is kept.
 
         .PARAMETER Rule
-        Complete replacement rule list, in the order the firewall should evaluate them.
-        This REPLACES the existing RuleList wholesale, exactly as the API does - it does
-        not merge with the rules already on the firewall (measured: shrinking from 2 rules
-        to 1, and sending no rules at all, both work as expected - RuleList is not
-        append-only on this entity, unlike some other list fields in this project). Omit
-        this parameter to keep the existing rules unchanged. To add or remove a single rule
-        without touching the rest of the list, use Add-SfosIPSPolicyRule /
-        Remove-SfosIPSPolicyRule instead.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. Complete replacement rule list, in the order the firewall should
+        evaluate them. Replaces the existing rule list entirely; it does not merge with
+        the rules already on the firewall. If omitted, the existing rules are kept. To add
+        or remove a single rule without touching the rest of the list, use
+        Add-SfosIPSPolicyRule or Remove-SfosIPSPolicyRule instead.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the
-        stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use
-        the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored
-        connection context.
+        Optional. User name for the API login. The account needs write permission for IPS
+        policies. If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored
-        connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the
+        certificate is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection
+        is used.
+
+        .INPUTS
+        System.String. The Name and Description can be bound from pipeline objects by
+        property name, for example the output of Get-SfosIPSPolicy.
 
         .OUTPUTS
-        None. Throws an exception if the update fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        update.
 
         .EXAMPLE
-        # Change only the description, RuleList is preserved
-        Set-SfosIPSPolicy -Name "BranchOfficeIPS" -Description "Updated description"
+        Set-SfosIPSPolicy -Name 'BranchOfficeIPS' -Description 'Updated description' -WhatIf
+
+        Shows what the call would change without sending it to the firewall.
 
         .EXAMPLE
-        # Update using pipeline input
-        Get-SfosIPSPolicy -NameLike "BranchOfficeIPS" | Set-SfosIPSPolicy -Description "Updated"
+        Set-SfosIPSPolicy -Name 'BranchOfficeIPS' -Description 'Updated description'
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for
-        user input.
-        No write protection for the 10 factory-default IPS policies - this cmdlet will
-        overwrite one, including its RuleList, without any warning from the API. Verify
-        -Name before running this against a shared/production policy.
+        Changes only the description; the rule list is preserved.
+
+        .EXAMPLE
+        Get-SfosIPSPolicy -NameLike 'BranchOfficeIPS' | Set-SfosIPSPolicy -Description 'Updated'
+
+        Updates the matching policy using pipeline input.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
@@ -606,58 +649,63 @@ function Set-SfosIPSPolicy {
 
 <#
         .SYNOPSIS
-        Removes an IPSPolicy object from the Sophos Firewall.
+        Removes an IPS policy from a Sophos Firewall.
 
         .DESCRIPTION
-        Removes an IPSPolicy object using the Sophos Firewall XML API. This cmdlet supports
-        ShouldProcess; use -WhatIf to preview the change.
-
-        Deleting a policy name that does not exist answers 200 'Configuration applied
-        successfully' just like a real delete (measured against the lab firewall) - the
-        firewall gives no indication that nothing happened. This cmdlet therefore reads the
-        object first and throws 'was not found' for a name that is not present, rather than
-        trusting that response.
+        Deletes an IPS policy by name. The cmdlet checks that the policy exists before
+        removing it and throws if the name is not found. It needs an open connection from
+        Connect-SfosFirewall, or the connection parameters supplied directly, and an
+        account with write permission for IPS policies. Never target one of the
+        factory-default IPS policies with this cmdlet.
 
         .PARAMETER Name
-        Name of the target policy.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Required. Name of the policy to remove.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the
-        stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use
-        the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored
-        connection context.
+        Optional. User name for the API login. The account needs write permission for IPS
+        policies. If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored
-        connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the
+        certificate is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection
+        is used.
+
+        .INPUTS
+        System.String. Name can be bound from the pipeline, including by property name, for
+        example the output of Get-SfosIPSPolicy.
 
         .OUTPUTS
-        None. Throws an exception if removal fails, or if the named object does not exist.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        removal or the policy does not exist.
 
         .EXAMPLE
-        Remove-SfosIPSPolicy -Name "BranchOffice"
+        Remove-SfosIPSPolicy -Name 'BranchOffice' -WhatIf
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for
-        user input.
-        Never target the 10 factory-default IPS policies with this cmdlet.
+        Shows what the call would remove without sending it to the firewall.
+
+        .EXAMPLE
+        Remove-SfosIPSPolicy -Name 'BranchOffice'
+
+        Removes the named IPS policy. The cmdlet asks for confirmation before it writes.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
@@ -727,99 +775,86 @@ function Remove-SfosIPSPolicy {
 
 <#
         .SYNOPSIS
-        Builds a rule for use inside an IPSPolicy's RuleList.
+        Builds a rule object for an IPS policy's rule list.
 
         .DESCRIPTION
-        Creates the object New-SfosIPSPolicy -Rule, Set-SfosIPSPolicy -Rule and
-        Add-SfosIPSPolicyRule expect. Performs no API call - the rule only becomes part of a
-        policy once handed to one of those cmdlets. SFOS persists rule order unchanged, so
-        build rules in the order they must be evaluated.
+        Creates the rule object that New-SfosIPSPolicy, Set-SfosIPSPolicy and
+        Add-SfosIPSPolicyRule expect for their -Rule parameter. The cmdlet makes no API
+        call; the rule becomes part of a policy only once it is handed to one of those
+        cmdlets. The firewall keeps rule order unchanged, so build rules in the order they
+        must be evaluated.
 
         .PARAMETER InputObject
-        An existing rule to use as the base, as returned in the RuleList of
-        Get-SfosIPSPolicy. Accepts pipeline input. Only the parameters you actually supply
-        override it, so a single field can be changed without disturbing the rest. Without
-        it, every omitted parameter falls back to its default.
+        Optional. An existing rule to use as the base, for example one entry from the
+        RuleList that Get-SfosIPSPolicy returns. Accepts pipeline input. Only the
+        parameters you actually supply override the base object, so a single field can be
+        changed without disturbing the rest. Without it, every omitted parameter falls back
+        to its default.
 
         .PARAMETER RuleName
-        Name of the rule within the policy (1-70 characters). Mandatory unless -InputObject
-        supplies one.
+        Required, unless -InputObject supplies one. Name of the rule within the policy, 1
+        to 70 characters.
 
         .PARAMETER SignaturSelectionType
-        'All Application' or 'Individual Application'. Default: 'All Application'. Spelled
-        exactly as the wire element - see the module report for why the missing "e" is not
-        a typo in this codebase. Only 'All Application' has been fully measured end to end
-        (create, read back, matches). 'Individual Application' was probed structurally with
-        a fictional signature ID in -Signature and accepted with a warning-level 201
-        'Operation partially successful' - it was not confirmed with a real, installed
-        signature ID, since no signature catalog was available for testing.
+        Optional. Either 'All Application' or 'Individual Application'. 'All Application'
+        selects signatures by category, severity, target and platform. 'Individual
+        Application' selects specific signature IDs through -Signature. Default: 'All
+        Application'.
 
         .PARAMETER Category
-        IPS signature category names, for example 'All Categories', 'os-windows',
-        'server-mail'. Used when -SignaturSelectionType is 'All Application'. No client-side
-        validation - the live category catalog is large and was not enumerated.
+        Optional. IPS signature category names, for example 'All Categories',
+        'os-windows' or 'server-mail'. Used when -SignaturSelectionType is
+        'All Application'. If omitted, no category is set.
 
         .PARAMETER Severity
-        Severity names for this rule, for example 'All Severity'. Only 'All Severity' has
-        been measured directly against a Rule's SeverityList; 'Critical', 'Major',
-        'Moderate', 'Minor' and 'Warning' are inferred from the Severity enum documented for
-        the sibling IPSCustomSignature entity in the same feature area, not independently
-        confirmed here. IMPORTANT (measured): an unrecognized value in this list is not
-        rejected - Set-SfosIPSPolicy's update silently drops the whole SeverityList and
-        still reports success. Stick to the validated set here specifically to avoid that.
+        Optional. Severity names for this rule: 'All Severity', 'Critical', 'Major',
+        'Moderate', 'Minor' or 'Warning'. If omitted, no severity is set.
 
         .PARAMETER Target
-        Target names for this rule: 'All Target', 'Client' or 'Server' (all three measured
-        against live default policies).
+        Optional. Target names for this rule: 'All Target', 'Client' or 'Server'. If
+        omitted, no target is set.
 
         .PARAMETER Platform
-        Platform names for this rule, for example 'All Platform', 'Windows', 'Linux' (all
-        three measured against live default policies; the live signature catalog most
-        likely defines more, but only these three were observed). No client-side
-        ValidateSet, since the full platform list was not enumerated.
+        Optional. Platform names for this rule, for example 'All Platform', 'Windows' or
+        'Linux'. If omitted, no platform is set.
 
         .PARAMETER Signature
-        Individual signature IDs, used when -SignaturSelectionType is
-        'Individual Application'. See the caveat under -SignaturSelectionType - this path
-        was only probed structurally, not confirmed with a real signature ID.
+        Optional. Individual signature IDs, used when -SignaturSelectionType is
+        'Individual Application'. If omitted, no signature is set.
 
         .PARAMETER SmartFilter
-        Free-text search filter as stored by the web admin's rule builder UI. Always empty
-        on the 10 factory-default policies; its functional purpose beyond the UI search box
-        is not documented. Default: '' (empty).
+        Optional. Free-text search filter as stored by the web admin's rule builder.
+        Default: an empty string.
 
         .PARAMETER RuleType
-        'Default Signature' or 'Custom Signature'. Default: 'Default Signature'. Only
-        'Default Signature' is used by any of the 10 factory-default policies.
-        'Custom Signature' was probed structurally (accepted with code 200 even without a
-        real custom signature referenced) but could not be exercised end to end, because no
-        IPSCustomSignature could be created on this firmware - see New-SfosIPSCustomSignature.
+        Optional. Either 'Default Signature' or 'Custom Signature'. Default:
+        'Default Signature'.
 
         .PARAMETER Action
-        'Recommended', 'Allow Packet', 'Drop Packet', 'Disable', 'Drop Session', 'Reset' or
-        'Bypass Session'. Default: 'Recommended', the only value used by any of the 10
-        factory-default policies. The vendor documentation also lists a cryptic value '7' in
-        the same enum; per this build's task scope it was deliberately not tried against the
-        live firewall and is not offered here - noted only as a documentation curiosity.
+        Optional. One of 'Recommended', 'Allow Packet', 'Drop Packet', 'Disable',
+        'Drop Session', 'Reset' or 'Bypass Session'. Default: 'Recommended'.
+
+        .INPUTS
+        System.Management.Automation.PSCustomObject. InputObject can be bound from the
+        pipeline, for example one entry of the RuleList returned by Get-SfosIPSPolicy.
 
         .OUTPUTS
-        PSCustomObject with RuleName, SignaturSelectionType, CategoryList, SeverityList,
-        PlatformList, TargetList, SignatureList, SmartFilter, RuleType and Action properties
-        - the same shape Get-SfosIPSPolicy returns for each RuleList entry.
+        System.Management.Automation.PSCustomObject. A rule object with the properties
+        RuleName, SignaturSelectionType, CategoryList, SeverityList, PlatformList,
+        TargetList, SignatureList, SmartFilter, RuleType and Action, matching the shape
+        Get-SfosIPSPolicy returns for each RuleList entry.
 
         .EXAMPLE
-        # A simple all-traffic rule using the recommended action
-        New-SfosIPSPolicyRule -RuleName "AllTraffic" -Category "All Categories" -Severity "All Severity" -Target "All Target" -Platform "All Platform"
+        New-SfosIPSPolicyRule -RuleName 'AllTraffic' -Category 'All Categories' -Severity 'All Severity' -Target 'All Target' -Platform 'All Platform'
+
+        Builds a rule that matches all traffic with the recommended action.
 
         .EXAMPLE
-        # Change one field of an existing rule read back from the firewall
-        $policy = Get-SfosIPSPolicy -NameLike "BranchOfficeIPS"
-        $edited = $policy.RuleList[0] | New-SfosIPSPolicyRule -Action "Drop Session"
-        Set-SfosIPSPolicy -Name "BranchOfficeIPS" -Rule $edited
+        $policy = Get-SfosIPSPolicy -NameLike 'BranchOfficeIPS'
+        $edited = $policy.RuleList[0] | New-SfosIPSPolicyRule -Action 'Drop Session'
+        Set-SfosIPSPolicy -Name 'BranchOfficeIPS' -Rule $edited
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This cmdlet performs no API call; it only builds an in-memory object.
+        Changes only the action of an existing rule and writes the updated rule back.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
@@ -934,59 +969,69 @@ function New-SfosIPSPolicyRule {
 
 <#
         .SYNOPSIS
-        Appends a rule to the end of an existing IPSPolicy's RuleList.
+        Appends a rule to an existing IPS policy.
 
         .DESCRIPTION
-        Reads the current IPSPolicy, appends the supplied rule after the existing ones, and
-        writes the whole entity back - SFOS replaces RuleList wholesale on update, so the
-        existing rules and their order are read back first and resent unchanged alongside
-        the new one.
+        Reads the current IPS policy, appends the supplied rule after the existing ones,
+        and writes the whole rule list back in one request. It needs an open connection
+        from Connect-SfosFirewall, or the connection parameters supplied directly, and an
+        account with write permission for IPS policies. No write protection exists for the
+        factory-default IPS policies; check -Name before running this against a shared or
+        production policy.
 
         .PARAMETER Name
-        Name of the target policy.
+        Required. Name of the target policy.
 
         .PARAMETER Rule
-        Rule object to append, built with New-SfosIPSPolicyRule.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Required. Rule object to append, built with New-SfosIPSPolicyRule.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the
-        stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use
-        the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored
-        connection context.
+        Optional. User name for the API login. The account needs write permission for IPS
+        policies. If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored
-        connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the
+        certificate is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection
+        is used.
+
+        .INPUTS
+        System.String. Name can be bound from pipeline objects by property name, for
+        example the output of Get-SfosIPSPolicy.
 
         .OUTPUTS
-        None. Throws an exception if the update fails.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        update.
 
         .EXAMPLE
-        $rule = New-SfosIPSPolicyRule -RuleName "ExtraRule" -Category "All Categories" -Severity "All Severity" -Target "All Target" -Platform "All Platform"
-        Add-SfosIPSPolicyRule -Name "BranchOfficeIPS" -Rule $rule
+        $rule = New-SfosIPSPolicyRule -RuleName 'ExtraRule' -Category 'All Categories' -Severity 'All Severity' -Target 'All Target' -Platform 'All Platform'
+        Add-SfosIPSPolicyRule -Name 'BranchOfficeIPS' -Rule $rule -WhatIf
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for
-        user input.
-        No write protection for the 10 factory-default IPS policies. Verify -Name before
-        running this against a shared/production policy.
+        Shows what the call would add without sending it to the firewall.
+
+        .EXAMPLE
+        $rule = New-SfosIPSPolicyRule -RuleName 'ExtraRule' -Category 'All Categories' -Severity 'All Severity' -Target 'All Target' -Platform 'All Platform'
+        Add-SfosIPSPolicyRule -Name 'BranchOfficeIPS' -Rule $rule
+
+        Appends the rule to the end of the policy's rule list.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
@@ -1063,70 +1108,69 @@ function Add-SfosIPSPolicyRule {
 
 <#
         .SYNOPSIS
-        Removes a single rule from an existing IPSPolicy's RuleList by index.
+        Removes a single rule from an IPS policy by index.
 
         .DESCRIPTION
-        Reads the current IPSPolicy, drops the rule at the given zero-based index from its
-        RuleList, and writes the whole entity back - SFOS replaces RuleList wholesale on
-        update, so the remaining rules and their order are resent unchanged.
-
-        RuleList was measured to NOT be append-only on this entity: shrinking a policy from
-        two rules to one, and sending an empty RuleList wrapper, both took effect correctly
-        and Get-SfosIPSPolicy read back the reduced/empty list. This differs from some other
-        list fields in this project (for example WebFilterCategory's URLList), where an
-        update can silently fail to shrink. This cmdlet still reads the object back after
-        the update and throws if the rule count on the firewall does not match what was
-        sent, rather than trusting the 200 status code alone - the same defensive pattern
-        used elsewhere in this project for writes that could otherwise report success while
-        changing nothing.
+        Reads the current IPS policy, drops the rule at the given zero-based index from its
+        rule list, and writes the whole rule list back in one request. The cmdlet reads the
+        policy back afterwards and throws if the rule count on the firewall does not match
+        what was sent, rather than trusting a success status alone. It needs an open
+        connection from Connect-SfosFirewall, or the connection parameters supplied
+        directly, and an account with write permission for IPS policies. No write
+        protection exists for the factory-default IPS policies; check -Name before running
+        this against a shared or production policy.
 
         .PARAMETER Name
-        Name of the target policy.
+        Required. Name of the target policy.
 
         .PARAMETER Index
-        Zero-based position of the rule to remove within the policy's RuleList, in the
-        order returned by Get-SfosIPSPolicy. Throws if out of range.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Required. Zero-based position of the rule to remove within the policy's rule list,
+        in the order returned by Get-SfosIPSPolicy. Throws if the index is out of range.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the
-        stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use
-        the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored
-        connection context.
+        Optional. User name for the API login. The account needs write permission for IPS
+        policies. If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored
-        connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the
+        certificate is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection
+        is used.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        None. Throws an exception if the update fails, or if the rule was not actually
-        removed.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        update or the rule was not actually removed.
 
         .EXAMPLE
-        # Remove the first rule of the policy
-        Remove-SfosIPSPolicyRule -Name "BranchOfficeIPS" -Index 0
+        Remove-SfosIPSPolicyRule -Name 'BranchOfficeIPS' -Index 0 -WhatIf
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for
-        user input.
-        No write protection for the 10 factory-default IPS policies. Verify -Name before
-        running this against a shared/production policy.
+        Shows what the call would remove without sending it to the firewall.
+
+        .EXAMPLE
+        Remove-SfosIPSPolicyRule -Name 'BranchOfficeIPS' -Index 0
+
+        Removes the first rule of the policy.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
@@ -1207,10 +1251,8 @@ function Remove-SfosIPSPolicyRule {
         $XmlResponse = [xml]$response.Content
         Assert-SfosApiReturnSuccess -Xml $XmlResponse -ObjectName 'IPSPolicy' -Action 'remove rule' -Target $Name
 
-        # RuleList is not append-only on this entity (measured, see .DESCRIPTION), but a 200
-        # that changes nothing is exactly the failure mode this project has been bitten by
-        # before (compare Remove-SfosSSLBookmark in the VPN module) - read back and throw
-        # rather than trust the status code alone.
+        # A 200 response can mean the rule list was not actually shortened, so the policy is
+        # read back and the rule count checked rather than trusting the status code alone.
         $after = @(Get-SfosIPSPolicy -Firewall $params.Firewall `
                 -Port $params.Port `
                 -Username $params.Username `
@@ -1232,70 +1274,70 @@ function Remove-SfosIPSPolicyRule {
 
 <#
         .SYNOPSIS
-        Retrieves IPSCustomSignature objects from the Sophos Firewall.
+        Retrieves custom IPS signatures from a Sophos Firewall.
 
         .DESCRIPTION
-        Queries the Sophos Firewall XML API for IPSCustomSignature objects. By default the
-        cmdlet returns PowerShell-friendly objects. Use -AsXml to return the raw XML nodes.
-
-        No IPSCustomSignature could be created on the lab firewall during this module's
-        build - see New-SfosIPSCustomSignature - so this cmdlet's success path was measured
-        only against an empty result set. Its shape follows the same conventions as every
-        other Get-Sfos* in this project and its error path (an unrecognized filter, a
-        firewall-side error) is covered by the same Assert-SfosApiReturnSuccess logic used
-        everywhere else, but a real record was never actually read back.
-
-        Note: Sophos GET responses can be inconsistent regarding status elements. This
-        cmdlet is designed to return an empty result when no records are found.
+        Returns the custom intrusion prevention signatures defined on the firewall. A
+        custom signature holds a rule pattern that IPS matches against traffic, alongside a
+        severity and a recommended action. The cmdlet only reads; nothing on the firewall
+        is changed. It needs an open connection from Connect-SfosFirewall, or the
+        connection parameters supplied directly.
 
         .PARAMETER NameLike
-        Optional name filter. In Sophos SFOS, 'like' behaves as a substring match (the
-        supplied value may match anywhere in the object name). Sent to the firewall as the
-        server-side filter and re-applied client-side, per the project's filtering rules.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. Returns only signatures whose name contains the given text anywhere. This
+        is a substring match, not a wildcard pattern. If omitted, the name is not used to
+        filter.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the
-        stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use
-        the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored
-        connection context.
+        Optional. User name for the API login. The account needs read permission for IPS
+        signatures. If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored
-        connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the
+        certificate is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection
+        is used.
 
         .PARAMETER AsXml
-        Returns raw XML nodes instead of PowerShell-friendly objects.
+        Optional. Returns the raw XML elements sent by the firewall instead of PowerShell
+        objects. Useful when you need a field that the standard output does not show.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
         .OUTPUTS
-        PSCustomObject with Name, Protocol, CustomRule, Severity and RecommendedAction.
-        System.Xml.XmlElement when -AsXml is specified.
+        System.Management.Automation.PSCustomObject. One object per signature, with the
+        properties Name, Protocol, CustomRule, Severity and RecommendedAction. Returns
+        System.Xml.XmlElement when -AsXml is used, and an empty array when no object
+        matches.
 
         .EXAMPLE
         Get-SfosIPSCustomSignature
 
-        .EXAMPLE
-        Get-SfosIPSCustomSignature -NameLike "Block"
+        Lists every custom IPS signature on the firewall of the current connection.
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        This module uses XML-based requests (<Get>, <Set>, <Remove>) and XML escaping for
-        user input.
+        .EXAMPLE
+        Get-SfosIPSCustomSignature -NameLike 'Block'
+
+        Lists all custom signatures whose name contains 'Block'.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
@@ -1377,84 +1419,80 @@ function Get-SfosIPSCustomSignature {
 
 <#
         .SYNOPSIS
-        Creates a new IPSCustomSignature on the Sophos Firewall.
+        Creates a custom IPS signature on a Sophos Firewall.
 
         .DESCRIPTION
-        Creates an IPSCustomSignature object. UNCONFIRMED on this firmware: every add
-        attempted during this module's build was rejected with a bare 501
-        'Configuration parameters validation failed.', InvalidParams naming only
-        /IPSCustomSignature/CustomRule. Ten syntax variants for -CustomRule were tried
-        against the live firewall - classic Snort-style rules with and without classtype,
-        a minimal sid-only rule, the literal dot-separated form the attribute table's cryptic
-        footnote for this field seems to suggest ("To separate letters, use a dot (.)"),
-        unquoted and single-quoted message text, an added priority field, a plain
-        non-parenthesized form, a trailing period, and a rule using the 'flow' keyword - all
-        ten were rejected identically. -Protocol, -Severity and -RecommendedAction were all
-        confirmed independently valid: sending an invalid Protocol adds /Protocol to the
-        same InvalidParams list, and using -Action instead of -RecommendedAction (as the
-        vendor's own attribute table names the field) adds /RecommendedAction to it - see
-        .PARAMETER RecommendedAction. No working -CustomRule syntax was found, so this
-        cmdlet is implemented documentation-faithful, matching the vendor sample XML
-        element-for-element, and is not confirmed to succeed on this firmware.
+        Creates a custom intrusion prevention signature from a protocol, a rule string, a
+        severity and a recommended action. It needs an open connection from
+        Connect-SfosFirewall, or the connection parameters supplied directly, and an
+        account with write permission for IPS signatures. The current firmware does not
+        accept any custom rule syntax for this cmdlet; every create request is rejected.
 
         .PARAMETER Name
-        Name of the custom signature (1-15 characters, no commas).
+        Required. Name of the custom signature, 1 to 15 characters, no commas.
 
         .PARAMETER Protocol
-        'TCP', 'UDP', 'ICMP' or 'ALL'. Confirmed live: an invalid value is rejected with a
-        501 naming /IPSCustomSignature/Protocol.
+        Required. One of 'TCP', 'UDP', 'ICMP' or 'ALL'.
 
         .PARAMETER CustomRule
-        Signature definition string. See .DESCRIPTION - no syntax that this firmware accepts
-        was found; every attempt was rejected regardless of content.
+        Required. Signature definition string.
 
         .PARAMETER Severity
-        'Critical', 'Major', 'Moderate', 'Minor' or 'Warning', per the vendor documentation.
-        Not independently confirmed live, because -CustomRule always blocked the create.
+        Required. One of 'Critical', 'Major', 'Moderate', 'Minor' or 'Warning'.
 
         .PARAMETER RecommendedAction
-        'Allow Packet', 'Drop Packet', 'Drop Session', 'Reset' or 'Bypass Session'. The
-        vendor's attribute table calls this field "Action" and marks it mandatory, but the
-        actual XML element - confirmed live via InvalidParams - is <RecommendedAction>, as
-        the vendor's own XML sample also shows: the sample, not the table, matches the wire.
-        The vendor doc also lists a cryptic value '3' in the same enum; it was deliberately
-        not tried against the live firewall and is not offered here - noted only as a
-        documentation curiosity.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Required. One of 'Allow Packet', 'Drop Packet', 'Drop Session', 'Reset' or
+        'Bypass Session'.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, uses stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number. If omitted, uses stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, uses stored connection context.
+        Optional. User name for the API login. The account needs write permission for IPS
+        signatures. If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, uses stored connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the
+        certificate is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection
+        is used.
+
+        .INPUTS
+        System.String. Name can be bound from pipeline objects by property name.
 
         .OUTPUTS
-        None. Throws an exception if creation fails - which, on this firmware, is every
-        attempt so far. See .DESCRIPTION.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        creation.
 
         .EXAMPLE
-        # Documentation-faithful call; unconfirmed to succeed on this firmware - see .DESCRIPTION
-        New-SfosIPSCustomSignature -Name "BlockTelnet" -Protocol TCP -CustomRule 'alert tcp any any -> any any (msg:"probe"; sid:1000001; rev:1;)' -Severity Minor -RecommendedAction "Allow Packet"
+        $rule = Get-Content -Path 'C:\rules\block-telnet.txt' -Raw
+        New-SfosIPSCustomSignature -Name 'BlockTelnet' -Protocol TCP -CustomRule $rule -Severity Minor -RecommendedAction 'Allow Packet' -WhatIf
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        Unconfirmed on this firmware - see .DESCRIPTION. Implemented documentation-faithful,
-        matching the vendor sample element-for-element.
+        Reads a signature rule in Snort syntax from a file and shows what the call would
+        create, without sending it to the firewall. Keeping the rule in a file avoids
+        quoting problems, because the rule text contains characters that a shell would
+        otherwise interpret.
+
+        .EXAMPLE
+        $rule = Get-Content -Path 'C:\rules\block-telnet.txt' -Raw
+        New-SfosIPSCustomSignature -Name 'BlockTelnet' -Protocol TCP -CustomRule $rule -Severity Minor -RecommendedAction 'Allow Packet'
+
+        Creates a custom IPS signature from a rule file.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
@@ -1540,76 +1578,79 @@ function New-SfosIPSCustomSignature {
 
 <#
         .SYNOPSIS
-        Updates an existing IPSCustomSignature object on the Sophos Firewall.
+        Updates a custom IPS signature on a Sophos Firewall.
 
         .DESCRIPTION
-        Updates an IPSCustomSignature object using the Sophos Firewall XML API, reading the
-        current object first and keeping whatever the caller does not explicitly pass -
-        SFOS replaces the whole entity on update.
-
-        UNCONFIRMED on this firmware, for the same reason as New-SfosIPSCustomSignature: no
-        IPSCustomSignature could be created to update in the first place - see that
-        cmdlet's .DESCRIPTION. Because Get-SfosIPSCustomSignature returns an empty result
-        for every name on this firmware, calling this cmdlet against any name currently
-        throws "was not found" rather than reaching the update call at all.
+        Updates an existing custom intrusion prevention signature. The cmdlet reads the
+        current object first and keeps whatever the caller does not explicitly pass. It
+        needs an open connection from Connect-SfosFirewall, or the connection parameters
+        supplied directly, and an account with write permission for IPS signatures. The
+        current firmware does not accept any custom rule syntax for the underlying create,
+        so no custom signature can exist to update.
 
         .PARAMETER Name
-        Name of the target custom signature.
+        Required. Name of the signature to update.
 
         .PARAMETER Protocol
-        'TCP', 'UDP', 'ICMP' or 'ALL'. If omitted, the existing value is kept.
+        Optional. One of 'TCP', 'UDP', 'ICMP' or 'ALL'. If omitted, the current value is
+        kept.
 
         .PARAMETER CustomRule
-        Signature definition string. If omitted, the existing value is kept. See
-        New-SfosIPSCustomSignature for why no known-working syntax exists for this field on
-        this firmware.
+        Optional. Signature definition string. If omitted, the current value is kept.
 
         .PARAMETER Severity
-        'Critical', 'Major', 'Moderate', 'Minor' or 'Warning'. If omitted, the existing
-        value is kept.
+        Optional. One of 'Critical', 'Major', 'Moderate', 'Minor' or 'Warning'. If omitted,
+        the current value is kept.
 
         .PARAMETER RecommendedAction
-        'Allow Packet', 'Drop Packet', 'Drop Session', 'Reset' or 'Bypass Session'. If
-        omitted, the existing value is kept. See New-SfosIPSCustomSignature's
-        .PARAMETER RecommendedAction for why this is the wire element name, not "Action".
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Optional. One of 'Allow Packet', 'Drop Packet', 'Drop Session', 'Reset' or
+        'Bypass Session'. If omitted, the current value is kept.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the
-        stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use
-        the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored
-        connection context.
+        Optional. User name for the API login. The account needs write permission for IPS
+        signatures. If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored
-        connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the
+        certificate is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection
+        is used.
+
+        .INPUTS
+        System.String. Name can be bound from the pipeline, including by property name, for
+        example the output of Get-SfosIPSCustomSignature.
 
         .OUTPUTS
-        None. Throws an exception if the update fails, including "was not found" for any
-        name on a firmware where no IPSCustomSignature could ever be created.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        update or the signature does not exist.
 
         .EXAMPLE
-        # Documentation-faithful call; unconfirmed to succeed on this firmware - see .DESCRIPTION
-        Set-SfosIPSCustomSignature -Name "BlockTelnet" -Severity Major
+        Set-SfosIPSCustomSignature -Name 'BlockTelnet' -Severity Major -WhatIf
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        Unconfirmed on this firmware - see .DESCRIPTION.
+        Shows what the call would change without sending it to the firewall.
+
+        .EXAMPLE
+        Set-SfosIPSCustomSignature -Name 'BlockTelnet' -Severity Major
+
+        Updates the severity of the named signature.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
@@ -1708,58 +1749,62 @@ function Set-SfosIPSCustomSignature {
 
 <#
         .SYNOPSIS
-        Removes an IPSCustomSignature object from the Sophos Firewall.
+        Removes a custom IPS signature from a Sophos Firewall.
 
         .DESCRIPTION
-        Removes an IPSCustomSignature object using the Sophos Firewall XML API. This cmdlet
-        supports ShouldProcess; use -WhatIf to preview the change.
-
-        Like Remove-SfosIPSPolicy, deleting a name that does not exist answers 200
-        'Configuration applied successfully' (measured), so this cmdlet reads the object
-        first and throws 'was not found' rather than trusting that response. Because no
-        IPSCustomSignature could be created on this firmware (see
-        New-SfosIPSCustomSignature), this cmdlet's delete-of-an-existing-object path could
-        not be exercised end to end - only the delete-of-a-nonexistent-name behaviour, and
-        the pre-check that guards against it, are confirmed.
+        Deletes a custom intrusion prevention signature by name. The cmdlet checks that the
+        signature exists before removing it and throws if the name is not found. It needs
+        an open connection from Connect-SfosFirewall, or the connection parameters supplied
+        directly, and an account with write permission for IPS signatures.
 
         .PARAMETER Name
-        Name of the target custom signature.
-
-        .PARAMETER Session
-        A session object returned by Connect-SfosFirewall, or the name of a session
-        registered with Connect-SfosFirewall -Name. Overrides the stored default
-        connection context; any of -Firewall/-Port/-Username/-Password/
-        -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-        between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Required. Name of the signature to remove.
 
         .PARAMETER Firewall
-        Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the
-        stored connection context.
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
         .PARAMETER Port
-        Management/API port number (typically 4444). If omitted, the cmdlet attempts to use
-        the stored connection context.
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER Username
-        Username for API authentication. If omitted, the cmdlet attempts to use the stored
-        connection context.
+        Optional. User name for the API login. The account needs write permission for IPS
+        signatures. If omitted, the value from the current connection is used.
 
         .PARAMETER Password
-        Password for API authentication. If omitted, the cmdlet attempts to use the stored
-        connection context.
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
         .PARAMETER SkipCertificateCheck
-        Skips SSL certificate validation for the API call.
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the
+        certificate is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection
+        is used.
+
+        .INPUTS
+        System.String. Name can be bound from the pipeline, including by property name, for
+        example the output of Get-SfosIPSCustomSignature.
 
         .OUTPUTS
-        None. Throws an exception if removal fails, or if the named object does not exist.
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        removal or the signature does not exist.
 
         .EXAMPLE
-        Remove-SfosIPSCustomSignature -Name "BlockTelnet"
+        Remove-SfosIPSCustomSignature -Name 'BlockTelnet' -WhatIf
 
-        .NOTES
-        Minimum supported PowerShell version: 5.1
-        Delete-of-an-existing-object path unconfirmed on this firmware - see .DESCRIPTION.
+        Shows what the call would remove without sending it to the firewall.
+
+        .EXAMPLE
+        Remove-SfosIPSCustomSignature -Name 'BlockTelnet'
+
+        Removes the named custom signature.
 
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
@@ -1830,84 +1875,76 @@ function Remove-SfosIPSCustomSignature {
 #region IPSSwitch
 # Entity: IPS switch (PROTECT > Intrusion Prevention > IPS switch). Device-wide singleton -
 # there is no Add/Update/Delete, just one combined Get/Set endpoint. Wire root is
-# <IPSSwitch>, with a single child <Status>Enable|Disable</Status> [doc].
+# <IPSSwitch>, with a single child <Status>Enable|Disable</Status>.
 #
-# Measured live against SFOS 22.0:
-# - On a successful Get the <Status> node carries NO 'code' attribute - it is the entity's
-#   one DATA field, not an API status, exactly like Get-SfosSDWANPolicyRouteStatus's
-#   ON/OFF field in the Routing module. Core's default status heuristic
-#   (Status[@code or not(../Name)]) would misread it: IPSSwitch has no <Name> sibling
-#   either, so the second half of that OR is also true, and the plain-text value 'Enable'
-#   would be read as an unrecognised status and thrown. Get-SfosIPSSwitch therefore checks
-#   explicitly for a coded Status node first (a real error/warning) and only falls back to
-#   reading the value as data when no 'code' attribute is present.
-# - The XPath for a genuine API error is /Response/IPSSwitch/Status[@code] - confirmed by
-#   provoking an invalid value: <IPSSwitch><Status>Bogus</Status></IPSSwitch> answers code
-#   501 "Configuration parameters validation failed." with
-#   <InvalidParams><Params>/IPSSwitch/Status</Params></InvalidParams>.
-# - operation="update" works normally for the two documented values and reports a genuine
-#   coded Status (200) on success, so Set-SfosIPSSwitch uses the standard
-#   Assert-SfosApiReturnSuccess check unmodified - only the Get side needs the special
-#   handling above.
-# - Write test: toggled from Enable to Disable, confirmed via Get, immediately toggled back
-#   to Enable, confirmed via Get - two calls total, minimal window. No admin/API access
-#   interruption was observed (unlike the SpoofPrevention LAN-zone trap documented in that
-#   region below), since this switch has nothing to do with zone-based traffic filtering.
+# On a successful Get the <Status> node carries no code attribute - it is the entity's one
+# data field, not an API status. Core's default status heuristic would misread it, since
+# IPSSwitch has no <Name> sibling either. Get-SfosIPSSwitch therefore checks explicitly for a
+# coded Status node first (a real error or warning) and only falls back to reading the value
+# as data when no code attribute is present. The XPath for a genuine API error is
+# /Response/IPSSwitch/Status[@code]. operation="update" reports a genuine coded Status on
+# success, so Set-SfosIPSSwitch uses the standard success check unmodified - only the Get
+# side needs the special handling above.
 
 <#
-.SYNOPSIS
-    Retrieves the device-wide IPSSwitch status from the Sophos Firewall.
+        .SYNOPSIS
+        Retrieves the intrusion prevention master switch state from a Sophos Firewall.
 
-.DESCRIPTION
-    Queries the Sophos Firewall XML API for the IPS switch (Intrusion Prevention > IPS
-    switch), the master on/off switch for the whole intrusion prevention engine. Use -AsXml
-    to return the raw XML node instead of a PowerShell-friendly object.
+        .DESCRIPTION
+        Returns whether the intrusion prevention engine is currently switched on or off for
+        the whole appliance. The cmdlet only reads; nothing on the firewall is changed. It
+        needs an open connection from Connect-SfosFirewall, or the connection parameters
+        supplied directly.
 
-    The wire's <Status> field on this entity is DATA, not an API status - see the region
-    header for why this cmdlet cannot use the project's default status heuristic unmodified.
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
-.PARAMETER Session
-A session object returned by Connect-SfosFirewall, or the name of a session
-registered with Connect-SfosFirewall -Name. Overrides the stored default
-connection context; any of -Firewall/-Port/-Username/-Password/
--SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
-.PARAMETER Firewall
-    Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs read permission for the
+        IPS switch. If omitted, the value from the current connection is used.
 
-.PARAMETER Port
-    Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
-.PARAMETER Username
-    Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER SkipCertificateCheck
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the
+        certificate is validated.
 
-.PARAMETER Password
-    Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection
+        is used.
 
-.PARAMETER SkipCertificateCheck
-    Skips SSL certificate validation for the API call.
+        .PARAMETER AsXml
+        Optional. Returns the raw XML node sent by the firewall instead of a PowerShell
+        object.
 
-.PARAMETER AsXml
-    Returns the raw XML node instead of a PowerShell-friendly object.
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
-.OUTPUTS
-    PSCustomObject (default). System.Xml.XmlElement when -AsXml is specified.
+        .OUTPUTS
+        System.Management.Automation.PSCustomObject. One object with the property Status,
+        either 'Enable' or 'Disable'. Returns System.Xml.XmlElement when -AsXml is used.
 
-.EXAMPLE
-    # Check whether intrusion prevention is currently switched on
-    Get-SfosIPSSwitch
+        .EXAMPLE
+        Get-SfosIPSSwitch
 
-.NOTES
-    Minimum supported PowerShell version: 5.1
-    Verified live: executed against the lab firewall, returned Status 'Enable' matching the
-    known baseline.
+        Shows whether intrusion prevention is currently switched on.
 
-.LINK
-    https://docs.sophos.com/nsg/sophos-firewall/22.0/API/PROTECT/Intrusion%20Prevention/ipsswitch/operations/IPSswitch.html
+        .LINK
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
 
-.LINK
-    Set-SfosIPSSwitch
+        .LINK
+        Set-SfosIPSSwitch
 #>
 function Get-SfosIPSSwitch {
     [CmdletBinding()]
@@ -1966,58 +2003,77 @@ function Get-SfosIPSSwitch {
 }
 
 <#
-.SYNOPSIS
-    Switches the device-wide intrusion prevention engine on or off.
+        .SYNOPSIS
+        Switches intrusion prevention on or off for a Sophos Firewall.
 
-.DESCRIPTION
-    Updates the IPS switch (Intrusion Prevention > IPS switch) using the Sophos Firewall XML
-    API. Supports ShouldProcess; use -WhatIf to preview. Reads the result back after a
-    successful-looking write and throws if the confirmed state does not match what was
-    requested.
+        .DESCRIPTION
+        Updates the device-wide IPS master switch. The cmdlet reads the result back after
+        the write and throws if the confirmed state does not match what was requested. It
+        needs an open connection from Connect-SfosFirewall, or the connection parameters
+        supplied directly, and an account with write permission for the IPS switch. This
+        switch affects intrusion prevention for the whole appliance; automated use should
+        pass -Confirm:$false deliberately.
 
-.PARAMETER Status
-    'Enable' or 'Disable' [doc]. Mandatory.
+        .PARAMETER Status
+        Required. Either 'Enable' or 'Disable'.
 
-.PARAMETER Session
-A session object returned by Connect-SfosFirewall, or the name of a session
-registered with Connect-SfosFirewall -Name. Overrides the stored default
-connection context; any of -Firewall/-Port/-Username/-Password/
--SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
-.PARAMETER Firewall
-    Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
-.PARAMETER Port
-    Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs write permission for the
+        IPS switch. If omitted, the value from the current connection is used.
 
-.PARAMETER Username
-    Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
-.PARAMETER Password
-    Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER SkipCertificateCheck
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the
+        certificate is validated.
 
-.PARAMETER SkipCertificateCheck
-    Skips SSL certificate validation for the API call.
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection
+        is used.
 
-.OUTPUTS
-    None. Throws an exception if the update fails or cannot be confirmed.
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
-.EXAMPLE
-    Set-SfosIPSSwitch -Status Disable
+        .OUTPUTS
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        update or the confirmed state does not match what was requested.
 
-.NOTES
-    Minimum supported PowerShell version: 5.1
-    Verified live: toggled Disable -> confirmed -> Enable -> confirmed against the lab
-    firewall, ending back at the original baseline. The error path (an invalid value
-    answering code 501 at /Response/IPSSwitch/Status[@code]) was also reproduced.
-    ConfirmImpact is High: device-wide IPS main switch; automation must pass -Confirm:$false.
+        .EXAMPLE
+        Set-SfosIPSSwitch -Status Disable -WhatIf
 
-.LINK
-    https://docs.sophos.com/nsg/sophos-firewall/22.0/API/PROTECT/Intrusion%20Prevention/ipsswitch/operations/IPSswitch.html
+        Shows what the call would change without sending it to the firewall.
 
-.LINK
-    Get-SfosIPSSwitch
+        .EXAMPLE
+        Set-SfosIPSSwitch -Status Disable
+
+        Switches off intrusion prevention. The cmdlet asks for confirmation before it
+        writes.
+
+        .EXAMPLE
+        Set-SfosIPSSwitch -Status Enable -Confirm:$false
+
+        Switches on intrusion prevention without asking for confirmation, for use in
+        scripts.
+
+        .LINK
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosIPSSwitch
 #>
 function Set-SfosIPSSwitch {
     [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
@@ -2077,93 +2133,77 @@ function Set-SfosIPSSwitch {
 #region IPSFullSignaturePack
 # Entity: IPS full signature pack (PROTECT > Intrusion Prevention > IPS full signature
 # pack). Device-wide singleton, wire root <IPSFullSignaturePack>, single child
-# <Status>enable|disable|show</Status> - all lowercase per doc and matching the live
-# baseline ('disable'), unlike IPSSwitch's Enable/Disable casing right next to it in the
-# same doc section.
+# <Status>enable|disable|show</Status>, all lowercase.
 #
-# Same DATENFELD-without-'code' trap as IPSSwitch's Status field on Get - see that region's
+# Same data-field-without-code trap as IPSSwitch's Status field on Get - see that region's
 # header for the mechanism. Get-SfosIPSFullSignaturePack uses the identical special-case
 # handling.
 #
-# Measured live against SFOS 22.0:
-# - Status='show' -> code 500 "Operation could not be performed on Entity."
-# - Status='Bogus' (invalid-value probe) -> also code 500, same message - indistinguishable
-#   from the 'show' result, so 500 alone cannot be used to tell "documented-but-unsupported
-#   value" from "genuinely invalid value" on this firmware.
-# - Status='enable' with operation="update" -> code 500, and a follow-up Get still reported
-#   'disable' - no state change.
-# - Status='disable' with operation="update" -> ALSO code 500, even though the target value
-#   matched the already-current state - update fails uniformly for every value tried on this
-#   entity, not just invalid ones.
-# - operation="add" was tried as a fallback with Status='enable': HTTP itself returned 200,
-#   but the response body carried NO <IPSFullSignaturePack> element and no <Status> at all -
-#   just the bare successful <Login>. A follow-up Get confirmed nothing had changed (still
-#   'disable'). This is a genuine silent no-op with an empty, harmless-looking response - the
-#   same defect class as GuestUser's edit-creates-duplicate trap and
-#   Remove-SfosSSLBookmark's no-op delete: a write that changes nothing and leaves nothing to
-#   hold onto.
-# - Conclusion: IPSFullSignaturePack cannot be toggled through the API on this firmware by
-#   any verb/value combination tried. Set-SfosIPSFullSignaturePack therefore uses
-#   operation="update" only and reliably throws via the coded 500 rather than silently doing
-#   nothing. Do not "fix" this by switching to operation="add": that variant is the dangerous
-#   silent no-op, not a working alternative.
-# - Net effect on the firewall: none. Every attempted write failed with a genuine error
-#   before anything changed.
+# The firmware does not currently accept a write to this entity through operation="update":
+# every value answers a code 500 and the state does not change. Set-SfosIPSFullSignaturePack
+# uses operation="update" so a failed write is reported loudly; operation="add" is a silent
+# no-op on this entity (HTTP 200, no state change, no error) and must not be used as a
+# workaround.
 
 <#
-.SYNOPSIS
-    Retrieves the device-wide IPSFullSignaturePack status from the Sophos Firewall.
+        .SYNOPSIS
+        Retrieves the IPS full signature pack status from a Sophos Firewall.
 
-.DESCRIPTION
-    Queries the Sophos Firewall XML API for the IPS full signature pack setting (Intrusion
-    Prevention > IPS full signature pack). Use -AsXml to return the raw XML node instead of
-    a PowerShell-friendly object.
+        .DESCRIPTION
+        Returns whether the full intrusion prevention signature pack is currently enabled
+        for the appliance, as opposed to the base pack. The cmdlet only reads; nothing on
+        the firewall is changed. It needs an open connection from Connect-SfosFirewall, or
+        the connection parameters supplied directly.
 
-    The wire's <Status> field on this entity is DATA, not an API status, exactly like
-    IPSSwitch - see that region's header for the mechanism this cmdlet works around.
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
-.PARAMETER Session
-A session object returned by Connect-SfosFirewall, or the name of a session
-registered with Connect-SfosFirewall -Name. Overrides the stored default
-connection context; any of -Firewall/-Port/-Username/-Password/
--SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
-.PARAMETER Firewall
-    Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs read permission for the
+        signature pack setting. If omitted, the value from the current connection is used.
 
-.PARAMETER Port
-    Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
-.PARAMETER Username
-    Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER SkipCertificateCheck
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the
+        certificate is validated.
 
-.PARAMETER Password
-    Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection
+        is used.
 
-.PARAMETER SkipCertificateCheck
-    Skips SSL certificate validation for the API call.
+        .PARAMETER AsXml
+        Optional. Returns the raw XML node sent by the firewall instead of a PowerShell
+        object.
 
-.PARAMETER AsXml
-    Returns the raw XML node instead of a PowerShell-friendly object.
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
-.OUTPUTS
-    PSCustomObject (default). System.Xml.XmlElement when -AsXml is specified.
+        .OUTPUTS
+        System.Management.Automation.PSCustomObject. One object with the property Status,
+        either 'enable' or 'disable'. Returns System.Xml.XmlElement when -AsXml is used.
 
-.EXAMPLE
-    # Check whether the full (as opposed to base) IPS signature pack is active
-    Get-SfosIPSFullSignaturePack
+        .EXAMPLE
+        Get-SfosIPSFullSignaturePack
 
-.NOTES
-    Minimum supported PowerShell version: 5.1
-    Verified live: executed against the lab firewall, returned Status 'disable' matching the
-    known baseline.
+        Shows whether the full IPS signature pack is currently active.
 
-.LINK
-    https://docs.sophos.com/nsg/sophos-firewall/22.0/API/PROTECT/Intrusion%20Prevention/ipsfullsignaturepack/operations/IPSFullSignaturePack.html
+        .LINK
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
 
-.LINK
-    Set-SfosIPSFullSignaturePack
+        .LINK
+        Set-SfosIPSFullSignaturePack
 #>
 function Get-SfosIPSFullSignaturePack {
     [CmdletBinding()]
@@ -2221,66 +2261,72 @@ function Get-SfosIPSFullSignaturePack {
 }
 
 <#
-.SYNOPSIS
-    Sets the device-wide IPSFullSignaturePack status on the Sophos Firewall.
+        .SYNOPSIS
+        Sets the IPS full signature pack status on a Sophos Firewall.
 
-.DESCRIPTION
-    Updates the IPS full signature pack setting (Intrusion Prevention > IPS full signature
-    pack) using the Sophos Firewall XML API. Supports ShouldProcess; use -WhatIf to preview.
+        .DESCRIPTION
+        Updates the device-wide setting that switches between the base and the full
+        intrusion prevention signature pack. The cmdlet reads the result back afterwards.
+        The current firmware rejects every write to this setting, so this cmdlet is
+        expected to fail; it is documentation-faithful and kept for firmware that accepts
+        the write. It needs an open connection from Connect-SfosFirewall, or the connection
+        parameters supplied directly, and an account with write permission for the
+        signature pack setting.
 
-    Measured broken on this firmware for every value tried, including a same-value
-    'disable' re-send - see the region header for the full transcript. This cmdlet is
-    implemented documentation-faithful with operation="update" and is expected to throw a
-    code-500 error on current firmware rather than reporting a false success; it still
-    confirms the result via Get afterwards as a safety net in case a firmware update makes
-    the write succeed.
+        .PARAMETER Status
+        Required. One of 'enable', 'disable' or 'show', all lowercase.
 
-.PARAMETER Status
-    'enable', 'disable' or 'show' [doc], all lowercase. Mandatory.
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
-.PARAMETER Session
-A session object returned by Connect-SfosFirewall, or the name of a session
-registered with Connect-SfosFirewall -Name. Overrides the stored default
-connection context; any of -Firewall/-Port/-Username/-Password/
--SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
-.PARAMETER Firewall
-    Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs write permission for the
+        signature pack setting. If omitted, the value from the current connection is used.
 
-.PARAMETER Port
-    Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
-.PARAMETER Username
-    Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER SkipCertificateCheck
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the
+        certificate is validated.
 
-.PARAMETER Password
-    Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection
+        is used.
 
-.PARAMETER SkipCertificateCheck
-    Skips SSL certificate validation for the API call.
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
-.OUTPUTS
-    None. Throws an exception if the update fails or cannot be confirmed - expected to throw
-    on current firmware, see .DESCRIPTION.
+        .OUTPUTS
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        update or the confirmed state does not match what was requested.
 
-.EXAMPLE
-    Set-SfosIPSFullSignaturePack -Status enable
+        .EXAMPLE
+        Set-SfosIPSFullSignaturePack -Status enable -WhatIf
 
-.NOTES
-    Minimum supported PowerShell version: 5.1
-    Verified live: 'show', an invalid value, 'enable' and 'disable' were all attempted with
-    operation="update" and all four answered code 500 without changing the firewall's state
-    - see the region header. This cmdlet is shipped in this documented-but-broken state
-    rather than switched to the operation="add" variant, which was also tried and found to
-    be a silent no-op (empty 200-looking response, no state change) - a worse failure mode
-    than a loud 500.
+        Shows what the call would change without sending it to the firewall.
 
-.LINK
-    https://docs.sophos.com/nsg/sophos-firewall/22.0/API/PROTECT/Intrusion%20Prevention/ipsfullsignaturepack/operations/IPSFullSignaturePack.html
+        .EXAMPLE
+        Set-SfosIPSFullSignaturePack -Status enable
 
-.LINK
-    Get-SfosIPSFullSignaturePack
+        Requests the full signature pack. The cmdlet asks for confirmation before it
+        writes.
+
+        .LINK
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosIPSFullSignaturePack
 #>
 function Set-SfosIPSFullSignaturePack {
     [CmdletBinding(SupportsShouldProcess)]
@@ -2347,94 +2393,90 @@ function Set-SfosIPSFullSignaturePack {
 # Entity: DoS Settings (PROTECT > Intrusion Prevention > DoS Settings). Device-wide
 # singleton, wire root <DoSSettings>, seven blocks: SYNFlood/UDPFlood/TCPFlood/ICMPFlood
 # each with a <Source> and a <Destination> child (PacketRatePerSource/Destination,
-# BurstRatePerSource/Destination, ApplyFlag), plus DroppedSourceRoutedPackets/
-# DisableICMPRedirectPacket/DisableARPFlooding which each carry only a <Destination><
-# ApplyFlag> [doc + live-DoSSettings.xml]. All 25 documented fields are "Mandatory: No", so
-# every parameter on Set-SfosDoSSettings here is optional with no default, and a full
-# read-modify-write across every block is mandatory.
+# BurstRatePerSource/Destination, ApplyFlag), plus DroppedSourceRoutedPackets,
+# DisableICMPRedirectPacket and DisableARPFlooding, which each carry only a
+# <Destination><ApplyFlag>. Every field is optional on the wire, so every parameter on
+# Set-SfosDoSSettings is optional with no default, and a full read-modify-write across every
+# block is mandatory.
 #
-# Measured live against SFOS 22.0:
-# - The status XPath for both success and failure is /Response/DoSSettings/Status[@code] -
-#   confirmed with a genuinely malformed field (PacketRatePerSource='abc' answers code 400
-#   "synFlood.source.packetRate: json: cannot unmarshal string into go value of type int32",
-#   the field path embedded directly in the message text) and with a normal successful write
-#   (code 200 "Configuration applied successfully."). No DoSSettings data field is itself
-#   named <Status>, so the default ObjectName-based heuristic in Assert-SfosApiReturnSuccess
-#   needs no special handling here, unlike IPSSwitch/IPSFullSignaturePack above.
-# - ApplyFlag is NOT validated server-side, confirmed again on FW2: sending
-#   ICMPFlood/Source/ApplyFlag='Bogus' together with an otherwise unchanged, complete
-#   DoSSettings body answers code 200 "Configuration applied successfully." and a follow-up
-#   Get shows the field UNCHANGED at its previous value ('Disable') - the invalid value is
-#   silently discarded rather than applied or rejected. This is the reason
-#   Set-SfosDoSSettings enforces ValidateSet('Enable','Disable') on every *ApplyFlag
-#   parameter client-side: the API's 200 response cannot be trusted to mean "the value you
-#   sent is now in effect."
-# - PacketRatePerSource/Destination and BurstRatePerSource/Destination are plain int32 on
-#   the wire (see the 'abc' probe above); no documented upper bound was found beyond that,
-#   so Set-SfosDoSSettings only enforces the type's own range.
+# The status XPath for both success and failure is /Response/DoSSettings/Status[@code]; no
+# DoSSettings data field is itself named <Status>, so the default status heuristic needs no
+# special handling here.
+#
+# ApplyFlag is not validated server-side: an invalid value is silently discarded rather than
+# applied or rejected, and the write still answers success. Set-SfosDoSSettings therefore
+# enforces ValidateSet('Enable','Disable') on every *ApplyFlag parameter client-side, since
+# the API's success response does not mean the value actually took effect.
 
 <#
-.SYNOPSIS
-    Retrieves the device-wide DoSSettings from the Sophos Firewall.
+        .SYNOPSIS
+        Retrieves the DoS protection settings from a Sophos Firewall.
 
-.DESCRIPTION
-    Queries the Sophos Firewall XML API for the DoS Settings singleton (Intrusion
-    Prevention > DoS Settings): per-direction packet/burst rate limits and enable flags for
-    SYN/UDP/TCP/ICMP flood protection, plus three simple enable flags for dropped
-    source-routed packets, ICMP redirect packets and ARP flood protection. Use -AsXml to
-    return the raw XML node instead of a PowerShell-friendly object.
+        .DESCRIPTION
+        Returns the device-wide denial-of-service protection settings: per-direction packet
+        and burst rate limits and enable flags for SYN, UDP, TCP and ICMP flood protection,
+        plus enable flags for dropped source-routed packets, ICMP redirect packets and ARP
+        flood protection. The cmdlet only reads; nothing on the firewall is changed. It
+        needs an open connection from Connect-SfosFirewall, or the connection parameters
+        supplied directly.
 
-.PARAMETER Session
-A session object returned by Connect-SfosFirewall, or the name of a session
-registered with Connect-SfosFirewall -Name. Overrides the stored default
-connection context; any of -Firewall/-Port/-Username/-Password/
--SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        Property names follow the pattern '<Block>SourcePacketRate',
+        '<Block>SourceBurstRate', '<Block>SourceApplyFlag', '<Block>DestinationPacketRate',
+        '<Block>DestinationBurstRate' and '<Block>DestinationApplyFlag' for each of
+        SYNFlood, UDPFlood, TCPFlood and ICMPFlood, plus
+        DroppedSourceRoutedPacketsApplyFlag, DisableICMPRedirectPacketApplyFlag and
+        DisableARPFloodingApplyFlag. These names match the parameters of Set-SfosDoSSettings
+        exactly, so a property read here can be passed straight back as a parameter name.
 
-.PARAMETER Firewall
-    Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
-.PARAMETER Port
-    Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
-.PARAMETER Username
-    Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs read permission for DoS
+        settings. If omitted, the value from the current connection is used.
 
-.PARAMETER Password
-    Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
-.PARAMETER SkipCertificateCheck
-    Skips SSL certificate validation for the API call.
+        .PARAMETER SkipCertificateCheck
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the
+        certificate is validated.
 
-.PARAMETER AsXml
-    Returns the raw XML node instead of a PowerShell-friendly object.
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection
+        is used.
 
-.OUTPUTS
-    PSCustomObject (default) with 27 flattened properties (see .NOTES for the naming
-    scheme). System.Xml.XmlElement when -AsXml is specified.
+        .PARAMETER AsXml
+        Optional. Returns the raw XML node sent by the firewall instead of a PowerShell
+        object.
 
-.EXAMPLE
-    # Check the current SYN flood packet-rate limits
-    Get-SfosDoSSettings | Select-Object SYNFloodSourcePacketRate, SYNFloodDestinationPacketRate
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
-.NOTES
-    Minimum supported PowerShell version: 5.1
-    Property naming scheme: '<Block>SourcePacketRate', '<Block>SourceBurstRate',
-    '<Block>SourceApplyFlag', '<Block>DestinationPacketRate', '<Block>DestinationBurstRate',
-    '<Block>DestinationApplyFlag' for Block in SYNFlood/UDPFlood/TCPFlood/ICMPFlood (24
-    properties), plus 'DroppedSourceRoutedPacketsApplyFlag',
-    'DisableICMPRedirectPacketApplyFlag' and 'DisableARPFloodingApplyFlag' (3 more) - 27
-    total, matching Set-SfosDoSSettings's parameter names exactly so a caller can read a
-    property name straight off this object and pass it as a Set-SfosDoSSettings parameter
-    name.
-    Verified live: executed against the lab firewall; all 27 values matched the saved
-    baseline XML.
+        .OUTPUTS
+        System.Management.Automation.PSCustomObject. One object with 27 properties covering
+        every DoS protection field. Returns System.Xml.XmlElement when -AsXml is used.
 
-.LINK
-    https://docs.sophos.com/nsg/sophos-firewall/22.0/API/PROTECT/Intrusion%20Prevention/DoSSettings/operations/ConfigurationDOSSettings.html
+        .EXAMPLE
+        Get-SfosDoSSettings | Select-Object SYNFloodSourcePacketRate, SYNFloodDestinationPacketRate
 
-.LINK
-    Set-SfosDoSSettings
+        Shows the current SYN flood packet rate limits.
+
+        .LINK
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Set-SfosDoSSettings
 #>
 function Get-SfosDoSSettings {
     # PSUseSingularNouns is suppressed on purpose. 'Settings' is not a plural container here
@@ -2518,146 +2560,174 @@ function Get-SfosDoSSettings {
 }
 
 <#
-.SYNOPSIS
-    Updates the device-wide DoSSettings on the Sophos Firewall.
+        .SYNOPSIS
+        Updates the DoS protection settings on a Sophos Firewall.
 
-.DESCRIPTION
-    Updates the DoS Settings singleton (Intrusion Prevention > DoS Settings) using the
-    Sophos Firewall XML API. Reads the current settings first and resends every one of the
-    27 fields across all seven blocks, overriding only what the caller explicitly passed
-    (read-modify-write, reaching into every nested block) - omitting a
-    block on this API clears it, and every field of this entity is "Mandatory: No" per the
-    doc table, so a partial write is syntactically accepted and silently destructive.
-    Supports ShouldProcess; use -WhatIf to preview.
+        .DESCRIPTION
+        Updates the device-wide denial-of-service protection settings. The cmdlet reads the
+        current settings first and resends every field across all seven blocks, overriding
+        only what the caller explicitly passed. It needs an open connection from
+        Connect-SfosFirewall, or the connection parameters supplied directly, and an
+        account with write permission for DoS settings.
 
-    Every *ApplyFlag parameter is validated client-side against 'Enable'/'Disable' - see the
-    region header for why: the firewall does not validate this field itself and silently
-    discards (not applies, not rejects) an invalid value while still answering code 200.
+        .PARAMETER SYNFloodSourcePacketRate
+        Optional. SYN flood packet rate limit per source, in packets per second. If
+        omitted, the current value is kept.
 
-.PARAMETER SYNFloodSourcePacketRate
-    SYN flood packet rate limit per source, in packets/second. If omitted, the current value is kept.
+        .PARAMETER SYNFloodSourceBurstRate
+        Optional. SYN flood burst rate limit per source. If omitted, the current value is
+        kept.
 
-.PARAMETER SYNFloodSourceBurstRate
-    SYN flood burst rate limit per source. If omitted, the current value is kept.
+        .PARAMETER SYNFloodSourceApplyFlag
+        Optional. Either 'Enable' or 'Disable' SYN flood protection per source. If omitted,
+        the current value is kept.
 
-.PARAMETER SYNFloodSourceApplyFlag
-    'Enable' or 'Disable' SYN flood protection per source. If omitted, the current value is kept.
+        .PARAMETER SYNFloodDestinationPacketRate
+        Optional. SYN flood packet rate limit per destination. If omitted, the current
+        value is kept.
 
-.PARAMETER SYNFloodDestinationPacketRate
-    SYN flood packet rate limit per destination. If omitted, the current value is kept.
+        .PARAMETER SYNFloodDestinationBurstRate
+        Optional. SYN flood burst rate limit per destination. If omitted, the current value
+        is kept.
 
-.PARAMETER SYNFloodDestinationBurstRate
-    SYN flood burst rate limit per destination. If omitted, the current value is kept.
+        .PARAMETER SYNFloodDestinationApplyFlag
+        Optional. Either 'Enable' or 'Disable' SYN flood protection per destination. If
+        omitted, the current value is kept.
 
-.PARAMETER SYNFloodDestinationApplyFlag
-    'Enable' or 'Disable' SYN flood protection per destination. If omitted, the current value is kept.
+        .PARAMETER UDPFloodSourcePacketRate
+        Optional. UDP flood packet rate limit per source. If omitted, the current value is
+        kept.
 
-.PARAMETER UDPFloodSourcePacketRate
-    UDP flood packet rate limit per source. If omitted, the current value is kept.
+        .PARAMETER UDPFloodSourceBurstRate
+        Optional. UDP flood burst rate limit per source. If omitted, the current value is
+        kept.
 
-.PARAMETER UDPFloodSourceBurstRate
-    UDP flood burst rate limit per source. If omitted, the current value is kept.
+        .PARAMETER UDPFloodSourceApplyFlag
+        Optional. Either 'Enable' or 'Disable' UDP flood protection per source. If omitted,
+        the current value is kept.
 
-.PARAMETER UDPFloodSourceApplyFlag
-    'Enable' or 'Disable' UDP flood protection per source. If omitted, the current value is kept.
+        .PARAMETER UDPFloodDestinationPacketRate
+        Optional. UDP flood packet rate limit per destination. If omitted, the current
+        value is kept.
 
-.PARAMETER UDPFloodDestinationPacketRate
-    UDP flood packet rate limit per destination. If omitted, the current value is kept.
+        .PARAMETER UDPFloodDestinationBurstRate
+        Optional. UDP flood burst rate limit per destination. If omitted, the current value
+        is kept.
 
-.PARAMETER UDPFloodDestinationBurstRate
-    UDP flood burst rate limit per destination. If omitted, the current value is kept.
+        .PARAMETER UDPFloodDestinationApplyFlag
+        Optional. Either 'Enable' or 'Disable' UDP flood protection per destination. If
+        omitted, the current value is kept.
 
-.PARAMETER UDPFloodDestinationApplyFlag
-    'Enable' or 'Disable' UDP flood protection per destination. If omitted, the current value is kept.
+        .PARAMETER TCPFloodSourcePacketRate
+        Optional. TCP flood packet rate limit per source. If omitted, the current value is
+        kept.
 
-.PARAMETER TCPFloodSourcePacketRate
-    TCP flood packet rate limit per source. If omitted, the current value is kept.
+        .PARAMETER TCPFloodSourceBurstRate
+        Optional. TCP flood burst rate limit per source. If omitted, the current value is
+        kept.
 
-.PARAMETER TCPFloodSourceBurstRate
-    TCP flood burst rate limit per source. If omitted, the current value is kept.
+        .PARAMETER TCPFloodSourceApplyFlag
+        Optional. Either 'Enable' or 'Disable' TCP flood protection per source. If omitted,
+        the current value is kept.
 
-.PARAMETER TCPFloodSourceApplyFlag
-    'Enable' or 'Disable' TCP flood protection per source. If omitted, the current value is kept.
+        .PARAMETER TCPFloodDestinationPacketRate
+        Optional. TCP flood packet rate limit per destination. If omitted, the current
+        value is kept.
 
-.PARAMETER TCPFloodDestinationPacketRate
-    TCP flood packet rate limit per destination. If omitted, the current value is kept.
+        .PARAMETER TCPFloodDestinationBurstRate
+        Optional. TCP flood burst rate limit per destination. If omitted, the current value
+        is kept.
 
-.PARAMETER TCPFloodDestinationBurstRate
-    TCP flood burst rate limit per destination. If omitted, the current value is kept.
+        .PARAMETER TCPFloodDestinationApplyFlag
+        Optional. Either 'Enable' or 'Disable' TCP flood protection per destination. If
+        omitted, the current value is kept.
 
-.PARAMETER TCPFloodDestinationApplyFlag
-    'Enable' or 'Disable' TCP flood protection per destination. If omitted, the current value is kept.
+        .PARAMETER ICMPFloodSourcePacketRate
+        Optional. ICMP flood packet rate limit per source. If omitted, the current value is
+        kept.
 
-.PARAMETER ICMPFloodSourcePacketRate
-    ICMP flood packet rate limit per source. If omitted, the current value is kept.
+        .PARAMETER ICMPFloodSourceBurstRate
+        Optional. ICMP flood burst rate limit per source. If omitted, the current value is
+        kept.
 
-.PARAMETER ICMPFloodSourceBurstRate
-    ICMP flood burst rate limit per source. If omitted, the current value is kept.
+        .PARAMETER ICMPFloodSourceApplyFlag
+        Optional. Either 'Enable' or 'Disable' ICMP flood protection per source. If
+        omitted, the current value is kept.
 
-.PARAMETER ICMPFloodSourceApplyFlag
-    'Enable' or 'Disable' ICMP flood protection per source. If omitted, the current value is kept.
+        .PARAMETER ICMPFloodDestinationPacketRate
+        Optional. ICMP flood packet rate limit per destination. If omitted, the current
+        value is kept.
 
-.PARAMETER ICMPFloodDestinationPacketRate
-    ICMP flood packet rate limit per destination. If omitted, the current value is kept.
+        .PARAMETER ICMPFloodDestinationBurstRate
+        Optional. ICMP flood burst rate limit per destination. If omitted, the current
+        value is kept.
 
-.PARAMETER ICMPFloodDestinationBurstRate
-    ICMP flood burst rate limit per destination. If omitted, the current value is kept.
+        .PARAMETER ICMPFloodDestinationApplyFlag
+        Optional. Either 'Enable' or 'Disable' ICMP flood protection per destination. If
+        omitted, the current value is kept.
 
-.PARAMETER ICMPFloodDestinationApplyFlag
-    'Enable' or 'Disable' ICMP flood protection per destination. If omitted, the current value is kept.
+        .PARAMETER DroppedSourceRoutedPacketsApplyFlag
+        Optional. Either 'Enable' or 'Disable' dropping of source-routed packets. If
+        omitted, the current value is kept.
 
-.PARAMETER DroppedSourceRoutedPacketsApplyFlag
-    'Enable' or 'Disable' dropping of source-routed packets. If omitted, the current value is kept.
+        .PARAMETER DisableICMPRedirectPacketApplyFlag
+        Optional. Either 'Enable' or 'Disable' disabling of ICMP redirect packets. If
+        omitted, the current value is kept.
 
-.PARAMETER DisableICMPRedirectPacketApplyFlag
-    'Enable' or 'Disable' disabling of ICMP redirect packets. If omitted, the current value is kept.
+        .PARAMETER DisableARPFloodingApplyFlag
+        Optional. Either 'Enable' or 'Disable' ARP flood protection. If omitted, the current
+        value is kept.
 
-.PARAMETER DisableARPFloodingApplyFlag
-    'Enable' or 'Disable' ARP flood protection. If omitted, the current value is kept.
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
-.PARAMETER Session
-A session object returned by Connect-SfosFirewall, or the name of a session
-registered with Connect-SfosFirewall -Name. Overrides the stored default
-connection context; any of -Firewall/-Port/-Username/-Password/
--SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
-.PARAMETER Firewall
-    Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs write permission for DoS
+        settings. If omitted, the value from the current connection is used.
 
-.PARAMETER Port
-    Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
-.PARAMETER Username
-    Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER SkipCertificateCheck
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the
+        certificate is validated.
 
-.PARAMETER Password
-    Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection
+        is used.
 
-.PARAMETER SkipCertificateCheck
-    Skips SSL certificate validation for the API call.
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
-.OUTPUTS
-    None. Throws an exception if the update fails.
+        .OUTPUTS
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        update.
 
-.EXAMPLE
-    # Change only the ICMP flood source packet rate, every other field is preserved
-    Set-SfosDoSSettings -ICMPFloodSourcePacketRate 121
+        .EXAMPLE
+        Set-SfosDoSSettings -ICMPFloodSourcePacketRate 121 -WhatIf
 
-.NOTES
-    Minimum supported PowerShell version: 5.1
-    Verified live: the example above was executed against the lab firewall (changing the
-    rate from its baseline of 120 to 121), confirmed via Get-SfosDoSSettings, then reverted
-    to exactly 120 and reconfirmed - the raw XML after revert matched the saved baseline
-    byte for byte. The error path (a malformed field answering code 400 with the field path
-    embedded in the message) and the ApplyFlag silent-discard behaviour (code 200, value
-    unchanged) were also reproduced - see the region header.
+        Shows what the call would change without sending it to the firewall.
 
-.LINK
-    https://docs.sophos.com/nsg/sophos-firewall/22.0/API/PROTECT/Intrusion%20Prevention/DoSSettings/operations/ConfigurationDOSSettings.html
+        .EXAMPLE
+        Set-SfosDoSSettings -ICMPFloodSourcePacketRate 121
 
-.LINK
-    Get-SfosDoSSettings
+        Changes only the ICMP flood source packet rate; every other field is preserved.
+
+        .LINK
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosDoSSettings
 #>
 function Set-SfosDoSSettings {
     # PSUseSingularNouns is suppressed on purpose. 'Settings' is not a plural container here
@@ -2862,65 +2932,33 @@ function Set-SfosDoSSettings {
 
 #region SpoofPrevention
 # Entity: Spoof Prevention (PROTECT > Intrusion Prevention > Spoof Prevention). Device-wide
-# singleton. Wire root <SpoofPrevention> wraps a child of the SAME name holding the main
-# switch: <SpoofPrevention><SpoofPrevention>Enable|Disable</SpoofPrevention>...</
-# SpoofPrevention> [doc sample + live-SpoofPrevention.xml]. When the switch is Enable, three
-# independent filter blocks may each be turned on for a list of zones:
-# <IPSpoofing><EnableOnZone><Zone>...</Zone>...</EnableOnZone></IPSpoofing>, and the same
-# shape for <MACFilter> and <IPMACFilter>. An additional flat field
-# <RestrictUnknownIPOnTrustedMAC>Enable|Disable</RestrictUnknownIPOnTrustedMAC> sits beside
-# the three blocks.
+# singleton. Wire root <SpoofPrevention> wraps a child of the same name holding the main
+# switch: <SpoofPrevention><SpoofPrevention>Enable|Disable</SpoofPrevention>...
+# </SpoofPrevention>. When the switch is Enable, three independent filter blocks may each be
+# turned on for a list of zones: <IPSpoofing><EnableOnZone><Zone>...</Zone>...
+# </EnableOnZone></IPSpoofing>, and the same shape for <MACFilter> and <IPMACFilter>. An
+# additional flat field <RestrictUnknownIPOnTrustedMAC>Enable|Disable</RestrictUnknownIPOnTrustedMAC>
+# sits beside the three blocks.
 #
-# CRITICAL MEASURED FINDING, measured once and deliberately not retested (see below):
-# enabling IPSpoofing for the zone that carries the management/API interface, on a
-# topology where that interface shares its subnet with another interface of a different
-# zone, made the firewall drop its own admin/API traffic on that interface as spoofed -
-# the API and admin connection was lost outright and the appliance had to be recovered
-# through an out-of-band path. This is exactly the scenario the IP-spoofing filter is
-# designed to catch (asymmetric routing on a shared subnet across two interfaces of
-# different zones), so it is a real, reproducible risk on any topology with the same
-# shared-subnet layout, not a fluke.
-#
-# Because of that finding, this run tests Spoof Prevention ONLY with IPSpoofing enabled
-# for a single zone that carries no admin/API path, never the management zone.
-# MACFilter/IPMACFilter are built structurally (same EnableOnZone/Zone shape, confirmed by
-# the working IPSpoofing write below) but their own zone-list write path was not separately
-# exercised - see .NOTES on Set-SfosSpoofPrevention.
-#
-# Measured live against SFOS 22.0:
-# - Status-XPath for a real API error is /Response/SpoofPrevention/Status[@code] - confirmed
-#   by sending the main switch value 'Bogus': answers code 400 '"Invalid request."' (the
-#   quotes are literally part of the message text on the wire).
-# - operation="update" with SpoofPrevention (main switch) = 'Enable', an empty
-#   RestrictUnknownIPOnTrustedMAC = 'Disable', IPSpoofing/EnableOnZone/Zone = 'DMZ', and
-#   empty (childless) EnableOnZone wrappers for MACFilter/IPMACFilter answers code 200 and a
-#   follow-up Get echoes back exactly SpoofPrevention=Enable,
-#   RestrictUnknownIPOnTrustedMAC=Disable, IPSpoofing/EnableOnZone/Zone=DMZ - and OMITS the
-#   MACFilter/IPMACFilter wrappers entirely, since their EnableOnZone had no <Zone>
-#   children. Reachability (a live Get-SfosZone call through the same session) was
-#   reconfirmed immediately afterwards - no admin/API impact from a DMZ-only zone.
-# - Reverting with operation="update" and ONLY <SpoofPrevention>Disable</SpoofPrevention> -
-#   no RestrictUnknownIPOnTrustedMAC, no IPSpoofing/MACFilter/IPMACFilter elements at all -
-#   answered code 200 and a follow-up Get returned exactly the pre-test baseline
-#   (<SpoofPrevention><SpoofPrevention>Disable</SpoofPrevention></SpoofPrevention>, nothing
-#   else), byte-for-byte identical to the saved baseline file. Disabling the main switch
-#   therefore clears/ignores every other field regardless of what was previously configured.
-#   This measured behaviour is deliberately mirrored in Set-SfosSpoofPrevention's own wire
-#   building below - see its .DESCRIPTION - rather than guessed at with an unverified
-#   "Disable plus full field set" combination.
+# The status XPath for a real API error is /Response/SpoofPrevention/Status[@code].
+# Disabling the main switch clears every other field regardless of what was previously
+# configured; a disabling update therefore sends only the main switch and omits the other
+# elements entirely.
 
 <#
-.SYNOPSIS
-    Internal helper: builds the <EnableOnZone> XML fragment for one Spoof Prevention filter
-    block from a zone name list. Not exported.
+        .SYNOPSIS
+        Builds the EnableOnZone XML fragment for one Spoof Prevention filter block.
 
-.DESCRIPTION
-    Shared by the IPSpoofing/MACFilter/IPMACFilter blocks inside Set-SfosSpoofPrevention -
-    all three use the identical <EnableOnZone><Zone>...</Zone>...</EnableOnZone> shape
-    [doc sample, confirmed live for IPSpoofing]. An empty list produces a childless, but
-    still present, <EnableOnZone></EnableOnZone> - matching what was sent (and accepted) for
-    MACFilter/IPMACFilter during the live IPSpoofing-only write test.
-#>
+        .DESCRIPTION
+        Shared by the IPSpoofing, MACFilter and IPMACFilter blocks inside
+        Set-SfosSpoofPrevention, which all use the identical
+        EnableOnZone/Zone shape. An empty list produces a childless, but still present,
+        EnableOnZone element.
+
+        .PARAMETER ZoneList
+        Zone names to enable the filter for. An empty or omitted list produces a childless
+        EnableOnZone element.
+    #>
 function ConvertTo-SfosSpoofPreventionZoneListXml {
     param([string[]]$ZoneList)
 
@@ -2934,62 +2972,69 @@ function ConvertTo-SfosSpoofPreventionZoneListXml {
 }
 
 <#
-.SYNOPSIS
-    Retrieves the device-wide SpoofPrevention settings from the Sophos Firewall.
+        .SYNOPSIS
+        Retrieves the spoof prevention settings from a Sophos Firewall.
 
-.DESCRIPTION
-    Queries the Sophos Firewall XML API for the Spoof Prevention singleton (Intrusion
-    Prevention > Spoof Prevention): the main on/off switch, the RestrictUnknownIPOnTrustedMAC
-    flag, and the three per-zone filter lists (IPSpoofing, MACFilter, IPMACFilter). Use
-    -AsXml to return the raw XML node instead of a PowerShell-friendly object.
+        .DESCRIPTION
+        Returns the device-wide spoof prevention configuration: the main on/off switch, the
+        RestrictUnknownIPOnTrustedMAC flag, and the three per-zone filter lists (IPSpoofing,
+        MACFilter, IPMACFilter). The cmdlet only reads; nothing on the firewall is changed.
+        It needs an open connection from Connect-SfosFirewall, or the connection parameters
+        supplied directly.
 
-    When the main switch is Disable, the firewall omits every other field from the response
-    (measured - see the region header), so RestrictUnknownIPOnTrustedMAC and all three zone
-    lists read back empty/blank in that state, not because they were cleared but because
-    they were never returned at all.
+        When the main switch is Disable, the firewall omits every other field from the
+        response, so RestrictUnknownIPOnTrustedMAC and all three zone lists read back empty
+        in that state, not because they were cleared but because they were never returned.
 
-.PARAMETER Session
-A session object returned by Connect-SfosFirewall, or the name of a session
-registered with Connect-SfosFirewall -Name. Overrides the stored default
-connection context; any of -Firewall/-Port/-Username/-Password/
--SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
-.PARAMETER Firewall
-    Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
-.PARAMETER Port
-    Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs read permission for spoof
+        prevention settings. If omitted, the value from the current connection is used.
 
-.PARAMETER Username
-    Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
-.PARAMETER Password
-    Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER SkipCertificateCheck
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the
+        certificate is validated.
 
-.PARAMETER SkipCertificateCheck
-    Skips SSL certificate validation for the API call.
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection
+        is used.
 
-.PARAMETER AsXml
-    Returns the raw XML node instead of a PowerShell-friendly object.
+        .PARAMETER AsXml
+        Optional. Returns the raw XML node sent by the firewall instead of a PowerShell
+        object.
 
-.OUTPUTS
-    PSCustomObject (default). System.Xml.XmlElement when -AsXml is specified.
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
-.EXAMPLE
-    # Check whether spoof prevention is on, and if so, for which zones
-    Get-SfosSpoofPrevention
+        .OUTPUTS
+        System.Management.Automation.PSCustomObject. One object describing the current
+        spoof prevention configuration. Returns System.Xml.XmlElement when -AsXml is used.
 
-.NOTES
-    Minimum supported PowerShell version: 5.1
-    Verified live: executed against the lab firewall in both the Disable baseline state and
-    the Enable/DMZ-only test state, matching the raw XML captured in both cases.
+        .EXAMPLE
+        Get-SfosSpoofPrevention
 
-.LINK
-    https://docs.sophos.com/nsg/sophos-firewall/22.0/API/PROTECT/Intrusion%20Prevention/SpoofPreventionSettings/operations/ConfigureSpoofPrevention.html
+        Shows whether spoof prevention is on, and for which zones.
 
-.LINK
-    Set-SfosSpoofPrevention
+        .LINK
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Set-SfosSpoofPrevention
 #>
 function Get-SfosSpoofPrevention {
     [CmdletBinding()]
@@ -3056,114 +3101,109 @@ function Get-SfosSpoofPrevention {
 }
 
 <#
-.SYNOPSIS
-    Updates the device-wide SpoofPrevention settings on the Sophos Firewall.
+        .SYNOPSIS
+        Updates the spoof prevention settings on a Sophos Firewall.
 
-.DESCRIPTION
-    Updates the Spoof Prevention singleton (Intrusion Prevention > Spoof Prevention) using
-    the Sophos Firewall XML API. Reads the current settings first and resends only what is
-    needed (read-modify-write), overriding only what the caller explicitly passed. Supports
-    ShouldProcess; use -WhatIf to preview.
+        .DESCRIPTION
+        Updates the device-wide spoof prevention configuration. The cmdlet reads the
+        current settings first and resends only what is needed, overriding only what the
+        caller explicitly passed. When the resolved target status is 'Disable', only the
+        main switch is sent; RestrictUnknownIPOnTrustedMAC and all three zone lists are
+        omitted, matching the firewall's own behaviour of clearing those fields whenever
+        the main switch is off. When the resolved target status is 'Enable',
+        RestrictUnknownIPOnTrustedMAC and all three zone lists are always sent. It needs an
+        open connection from Connect-SfosFirewall, or the connection parameters supplied
+        directly, and an account with write permission for spoof prevention settings.
 
-    WARNING - measured lockout risk: enabling IPSpoofing (or, presumably, MACFilter/
-    IPMACFilter, not separately tested) for the zone that carries the firewall's own admin/
-    API traffic, on a topology where that zone's interface shares a subnet with another
-    interface of a different zone, causes the firewall to treat its own management traffic
-    as spoofed and drop it. This was measured on a live appliance and made it unreachable
-    over the network until recovered through an out-of-band path - see the region header.
-    Before enabling any zone here, confirm
-    that zone's interface does not share a subnet with the interface you are connected
-    through, or you may lock yourself out with no way back in except physical/console access.
+        Enabling IP spoofing prevention for the zone that carries the firewall's own
+        management or API interface can make the appliance treat its own admin and API
+        traffic as spoofed and drop it, cutting off remote access. Recovery then requires
+        local access to the appliance. Confirm that the zone you enable does not carry the
+        interface you are connected through before running this cmdlet.
 
-    Wire shape mirrors what was measured live rather than the full documented structure at
-    all times: when the resolved target -Status is 'Disable', ONLY
-    <SpoofPrevention>Disable</SpoofPrevention> is sent - RestrictUnknownIPOnTrustedMAC and
-    all three zone lists are omitted entirely, matching the measured firewall behaviour that
-    disabling the main switch clears/ignores those fields regardless of what is sent
-    alongside it. When the resolved target -Status is 'Enable', RestrictUnknownIPOnTrustedMAC
-    and all three EnableOnZone blocks are always sent (defaulting
-    RestrictUnknownIPOnTrustedMAC to 'Disable' if neither passed nor previously set, since
-    the API never returns a value for it in the Disable state to read back). This avoids the
-    untested combination of 'Disable' sent together with a populated zone list.
+        .PARAMETER Status
+        Optional. Either 'Enable' or 'Disable' for the main spoof prevention switch. If
+        omitted, the current value is kept.
 
-.PARAMETER Status
-    'Enable' or 'Disable' for the main Spoof Prevention switch [doc sample; the doc's
-    attribute table instead lists lowercase 'on'/'off' for the same field - see
-    ips-doku-inventar.md for the full contradiction]. If omitted, the current value is kept.
+        .PARAMETER RestrictUnknownIPOnTrustedMAC
+        Optional. Either 'Enable' or 'Disable'. Only sent when the resolved -Status is
+        'Enable'. If omitted, the current value is kept, defaulting to 'Disable' if there
+        is no current value to read.
 
-.PARAMETER RestrictUnknownIPOnTrustedMAC
-    'Enable' or 'Disable' [doc]. Only meaningful (and only sent) when the resolved -Status is
-    'Enable' - see .DESCRIPTION. If omitted, the current value is kept, defaulting to
-    'Disable' if there is no current value to read (i.e. the entity was Disable beforehand).
+        .PARAMETER IPSpoofingZoneList
+        Optional. Zone names to enable IP spoofing prevention for. Only sent when the
+        resolved -Status is 'Enable'. If omitted, the current list is kept. Pass an empty
+        array to clear it. Never include the zone that carries your own admin or API
+        connection.
 
-.PARAMETER IPSpoofingZoneList
-    Zone names to enable IP spoofing prevention for. Only sent when the resolved -Status is
-    'Enable'. If omitted, the current list is kept. Pass an empty array to clear it. See the
-    WARNING in .DESCRIPTION before including any zone that carries your own admin/API
-    traffic.
+        .PARAMETER MACFilterZoneList
+        Optional. Zone names to enable MAC filtering for. Only sent when the resolved
+        -Status is 'Enable'. If omitted, the current list is kept. Pass an empty array to
+        clear it. The same lock-out risk as -IPSpoofingZoneList applies.
 
-.PARAMETER MACFilterZoneList
-    Zone names to enable MAC filtering for. Only sent when the resolved -Status is 'Enable'.
-    If omitted, the current list is kept. Pass an empty array to clear it. Structural only in
-    this project's live verification - the write path was exercised for IPSpoofing, not
-    separately for this block. See the WARNING in .DESCRIPTION: the same lockout mechanism
-    plausibly applies here too, since MAC filtering can also drop traffic from the zone
-    carrying your own session.
+        .PARAMETER IPMACFilterZoneList
+        Optional. Zone names to enable combined IP and MAC filtering for. Only sent when
+        the resolved -Status is 'Enable'. If omitted, the current list is kept. Pass an
+        empty array to clear it. The same lock-out risk as -IPSpoofingZoneList applies.
 
-.PARAMETER IPMACFilterZoneList
-    Zone names to enable combined IP+MAC filtering for. Only sent when the resolved -Status
-    is 'Enable'. If omitted, the current list is kept. Pass an empty array to clear it.
-    Structural only - see -MACFilterZoneList's note; the same caution applies.
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
-.PARAMETER Session
-A session object returned by Connect-SfosFirewall, or the name of a session
-registered with Connect-SfosFirewall -Name. Overrides the stored default
-connection context; any of -Firewall/-Port/-Username/-Password/
--SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
-.PARAMETER Firewall
-    Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs write permission for
+        spoof prevention settings. If omitted, the value from the current connection is
+        used.
 
-.PARAMETER Port
-    Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
-.PARAMETER Username
-    Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER SkipCertificateCheck
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the
+        certificate is validated.
 
-.PARAMETER Password
-    Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection
+        is used.
 
-.PARAMETER SkipCertificateCheck
-    Skips SSL certificate validation for the API call.
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
-.OUTPUTS
-    None. Throws an exception if the update fails.
+        .OUTPUTS
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        update.
 
-.EXAMPLE
-    # Enable IP spoofing prevention for the DMZ zone only - never a zone carrying your own
-    # admin/API session, see the WARNING in .DESCRIPTION
-    Set-SfosSpoofPrevention -Status Enable -IPSpoofingZoneList 'DMZ'
+        .EXAMPLE
+        Set-SfosSpoofPrevention -Status Enable -IPSpoofingZoneList 'DMZ' -WhatIf
 
-.EXAMPLE
-    # Turn Spoof Prevention back off entirely
-    Set-SfosSpoofPrevention -Status Disable
+        Shows what the call would change without sending it to the firewall.
 
-.NOTES
-    Minimum supported PowerShell version: 5.1
-    Verified live: both examples above were executed against the lab firewall in sequence
-    (Enable/DMZ, confirmed via Get-SfosSpoofPrevention and a reachability probe through the
-    same session, then Disable, reconfirmed byte-for-byte against the saved pre-test
-    baseline XML). The error path (an invalid main-switch value answering code 400) was also
-    reproduced. The zone 'LAN' must never be used when testing this cmdlet.
-    ConfirmImpact is High: enabling IPSpoofing on the management zone caused a
-    measured, unrecoverable-remote lock-out; automation must pass -Confirm:$false.
+        .EXAMPLE
+        Set-SfosSpoofPrevention -Status Enable -IPSpoofingZoneList 'DMZ'
 
-.LINK
-    https://docs.sophos.com/nsg/sophos-firewall/22.0/API/PROTECT/Intrusion%20Prevention/SpoofPreventionSettings/operations/ConfigureSpoofPrevention.html
+        Enables IP spoofing prevention for the DMZ zone only. The cmdlet asks for
+        confirmation before it writes.
 
-.LINK
-    Get-SfosSpoofPrevention
+        .EXAMPLE
+        Set-SfosSpoofPrevention -Status Disable -Confirm:$false
+
+        Turns spoof prevention off entirely without asking for confirmation, for use in
+        scripts.
+
+        .LINK
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosSpoofPrevention
 #>
 function Set-SfosSpoofPrevention {
     [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
@@ -3205,9 +3245,8 @@ function Set-SfosSpoofPrevention {
     }
 
     if ($targetStatus -eq 'Disable') {
-        # See .DESCRIPTION: disabling the main switch clears/ignores every other field on
-        # this firewall [measured], so nothing else is sent - matching exactly what was
-        # verified to restore the pristine baseline.
+        # See .DESCRIPTION: disabling the main switch clears every other field, so nothing
+        # else is sent.
         $inner = @'
 <Set operation="update">
   <SpoofPrevention>
@@ -3267,137 +3306,129 @@ function Set-SfosSpoofPrevention {
 #region DoSBypassRules
 # Entity: DoS Bypass Rule (PROTECT > Intrusion Prevention > DoS Bypass Rules).
 # Wire root element is the plural <DoSBypassRules> for both the container and every
-# individual record - there is no <Name> field and no other single-value key at all; a
-# record is identified purely by the combination of all six fields.
+# individual record - there is no <Name> field and no other single-value key; a record is
+# identified purely by the combination of all six fields.
 #
-# Measured live against SFOS 22.0, all with 0 pre-existing records:
-# - Multiple records come back as sibling <DoSBypassRules> elements directly under
-#   <Response>, exactly like the single-record case - there is no further wrapper.
-# - Server-side filtering is not merely "unsupported key returns everything" as with most
-#   other entities in this project - it is broken outright: sending ANY <Filter> (even one
-#   that server-side matches an existing record) answers code 404 "The requested resource
-#   could not be found" instead of the filtered rows. Get-SfosDoSBypassRule therefore never
-#   sends a <Filter> at all; every -*Like parameter is client-side only.
-# - SourcePort/DestinationPort are genuinely mandatory for Protocol TCP/UDP: omitting them
-#   answers code 400 "sourcePort and destinationPort are required for ipVersion ipv4 with
-#   protocol: tcp". For Protocol ICMP/AllProtocol they are accepted if sent (including the
-#   literal '*') but are never stored - a follow-up Get shows no SourcePort/DestinationPort
-#   element at all for those records. New-/Set-SfosDoSBypassRule therefore always send both
-#   ports (default '*', which the doc explicitly allows as a value) rather than branching on
-#   Protocol - the firewall silently drops them for ICMP/AllProtocol either way.
-# - operation="update" together with the documented <OldConfiguration> wrapper (repeating
-#   the full old record) works and changes exactly the targeted record - no need to fall
-#   back to operation="edit" (and its GuestUser-style duplicate-on-edit risk) for this
-#   entity. Updating a record that does not exist (wrong OldConfiguration) answers code 500
-#   "Operation could not be performed on Entity." - a genuine failure, not a 200 no-op, so
-#   Set-SfosDoSBypassRule does not need a pre-existence Get for correctness.
-# - Delete is the opposite: it silently no-ops. Deleting by only the three fields the
-#   documentation marks mandatory (IPFamily, SourcePort, DestinationPort) answers code 200
-#   and deletes nothing when a second record shares those three values but differs in
-#   SourceIPNetmask/DestinationIPNetmask/Protocol - the two "duplicates" from the docs'
-#   own Delete table are not actually sufficient to disambiguate. Only sending the complete
-#   six-field record removed the intended one and left its near-duplicate untouched.
-#   Deleting a record that does not exist at all also answers 200 and changes nothing.
-#   Remove-SfosDoSBypassRule therefore reads the current list first, matches the full
-#   six-field key client-side (SourcePort/DestinationPort default to '*' to match what a
-#   ICMP/AllProtocol record reports back empty), throws "not found" up front if there is no
-#   match, and after the Remove call re-reads and throws if the record is still present.
-# - The status node is always /Response/DoSBypassRules/Status[@code] for Add, Update and
-#   Remove alike - measured by provoking an invalid IPFamily value (code 400) and an
-#   invalid OldConfiguration on Update (code 500). Since no data record of this entity ever
-#   carries a <Status> child, Core's default ObjectName-based heuristic
-#   (Status[@code or not(../Name)]) is safe to use unmodified.
-# - A record created with a wildcard netmask (SourceIPNetmask/DestinationIPNetmask left at
-#   the default '*') is echoed back by Get as the literal string 'any', not '*'. That is a
-#   Get-side display artifact only: sending 'any' back inside <OldConfiguration> on Update,
-#   or as a Remove identifying field, answers code 500 even though the record is genuinely
-#   present - only the literal '*' is accepted for identification on write. First found by
-#   piping Get-SfosDoSBypassRule straight into Set-SfosDoSBypassRule and getting a 500 for
-#   an object that plainly existed. ConvertTo-SfosDoSBypassNetmaskWire (private helper)
-#   translates 'any' back to '*' inside Set-/Remove-SfosDoSBypassRule and the identity
-#   matcher, so piping Get output into either cmdlet works correctly.
+# Multiple records come back as sibling <DoSBypassRules> elements directly under
+# <Response>, with no further wrapper. Server-side filtering does not work for this entity:
+# sending any <Filter> answers code 404 instead of the filtered rows, so
+# Get-SfosDoSBypassRule never sends a <Filter>; every -*Like parameter is client-side only.
+#
+# SourcePort and DestinationPort are mandatory on the wire for Protocol TCP/UDP. For
+# Protocol ICMP/AllProtocol they are accepted if sent but never stored, so New-/
+# Set-SfosDoSBypassRule always send both ports (default '*') rather than branching on
+# Protocol.
+#
+# Update uses the documented <OldConfiguration> wrapper, repeating the full old record, and
+# fails loudly for a record that does not exist. Delete behaves differently: sending only
+# the three fields the documentation marks mandatory can silently delete nothing when a
+# second record shares those three values but differs in the rest, and deleting a record
+# that does not exist also answers success without changing anything. Remove-SfosDoSBypassRule
+# therefore reads the current list first, matches the full six-field key client-side, throws
+# if there is no match, and re-reads afterwards to confirm the record is gone.
+#
+# The status node is always /Response/DoSBypassRules/Status[@code] for Add, Update and
+# Remove alike; no data record of this entity carries a <Status> child, so the default
+# status heuristic is safe to use unmodified.
+#
+# A record created with a wildcard netmask is echoed back by Get as the literal string
+# 'any', not '*'. Only the literal '*' is accepted when identifying a record on write, so
+# ConvertTo-SfosDoSBypassNetmaskWire translates 'any' back to '*' inside Set-/
+# Remove-SfosDoSBypassRule and the identity matcher, letting Get output be piped into either
+# cmdlet directly.
 
 <#
-.SYNOPSIS
-    Retrieves DoSBypassRules objects from the Sophos Firewall.
+        .SYNOPSIS
+        Retrieves DoS bypass rules from a Sophos Firewall.
 
-.DESCRIPTION
-    Queries the Sophos Firewall XML API for DoS Bypass Rule objects (Intrusion Prevention >
-    DoS Bypass Rules). By default the cmdlet returns PowerShell-friendly objects. Use -AsXml
-    to return the raw XML nodes.
+        .DESCRIPTION
+        Returns the DoS bypass rules defined on the firewall. A DoS bypass rule exempts
+        matching traffic from denial-of-service protection. The cmdlet only reads; nothing
+        on the firewall is changed. It needs an open connection from Connect-SfosFirewall,
+        or the connection parameters supplied directly. This entity has no name field and
+        no working server-side filter, so every filter parameter is applied on the client.
 
-    This entity has no Name field and no working server-side filter of any kind - sending a
-    <Filter> element answers code 404 even for a filter that server-side matches an existing
-    record [measured]. Every -*Like parameter here is therefore client-side only; no filter
-    is ever sent to the firewall.
+        .PARAMETER IPFamilyLike
+        Optional. Returns only rules whose IP family contains the given text anywhere. If
+        omitted, IP family is not used to filter.
 
-.PARAMETER IPFamilyLike
-    Filters by IPFamily, substring match. Client-side only.
+        .PARAMETER SourceIPNetmaskLike
+        Optional. Returns only rules whose source netmask contains the given text anywhere.
+        If omitted, the source netmask is not used to filter.
 
-.PARAMETER SourceIPNetmaskLike
-    Filters by SourceIPNetmask, substring match. Client-side only.
+        .PARAMETER DestinationIPNetmaskLike
+        Optional. Returns only rules whose destination netmask contains the given text
+        anywhere. If omitted, the destination netmask is not used to filter.
 
-.PARAMETER DestinationIPNetmaskLike
-    Filters by DestinationIPNetmask, substring match. Client-side only.
+        .PARAMETER ProtocolLike
+        Optional. Returns only rules whose protocol contains the given text anywhere. If
+        omitted, the protocol is not used to filter.
 
-.PARAMETER ProtocolLike
-    Filters by Protocol, substring match. Client-side only.
+        .PARAMETER SourcePortLike
+        Optional. Returns only rules whose source port contains the given text anywhere.
+        Rules for protocol ICMP or AllProtocol carry no source port and are matched against
+        an empty string. If omitted, the source port is not used to filter.
 
-.PARAMETER SourcePortLike
-    Filters by SourcePort, substring match. Client-side only. Records for Protocol
-    ICMP/AllProtocol never carry a SourcePort and are matched against an empty string.
+        .PARAMETER DestinationPortLike
+        Optional. Returns only rules whose destination port contains the given text
+        anywhere. Rules for protocol ICMP or AllProtocol carry no destination port and are
+        matched against an empty string. If omitted, the destination port is not used to
+        filter.
 
-.PARAMETER DestinationPortLike
-    Filters by DestinationPort, substring match. Client-side only. Records for Protocol
-    ICMP/AllProtocol never carry a DestinationPort and are matched against an empty string.
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
-.PARAMETER Session
-A session object returned by Connect-SfosFirewall, or the name of a session
-registered with Connect-SfosFirewall -Name. Overrides the stored default
-connection context; any of -Firewall/-Port/-Username/-Password/
--SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
-.PARAMETER Firewall
-    Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs read permission for DoS
+        bypass rules. If omitted, the value from the current connection is used.
 
-.PARAMETER Port
-    Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
-.PARAMETER Username
-    Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER SkipCertificateCheck
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the
+        certificate is validated.
 
-.PARAMETER Password
-    Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection
+        is used.
 
-.PARAMETER SkipCertificateCheck
-    Skips SSL certificate validation for the API call.
+        .PARAMETER AsXml
+        Optional. Returns the raw XML elements sent by the firewall instead of PowerShell
+        objects. Useful when you need a field that the standard output does not show.
 
-.PARAMETER AsXml
-    Returns the raw XML nodes instead of PowerShell-friendly objects.
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
-.OUTPUTS
-    PSCustomObject[] (default). System.Xml.XmlElement[] when -AsXml is specified.
+        .OUTPUTS
+        System.Management.Automation.PSCustomObject. One object per rule. Returns
+        System.Xml.XmlElement when -AsXml is used, and an empty array when no rule exists.
 
-.EXAMPLE
-    # List every DoS bypass rule
-    Get-SfosDoSBypassRule
+        .EXAMPLE
+        Get-SfosDoSBypassRule
 
-.EXAMPLE
-    # Find every TCP bypass rule
-    Get-SfosDoSBypassRule -ProtocolLike 'TCP'
+        Lists every DoS bypass rule on the firewall of the current connection.
 
-.NOTES
-    Minimum supported PowerShell version: 5.1
-    Measured live: an empty firewall answers HTTP 200 with
-    '<DoSBypassRules><Status>No. of records Zero.</Status></DoSBypassRules>' - a normal empty
-    result, not an error; this cmdlet returns @() for it.
+        .EXAMPLE
+        Get-SfosDoSBypassRule -ProtocolLike 'TCP'
 
-.LINK
-    https://docs.sophos.com/nsg/sophos-firewall/22.0/API/PROTECT/Intrusion%20Prevention/DoSBypassRule/DoSBypassRule.html
+        Lists every TCP DoS bypass rule.
 
-.LINK
-    New-SfosDoSBypassRule
+        .LINK
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        New-SfosDoSBypassRule
 #>
 function Get-SfosDoSBypassRule {
     [CmdletBinding()]
@@ -3479,19 +3510,19 @@ function Get-SfosDoSBypassRule {
 }
 
 <#
-.SYNOPSIS
-    Internal helper: normalizes a DoSBypassRules netmask value for identity comparison
-    and for the wire. Not exported.
+        .SYNOPSIS
+        Normalizes a DoS bypass rule netmask value for identity comparison and for the wire.
 
-.DESCRIPTION
-    Get-SfosDoSBypassRule reports a wildcard netmask back as the literal string 'any', but
-    Set-SfosDoSBypassRule's <OldConfiguration> and Remove-SfosDoSBypassRule's identifying
-    fields only match against the literal '*' - sending 'any' back in either of those
-    answers code 500 "Operation could not be performed on Entity." even though the record
-    is genuinely present [measured]. 'any' is a Get-side display artifact, never a value
-    accepted on write. This makes piping Get-SfosDoSBypassRule straight into Set-*/Remove-*
-    safe.
-#>
+        .DESCRIPTION
+        Get-SfosDoSBypassRule reports a wildcard netmask back as the literal string 'any',
+        but Set-SfosDoSBypassRule's OldConfiguration and Remove-SfosDoSBypassRule's
+        identifying fields only match against the literal '*'. 'any' is a Get-side display
+        value only, never accepted on write. This makes piping Get-SfosDoSBypassRule
+        straight into Set-SfosDoSBypassRule or Remove-SfosDoSBypassRule work correctly.
+
+        .PARAMETER Value
+        Netmask value to normalize.
+    #>
 function ConvertTo-SfosDoSBypassNetmaskWire {
     param([string]$Value)
 
@@ -3500,17 +3531,37 @@ function ConvertTo-SfosDoSBypassNetmaskWire {
 }
 
 <#
-.SYNOPSIS
-    Internal helper: tests whether a Get-SfosDoSBypassRule record matches a given
-    six-field identity. Not exported.
+        .SYNOPSIS
+        Tests whether a DoS bypass rule record matches a given six-field identity.
 
-.DESCRIPTION
-    SourcePort/DestinationPort compare against '*' when the record has none, since that
-    is the value ICMP/AllProtocol records are addressed by on Remove [measured - see the
-    region header]. SourceIPNetmask/DestinationIPNetmask are normalized through
-    ConvertTo-SfosDoSBypassNetmaskWire on both sides so a record whose wildcard netmask
-    Get reports as 'any' still matches an identity expressed with the literal '*'.
-#>
+        .DESCRIPTION
+        Used by Set-SfosDoSBypassRule and Remove-SfosDoSBypassRule to find the record a
+        caller means, since this entity has no name field. SourcePort and DestinationPort
+        compare against '*' when the record has none, matching how ICMP and AllProtocol
+        records are addressed on Remove. SourceIPNetmask and DestinationIPNetmask are
+        normalized through ConvertTo-SfosDoSBypassNetmaskWire on both sides.
+
+        .PARAMETER Record
+        The record to test, as returned by Get-SfosDoSBypassRule.
+
+        .PARAMETER IPFamily
+        IP family to match.
+
+        .PARAMETER SourceIPNetmask
+        Source netmask to match.
+
+        .PARAMETER DestinationIPNetmask
+        Destination netmask to match.
+
+        .PARAMETER Protocol
+        Protocol to match.
+
+        .PARAMETER SourcePort
+        Source port to match.
+
+        .PARAMETER DestinationPort
+        Destination port to match.
+    #>
 function Test-SfosDoSBypassRuleIdentity {
     param(
         [Parameter(Mandatory)][PSCustomObject]$Record,
@@ -3541,85 +3592,92 @@ function Test-SfosDoSBypassRuleIdentity {
 }
 
 <#
-.SYNOPSIS
-    Creates a new DoSBypassRules object on the Sophos Firewall.
+        .SYNOPSIS
+        Creates a DoS bypass rule on a Sophos Firewall.
 
-.DESCRIPTION
-    Creates a DoS Bypass Rule (Intrusion Prevention > DoS Bypass Rules) using the Sophos
-    Firewall XML API. Supports ShouldProcess; use -WhatIf to preview.
+        .DESCRIPTION
+        Creates a rule that exempts matching traffic from denial-of-service protection.
+        SourcePort and DestinationPort are always sent, defaulting to '*', regardless of
+        -Protocol; they are mandatory on the wire for TCP and UDP, and are accepted but not
+        stored for ICMP and AllProtocol. It needs an open connection from
+        Connect-SfosFirewall, or the connection parameters supplied directly, and an
+        account with write permission for DoS bypass rules.
 
-    SourcePort and DestinationPort are always sent, defaulting to '*' - the doc-documented
-    wildcard value - regardless of -Protocol. They are genuinely mandatory on the wire for
-    TCP/UDP [measured: omitting them for Protocol TCP answers code 400 "sourcePort and
-    destinationPort are required..."]; for ICMP/AllProtocol they are accepted but silently
-    not stored [measured], so sending the default is harmless there too.
+        .PARAMETER IPFamily
+        Required. Either 'IPv4' or 'IPv6'.
 
-.PARAMETER IPFamily
-    'IPv4' or 'IPv6' [doc]. Mandatory.
+        .PARAMETER SourceIPNetmask
+        Optional. Source IP or IP/netmask to bypass, or '*' for any. Maximum 45 characters.
+        Default: '*'.
 
-.PARAMETER SourceIPNetmask
-    Source IP or IP/netmask to bypass, or '*' for any [doc]. Default '*'. Max 45 characters.
+        .PARAMETER DestinationIPNetmask
+        Optional. Destination IP or IP/netmask to bypass, or '*' for any. Maximum 45
+        characters. Default: '*'.
 
-.PARAMETER DestinationIPNetmask
-    Destination IP or IP/netmask to bypass, or '*' for any [doc]. Default '*'. Max 45
-    characters.
+        .PARAMETER Protocol
+        Optional. One of 'TCP', 'UDP', 'AllProtocol' or 'ICMP'. Default: 'TCP'.
 
-.PARAMETER Protocol
-    'TCP', 'UDP', 'AllProtocol' or 'ICMP' [doc]. Default 'TCP'.
+        .PARAMETER SourcePort
+        Optional. Source port, 1 to 65535, or '*' for any. Default: '*'.
 
-.PARAMETER SourcePort
-    Source port, 1-65535, or '*' for any [doc]. Default '*'. See .DESCRIPTION for why this
-    is always sent regardless of -Protocol.
+        .PARAMETER DestinationPort
+        Optional. Destination port, 1 to 65535, or '*' for any. Default: '*'.
 
-.PARAMETER DestinationPort
-    Destination port, 1-65535, or '*' for any [doc]. Default '*'. See .DESCRIPTION for why
-    this is always sent regardless of -Protocol.
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
-.PARAMETER Session
-A session object returned by Connect-SfosFirewall, or the name of a session
-registered with Connect-SfosFirewall -Name. Overrides the stored default
-connection context; any of -Firewall/-Port/-Username/-Password/
--SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
-.PARAMETER Firewall
-    Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs write permission for DoS
+        bypass rules. If omitted, the value from the current connection is used.
 
-.PARAMETER Port
-    Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
-.PARAMETER Username
-    Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER SkipCertificateCheck
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the
+        certificate is validated.
 
-.PARAMETER Password
-    Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection
+        is used.
 
-.PARAMETER SkipCertificateCheck
-    Skips SSL certificate validation for the API call.
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
-.OUTPUTS
-    None. Throws an exception if creation fails.
+        .OUTPUTS
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        creation.
 
-.EXAMPLE
-    # Bypass DoS protection for TCP traffic between two private test subnets on ports 2201/2202
-    New-SfosDoSBypassRule -IPFamily IPv4 -SourceIPNetmask '10.99.98.0/24' -DestinationIPNetmask '10.99.99.0/24' -Protocol TCP -SourcePort 2201 -DestinationPort 2202
+        .EXAMPLE
+        New-SfosDoSBypassRule -IPFamily IPv4 -SourceIPNetmask '10.99.98.0/24' -DestinationIPNetmask '10.99.99.0/24' -Protocol TCP -SourcePort 2201 -DestinationPort 2202 -WhatIf
 
-.EXAMPLE
-    # Bypass DoS protection for all ICMP traffic from a private test subnet
-    New-SfosDoSBypassRule -IPFamily IPv4 -SourceIPNetmask '10.99.95.0/24' -Protocol ICMP
+        Shows what the call would create without sending it to the firewall.
 
-.NOTES
-    Minimum supported PowerShell version: 5.1
-    Verified live: both examples above were executed against the lab firewall, answered code
-    201 ('Configuration applied successfully', the documented partial-success/warning code -
-    the object is present and correctly shaped on a subsequent Get either way), and were
-    removed again after verification.
+        .EXAMPLE
+        New-SfosDoSBypassRule -IPFamily IPv4 -SourceIPNetmask '10.99.98.0/24' -DestinationIPNetmask '10.99.99.0/24' -Protocol TCP -SourcePort 2201 -DestinationPort 2202
 
-.LINK
-    https://docs.sophos.com/nsg/sophos-firewall/22.0/API/PROTECT/Intrusion%20Prevention/DoSBypassRule/operations/AddDOSByPassRules%26EditDOSByPassRules.html
+        Bypasses DoS protection for TCP traffic between two subnets on the given ports.
 
-.LINK
-    Get-SfosDoSBypassRule
+        .EXAMPLE
+        New-SfosDoSBypassRule -IPFamily IPv4 -SourceIPNetmask '10.99.95.0/24' -Protocol ICMP
+
+        Bypasses DoS protection for all ICMP traffic from a subnet.
+
+        .LINK
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosDoSBypassRule
 #>
 function New-SfosDoSBypassRule {
     [CmdletBinding(SupportsShouldProcess)]
@@ -3694,105 +3752,110 @@ function New-SfosDoSBypassRule {
 }
 
 <#
-.SYNOPSIS
-    Updates an existing DoSBypassRules object on the Sophos Firewall.
+        .SYNOPSIS
+        Updates an existing DoS bypass rule on a Sophos Firewall.
 
-.DESCRIPTION
-    Updates a DoS Bypass Rule using the documented <OldConfiguration> mechanism
-    (operation="update", the current six-field identity repeated inside <OldConfiguration>) -
-    measured working live, unlike the undocumented operation="edit" this doc page also
-    describes in its operation name (which this cmdlet deliberately does not use, per the
-    convention of using only "add"/"update"; "edit" is untrusted unless separately verified).
+        .DESCRIPTION
+        Updates a DoS bypass rule using the documented OldConfiguration mechanism, which
+        repeats the current six-field identity alongside the new values. This entity has no
+        single name field, so the caller supplies the complete current identity as
+        mandatory parameters, typically through
+        Get-SfosDoSBypassRule | Set-SfosDoSBypassRule. Only the -New* parameters that are
+        explicitly bound override the current value; the rest are kept. It needs an open
+        connection from Connect-SfosFirewall, or the connection parameters supplied
+        directly, and an account with write permission for DoS bypass rules.
 
-    This entity has no independent Get before the write: the caller supplies the complete
-    current six-field identity as mandatory parameters (typically via
-    Get-SfosDoSBypassRule | Set-SfosDoSBypassRule), which together with the -New* parameters
-    (only overriding what was explicitly bound) already implements read-modify-write without
-    a second round trip - there is no field on this entity that a Get could reveal beyond
-    these six. Updating a record whose current identity does not match anything on the
-    firewall answers code 500 "Operation could not be performed on Entity." [measured] - a
-    genuine failure, not a silent no-op, so no extra existence check is added.
+        .PARAMETER IPFamily
+        Required. Current IP family of the rule to update. Accepts pipeline input by
+        property name.
 
-.PARAMETER IPFamily
-    Current IPFamily of the rule to update. Mandatory; accepts pipeline input by property
-    name.
+        .PARAMETER SourceIPNetmask
+        Optional. Current source netmask of the rule to update. Default: '*'.
 
-.PARAMETER SourceIPNetmask
-    Current SourceIPNetmask of the rule to update. Default '*' (matches a rule created
-    without an explicit value).
+        .PARAMETER DestinationIPNetmask
+        Optional. Current destination netmask of the rule to update. Default: '*'.
 
-.PARAMETER DestinationIPNetmask
-    Current DestinationIPNetmask of the rule to update. Default '*'.
+        .PARAMETER Protocol
+        Optional. Current protocol of the rule to update. Default: 'TCP'.
 
-.PARAMETER Protocol
-    Current Protocol of the rule to update. Default 'TCP'.
+        .PARAMETER SourcePort
+        Optional. Current source port of the rule to update. Default: '*'. For a rule of
+        protocol ICMP or AllProtocol, pass the value exactly as Get-SfosDoSBypassRule
+        returned it.
 
-.PARAMETER SourcePort
-    Current SourcePort of the rule to update. Default '*' (also matches an ICMP/AllProtocol
-    record, which Get-SfosDoSBypassRule reports back as an empty string here rather than
-    '*' - pass the value exactly as Get returned it when piping).
+        .PARAMETER DestinationPort
+        Optional. Current destination port of the rule to update. Default: '*'.
 
-.PARAMETER DestinationPort
-    Current DestinationPort of the rule to update. Default '*'.
+        .PARAMETER NewIPFamily
+        Optional. New IP family. If omitted, the current value is kept.
 
-.PARAMETER NewIPFamily
-    New IPFamily. If omitted, the current value is kept.
+        .PARAMETER NewSourceIPNetmask
+        Optional. New source netmask. If omitted, the current value is kept.
 
-.PARAMETER NewSourceIPNetmask
-    New SourceIPNetmask. If omitted, the current value is kept.
+        .PARAMETER NewDestinationIPNetmask
+        Optional. New destination netmask. If omitted, the current value is kept.
 
-.PARAMETER NewDestinationIPNetmask
-    New DestinationIPNetmask. If omitted, the current value is kept.
+        .PARAMETER NewProtocol
+        Optional. New protocol. If omitted, the current value is kept.
 
-.PARAMETER NewProtocol
-    New Protocol. If omitted, the current value is kept.
+        .PARAMETER NewSourcePort
+        Optional. New source port. If omitted, the current value is kept.
 
-.PARAMETER NewSourcePort
-    New SourcePort. If omitted, the current value is kept.
+        .PARAMETER NewDestinationPort
+        Optional. New destination port. If omitted, the current value is kept.
 
-.PARAMETER NewDestinationPort
-    New DestinationPort. If omitted, the current value is kept.
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
-.PARAMETER Session
-A session object returned by Connect-SfosFirewall, or the name of a session
-registered with Connect-SfosFirewall -Name. Overrides the stored default
-connection context; any of -Firewall/-Port/-Username/-Password/
--SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
-.PARAMETER Firewall
-    Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs write permission for DoS
+        bypass rules. If omitted, the value from the current connection is used.
 
-.PARAMETER Port
-    Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
-.PARAMETER Username
-    Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER SkipCertificateCheck
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the
+        certificate is validated.
 
-.PARAMETER Password
-    Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection
+        is used.
 
-.PARAMETER SkipCertificateCheck
-    Skips SSL certificate validation for the API call.
+        .INPUTS
+        System.Management.Automation.PSCustomObject. IPFamily and the other identifying
+        parameters can be bound from pipeline objects by property name, for example the
+        output of Get-SfosDoSBypassRule.
 
-.OUTPUTS
-    None. Throws an exception if the update fails.
+        .OUTPUTS
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        update.
 
-.EXAMPLE
-    # Widen the destination netmask of an existing ICMP bypass rule
-    Set-SfosDoSBypassRule -IPFamily IPv4 -SourceIPNetmask '10.99.95.0/24' -DestinationIPNetmask '10.99.94.0/24' -Protocol ICMP -NewSourceIPNetmask '10.99.85.0/24'
+        .EXAMPLE
+        Set-SfosDoSBypassRule -IPFamily IPv4 -SourceIPNetmask '10.99.95.0/24' -DestinationIPNetmask '10.99.94.0/24' -Protocol ICMP -NewSourceIPNetmask '10.99.85.0/24' -WhatIf
 
-.NOTES
-    Minimum supported PowerShell version: 5.1
-    Verified live: created a test ICMP rule, updated its SourceIPNetmask only via this
-    exact call shape, re-read it and confirmed the new netmask while Protocol/
-    DestinationIPNetmask were unchanged, then removed it.
+        Shows what the call would change without sending it to the firewall.
 
-.LINK
-    https://docs.sophos.com/nsg/sophos-firewall/22.0/API/PROTECT/Intrusion%20Prevention/DoSBypassRule/operations/AddDOSByPassRules%26EditDOSByPassRules.html
+        .EXAMPLE
+        Set-SfosDoSBypassRule -IPFamily IPv4 -SourceIPNetmask '10.99.95.0/24' -DestinationIPNetmask '10.99.94.0/24' -Protocol ICMP -NewSourceIPNetmask '10.99.85.0/24'
 
-.LINK
-    Get-SfosDoSBypassRule
+        Widens the source netmask of an existing ICMP bypass rule.
+
+        .LINK
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosDoSBypassRule
 #>
 function Set-SfosDoSBypassRule {
     [CmdletBinding(SupportsShouldProcess)]
@@ -3853,8 +3916,8 @@ function Set-SfosDoSBypassRule {
 
         # Normalize identity fields before anything else: Get-SfosDoSBypassRule reports a
         # wildcard netmask back as 'any' and an unset port as '', neither of which the
-        # firewall's <OldConfiguration> match accepts - only the literal '*' does
-        # [measured]. This makes 'Get-SfosDoSBypassRule | Set-SfosDoSBypassRule' safe.
+        # firewall's <OldConfiguration> match accepts - only the literal '*' does. This makes
+        # 'Get-SfosDoSBypassRule | Set-SfosDoSBypassRule' safe.
         $SourceIPNetmask = ConvertTo-SfosDoSBypassNetmaskWire -Value $SourceIPNetmask
         $DestinationIPNetmask = ConvertTo-SfosDoSBypassNetmaskWire -Value $DestinationIPNetmask
         if (-not $SourcePort) { $SourcePort = '*' }
@@ -3921,82 +3984,88 @@ function Set-SfosDoSBypassRule {
 }
 
 <#
-.SYNOPSIS
-    Removes a DoSBypassRules object from the Sophos Firewall.
+        .SYNOPSIS
+        Removes a DoS bypass rule from a Sophos Firewall.
 
-.DESCRIPTION
-    Removes a DoS Bypass Rule using the Sophos Firewall XML API. Supports ShouldProcess; use
-    -WhatIf to preview.
+        .DESCRIPTION
+        Deletes a DoS bypass rule identified by its full six-field identity. The cmdlet
+        reads the current list first and throws if no record matches, sends the complete
+        identity to the removal call, and reads the list back afterwards to confirm the
+        record is gone. It needs an open connection from Connect-SfosFirewall, or the
+        connection parameters supplied directly, and an account with write permission for
+        DoS bypass rules.
 
-    This entity's Remove is a documented-but-broken no-op in two ways [measured, see the
-    region header]: deleting by only the three fields the docs mark mandatory
-    (IPFamily/SourcePort/DestinationPort) answers 200 and deletes nothing when a
-    near-duplicate record exists, and deleting a record that does not exist at all also
-    answers 200. This cmdlet therefore (1) reads the current list first and throws "not
-    found" if no record matches the full six-field identity, (2) sends the complete
-    six-field record - not just the three documented ones - to the Remove call, and (3)
-    re-reads afterwards and throws if the record is still present.
+        .PARAMETER IPFamily
+        Required. IP family of the rule to remove. Accepts pipeline input by property name.
 
-.PARAMETER IPFamily
-    IPFamily of the rule to remove. Mandatory; accepts pipeline input by property name.
+        .PARAMETER SourceIPNetmask
+        Optional. Source netmask of the rule to remove. Default: '*'.
 
-.PARAMETER SourceIPNetmask
-    SourceIPNetmask of the rule to remove. Default '*'.
+        .PARAMETER DestinationIPNetmask
+        Optional. Destination netmask of the rule to remove. Default: '*'.
 
-.PARAMETER DestinationIPNetmask
-    DestinationIPNetmask of the rule to remove. Default '*'.
+        .PARAMETER Protocol
+        Optional. Protocol of the rule to remove. Default: 'TCP'.
 
-.PARAMETER Protocol
-    Protocol of the rule to remove. Default 'TCP'.
+        .PARAMETER SourcePort
+        Optional. Source port of the rule to remove. Default: '*'. For a rule of protocol
+        ICMP or AllProtocol, pass the value exactly as Get-SfosDoSBypassRule returned it.
 
-.PARAMETER SourcePort
-    SourcePort of the rule to remove. Default '*'. Pass the value exactly as
-    Get-SfosDoSBypassRule returned it (empty string for ICMP/AllProtocol records) when
-    piping.
+        .PARAMETER DestinationPort
+        Optional. Destination port of the rule to remove. Default: '*'.
 
-.PARAMETER DestinationPort
-    DestinationPort of the rule to remove. Default '*'.
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
-.PARAMETER Session
-A session object returned by Connect-SfosFirewall, or the name of a session
-registered with Connect-SfosFirewall -Name. Overrides the stored default
-connection context; any of -Firewall/-Port/-Username/-Password/
--SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
-.PARAMETER Firewall
-    Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs write permission for DoS
+        bypass rules. If omitted, the value from the current connection is used.
 
-.PARAMETER Port
-    Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
-.PARAMETER Username
-    Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER SkipCertificateCheck
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the
+        certificate is validated.
 
-.PARAMETER Password
-    Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection
+        is used.
 
-.PARAMETER SkipCertificateCheck
-    Skips SSL certificate validation for the API call.
+        .INPUTS
+        System.Management.Automation.PSCustomObject. IPFamily and the other identifying
+        parameters can be bound from pipeline objects by property name, for example the
+        output of Get-SfosDoSBypassRule.
 
-.OUTPUTS
-    None. Throws an exception if the removal fails or if the object is still present
-    afterwards.
+        .OUTPUTS
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        removal or the rule is still present afterwards.
 
-.EXAMPLE
-    Remove-SfosDoSBypassRule -IPFamily IPv4 -SourceIPNetmask '10.99.98.0/24' -DestinationIPNetmask '10.99.99.0/24' -Protocol TCP -SourcePort 2201 -DestinationPort 2202
+        .EXAMPLE
+        Remove-SfosDoSBypassRule -IPFamily IPv4 -SourceIPNetmask '10.99.98.0/24' -DestinationIPNetmask '10.99.99.0/24' -Protocol TCP -SourcePort 2201 -DestinationPort 2202 -WhatIf
 
-.NOTES
-    Minimum supported PowerShell version: 5.1
-    Verified live: removed a test rule created for this purpose, confirmed gone with a
-    follow-up Get, then confirmed the "not found" error path against an identity that never
-    existed. See .DESCRIPTION for the 200 no-op this cmdlet works around.
+        Shows what the call would remove without sending it to the firewall.
 
-.LINK
-    https://docs.sophos.com/nsg/sophos-firewall/22.0/API/PROTECT/Intrusion%20Prevention/DoSBypassRule/operations/Delete%20DOS%20ByPass%20Rule.html
+        .EXAMPLE
+        Remove-SfosDoSBypassRule -IPFamily IPv4 -SourceIPNetmask '10.99.98.0/24' -DestinationIPNetmask '10.99.99.0/24' -Protocol TCP -SourcePort 2201 -DestinationPort 2202
 
-.LINK
-    Get-SfosDoSBypassRule
+        Removes the matching DoS bypass rule.
+
+        .LINK
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosDoSBypassRule
 #>
 function Remove-SfosDoSBypassRule {
     [CmdletBinding(SupportsShouldProcess)]
@@ -4037,7 +4106,7 @@ function Remove-SfosDoSBypassRule {
     process {
         # Normalize identity fields before anything else - see Set-SfosDoSBypassRule's
         # matching comment; the same 'any'/'' vs '*' mismatch applies to Remove's own
-        # identifying fields [measured].
+        # identifying fields.
         $SourceIPNetmask = ConvertTo-SfosDoSBypassNetmaskWire -Value $SourceIPNetmask
         $DestinationIPNetmask = ConvertTo-SfosDoSBypassNetmaskWire -Value $DestinationIPNetmask
         if (-not $SourcePort) { $SourcePort = '*' }
@@ -4092,8 +4161,9 @@ function Remove-SfosDoSBypassRule {
         $XmlResponse = [xml]$response.Content
         Assert-SfosApiReturnSuccess -Xml $XmlResponse -ObjectName 'DoSBypassRules' -Action 'remove' -Target $target
 
-        # The API answers 200 for a no-op delete on this entity [measured] - re-read and
-        # throw if the record is still there rather than trusting the status code alone.
+        # The API can answer success for a delete that removed nothing on this entity -
+        # re-read and throw if the record is still there rather than trusting the status
+        # code alone.
         $stillPresent = @(Get-SfosDoSBypassRule -Firewall $params.Firewall `
                 -Port $params.Port `
                 -Username $params.Username `
@@ -4115,110 +4185,99 @@ function Remove-SfosDoSBypassRule {
 # <TrustedMAC> (singular, unlike DoSBypassRules); a record is identified by MACAddress,
 # which acts as this entity's key even though the documentation never calls it that.
 #
-# Measured live against SFOS 22.0, all with 0 pre-existing records:
-# - Multiple records come back as sibling <TrustedMAC> elements under <Response>, same
-#   shape as the single-record case.
-# - The server-side filter on MACAddress does not work: a <Filter> with
-#   <key name="MACAddress" criteria="like"> returns every record regardless of whether it
-#   matches, the same "unsupported key answers everything" failure mode seen on other
-#   entities. Get-SfosTrustedMAC therefore never sends a <Filter>.
-# - IPV4Address/IPV6Address round-trip exactly as sent, including a genuine multi-value CSV
-#   ("10.99.60.30,10.99.60.31" came back unchanged) - they are kept as plain strings here,
-#   matching the wire's own CSV type, rather than split into arrays.
-# - AssociateIP accepts any string without validation ('Enable' and even a nonsense value
-#   both answered 201) and is never returned by a subsequent Get - there is no way to
-#   observe what, if anything, it actually does. Following the same FileType/Template
-#   precedent - where the API offers a write-only field, leave it off the Set-* rather than
-#   pretending - this field is not exposed by New-/Set-SfosTrustedMAC at
-#   all rather than accepting a value nobody can verify.
-# - IPV4Association with an invalid value (e.g. 'Bogus') is also not rejected - it is
-#   silently coerced to 'None' - so no client-side ValidateSet blocks it here beyond the
-#   three documented values, and this quirk is left to the API rather than guessed at
-#   further.
-# - operation="update" with the documented <OldConfiguration><MACAddress> wrapper works and
-#   can rename the MACAddress itself (the top-level <MACAddress> becomes the record's new
-#   key) - measured by renaming a test record from 00:16:76:00:00:02 to
-#   00:16:76:00:00:99 and confirming both the old key is gone and the new one carries the
-#   unchanged IPV4Address. Updating a MACAddress that does not exist answers code 404
-#   "Trusted MAC not found" - a genuine failure, not a silent no-op.
-# - Deleting by MACAddress alone (the only documented Delete field) correctly removes
-#   exactly that record and nothing else - no duplicate-identity trap like DoSBypassRules.
-#   Deleting a MACAddress that does not exist answers code 500 "Deleted some configurations.
-#   Couldn't delete all." - also a genuine failure.
-# - The status node is always /Response/TrustedMAC/Status[@code] for Add, Update and Remove
-#   alike - measured by provoking an invalid MAC address format (code 400) and an unknown
-#   OldConfiguration MACAddress on Update (code 404). No data record ever carries a <Status>
-#   child, so Core's default ObjectName-based heuristic is safe unmodified.
-# - Upload Trusted MAC List (root <Upload_TrustedMAC>, field TrustedMACListFile) is a
-#   genuine multipart file upload per its own doc page ("{name of file passed in
-#   multipart}"). Invoke-SfosApi only builds the single urlencoded 'reqxml=' POST body this
-#   project uses everywhere else - it has no multipart transport, the same blocker as
-#   SiteToSiteClient's ServerConfigurationFile. No Upload-SfosTrustedMACList
-#   cmdlet was built.
+# Multiple records come back as sibling <TrustedMAC> elements under <Response>. The
+# server-side filter on MACAddress does not work: it returns every record regardless of
+# match, so Get-SfosTrustedMAC never sends a <Filter>. IPV4Address and IPV6Address round-trip
+# exactly as sent, including a comma-separated multi-value list, and are kept as plain
+# strings here rather than split into arrays.
+#
+# AssociateIP accepts any value without validation and is never returned by a subsequent
+# Get, so there is no way to observe what it does; New-/Set-SfosTrustedMAC do not expose it.
+# IPV4Association and IPV6Association silently coerce an invalid value to 'None' rather than
+# rejecting it.
+#
+# operation="update" with the documented OldConfiguration/MACAddress wrapper can rename the
+# MACAddress itself, since the top-level MACAddress becomes the record's new key. Updating a
+# MACAddress that does not exist fails loudly. Deleting by MACAddress alone removes exactly
+# that record; deleting one that does not exist also fails loudly. The status node is always
+# /Response/TrustedMAC/Status[@code] for Add, Update and Remove alike; no data record ever
+# carries a <Status> child, so the default status heuristic is safe unmodified.
+#
+# Uploading a trusted MAC list file is a genuine multipart file upload, which this module's
+# transport does not support; no cmdlet was built for it.
 
 <#
-.SYNOPSIS
-    Retrieves TrustedMAC objects from the Sophos Firewall.
+        .SYNOPSIS
+        Retrieves trusted MAC entries from a Sophos Firewall.
 
-.DESCRIPTION
-    Queries the Sophos Firewall XML API for Trusted MAC objects (Intrusion Prevention >
-    Trusted MAC). By default the cmdlet returns PowerShell-friendly objects. Use -AsXml to
-    return the raw XML nodes.
+        .DESCRIPTION
+        Returns the trusted MAC address entries defined on the firewall, used together with
+        the RestrictUnknownIPOnTrustedMAC spoof prevention setting. The cmdlet only reads;
+        nothing on the firewall is changed. It needs an open connection from
+        Connect-SfosFirewall, or the connection parameters supplied directly. The
+        server-side filter on MAC address does not work, so -MACAddressLike is applied on
+        the client.
 
-    The server-side filter on MACAddress does not work - it returns every record regardless
-    of match [measured]. -MACAddressLike is therefore client-side only; no filter is ever
-    sent to the firewall.
+        .PARAMETER MACAddressLike
+        Optional. Returns only entries whose MAC address contains the given text anywhere.
+        If omitted, the MAC address is not used to filter.
 
-.PARAMETER MACAddressLike
-    Filters by MACAddress, substring match. Client-side only.
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
-.PARAMETER Session
-A session object returned by Connect-SfosFirewall, or the name of a session
-registered with Connect-SfosFirewall -Name. Overrides the stored default
-connection context; any of -Firewall/-Port/-Username/-Password/
--SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
-.PARAMETER Firewall
-    Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs read permission for
+        trusted MAC entries. If omitted, the value from the current connection is used.
 
-.PARAMETER Port
-    Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
-.PARAMETER Username
-    Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER SkipCertificateCheck
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the
+        certificate is validated.
 
-.PARAMETER Password
-    Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection
+        is used.
 
-.PARAMETER SkipCertificateCheck
-    Skips SSL certificate validation for the API call.
+        .PARAMETER AsXml
+        Optional. Returns the raw XML elements sent by the firewall instead of PowerShell
+        objects. Useful when you need a field that the standard output does not show.
 
-.PARAMETER AsXml
-    Returns the raw XML nodes instead of PowerShell-friendly objects.
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
-.OUTPUTS
-    PSCustomObject[] (default). System.Xml.XmlElement[] when -AsXml is specified.
+        .OUTPUTS
+        System.Management.Automation.PSCustomObject. One object per entry, with the
+        properties MACAddress, IPV4Association, IPV4Address, IPV6Association and
+        IPV6Address. Returns System.Xml.XmlElement when -AsXml is used, and an empty array
+        when no entry matches.
 
-.EXAMPLE
-    # List every trusted MAC entry
-    Get-SfosTrustedMAC
+        .EXAMPLE
+        Get-SfosTrustedMAC
 
-.EXAMPLE
-    # Find entries in the documented vendor test range
-    Get-SfosTrustedMAC -MACAddressLike '00:16:76'
+        Lists every trusted MAC entry on the firewall of the current connection.
 
-.NOTES
-    Minimum supported PowerShell version: 5.1
-    Measured live: an empty firewall answers HTTP 200 with
-    '<TrustedMAC><Status>No. of records Zero.</Status></TrustedMAC>' - a normal empty
-    result, not an error; this cmdlet returns @() for it.
+        .EXAMPLE
+        Get-SfosTrustedMAC -MACAddressLike '00:16:76'
 
-.LINK
-    https://docs.sophos.com/nsg/sophos-firewall/22.0/API/PROTECT/Intrusion%20Prevention/TrustedMAC/TrustedMAC.html
+        Lists all trusted MAC entries whose address contains '00:16:76'.
 
-.LINK
-    New-SfosTrustedMAC
+        .LINK
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        New-SfosTrustedMAC
 #>
 function Get-SfosTrustedMAC {
     [CmdletBinding()]
@@ -4293,81 +4352,84 @@ function Get-SfosTrustedMAC {
 }
 
 <#
-.SYNOPSIS
-    Creates a new TrustedMAC object on the Sophos Firewall.
+        .SYNOPSIS
+        Creates a trusted MAC entry on a Sophos Firewall.
 
-.DESCRIPTION
-    Creates a Trusted MAC entry (Intrusion Prevention > Trusted MAC) using the Sophos
-    Firewall XML API. Supports ShouldProcess; use -WhatIf to preview.
+        .DESCRIPTION
+        Creates a MAC address entry that is exempted from spoof prevention's unknown-IP
+        restriction. If -IPV4Association or -IPV6Association is not passed, it defaults to
+        'Static' when the matching address parameter is given, and to 'None' otherwise. It
+        needs an open connection from Connect-SfosFirewall, or the connection parameters
+        supplied directly, and an account with write permission for trusted MAC entries.
 
-    Has no -AssociateIP parameter - see the region header for why (write-only,
-    unvalidated, never observable through Get).
+        .PARAMETER MACAddress
+        Required. MAC address to trust, for example '00:16:76:00:00:01'. Maximum 17
+        characters.
 
-.PARAMETER MACAddress
-    MAC address to trust, for example '00:16:76:00:00:01' [doc]. Mandatory. Max 17
-    characters.
+        .PARAMETER IPV4Association
+        Optional. One of 'Static', 'DHCP' or 'None'. If omitted, defaults to 'Static' when
+        -IPV4Address is given, otherwise to 'None'.
 
-.PARAMETER IPV4Association
-    'Static', 'DHCP' or 'None' [doc]. Default 'Static'.
+        .PARAMETER IPV4Address
+        Optional. IPv4 address or comma-separated addresses for the IP-MAC binding.
 
-.PARAMETER IPV4Address
-    IPv4 address(es) for the IP-MAC binding, comma-separated for multiple values [doc].
-    Optional.
+        .PARAMETER IPV6Association
+        Optional. One of 'Static', 'DHCP' or 'None'. If omitted, defaults to 'Static' when
+        -IPV6Address is given, otherwise to 'None'.
 
-.PARAMETER IPV6Association
-    'Static', 'DHCP' or 'None' [doc]. Default 'Static'.
+        .PARAMETER IPV6Address
+        Optional. IPv6 address or comma-separated addresses for the IP-MAC binding.
 
-.PARAMETER IPV6Address
-    IPv6 address(es) for the IP-MAC binding, comma-separated for multiple values [doc].
-    Optional.
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
-.PARAMETER Session
-A session object returned by Connect-SfosFirewall, or the name of a session
-registered with Connect-SfosFirewall -Name. Overrides the stored default
-connection context; any of -Firewall/-Port/-Username/-Password/
--SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
-.PARAMETER Firewall
-    Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs write permission for
+        trusted MAC entries. If omitted, the value from the current connection is used.
 
-.PARAMETER Port
-    Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
-.PARAMETER Username
-    Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER SkipCertificateCheck
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the
+        certificate is validated.
 
-.PARAMETER Password
-    Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection
+        is used.
 
-.PARAMETER SkipCertificateCheck
-    Skips SSL certificate validation for the API call.
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
-.OUTPUTS
-    None. Throws an exception if creation fails.
+        .OUTPUTS
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        creation.
 
-.EXAMPLE
-    New-SfosTrustedMAC -MACAddress '00:16:76:00:00:01' -IPV4Association Static -IPV4Address '10.99.60.10'
+        .EXAMPLE
+        New-SfosTrustedMAC -MACAddress '00:16:76:00:00:01' -IPV4Association Static -IPV4Address '10.99.60.10' -WhatIf
 
-.NOTES
-    Minimum supported PowerShell version: 5.1
-    Verified live: the example above was executed against the lab firewall, answered code
-    201, and the object was confirmed present and correctly shaped on a subsequent Get, then
-    removed.
+        Shows what the call would create without sending it to the firewall.
 
-    -IPV4Association/-IPV6Association have no fixed default despite the doc table naming
-    'Static' as the default for both: sending Association=Static together with an empty
-    address (the doc's own default combination when only one address family is used)
-    answers code 400 "IPv6 address[0] validation failed" [measured] - a real trap the doc's
-    stated default walks straight into. This cmdlet instead defaults each association to
-    'Static' only when the matching address parameter was actually given, and to 'None'
-    otherwise - matching what the firewall itself reports back for an omitted family.
+        .EXAMPLE
+        New-SfosTrustedMAC -MACAddress '00:16:76:00:00:01' -IPV4Association Static -IPV4Address '10.99.60.10'
 
-.LINK
-    https://docs.sophos.com/nsg/sophos-firewall/22.0/API/PROTECT/Intrusion%20Prevention/TrustedMAC/operations/AddTrustedMAC%26UpdateTrustedMAC.html
+        Creates a trusted MAC entry with a static IPv4 binding.
 
-.LINK
-    Get-SfosTrustedMAC
+        .LINK
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosTrustedMAC
 #>
 function New-SfosTrustedMAC {
     [CmdletBinding(SupportsShouldProcess)]
@@ -4443,86 +4505,95 @@ function New-SfosTrustedMAC {
 }
 
 <#
-.SYNOPSIS
-    Updates an existing TrustedMAC object on the Sophos Firewall, optionally renaming its
-    MAC address.
+        .SYNOPSIS
+        Updates a trusted MAC entry on a Sophos Firewall, optionally renaming its address.
 
-.DESCRIPTION
-    Updates a Trusted MAC entry using the Sophos Firewall XML API. Reads the current object
-    first and resends every field, overriding only what the caller explicitly passed
-    (read-modify-write). Supports ShouldProcess; use -WhatIf to preview.
+        .DESCRIPTION
+        Updates an existing trusted MAC entry. The cmdlet reads the current object first
+        and resends every field, overriding only what the caller explicitly passed.
+        -NewMACAddress renames the entry: the current -MACAddress identifies the record,
+        and -NewMACAddress, if given, becomes its new address. It needs an open connection
+        from Connect-SfosFirewall, or the connection parameters supplied directly, and an
+        account with write permission for trusted MAC entries.
 
-    -NewMACAddress renames the entry: the current -MACAddress is sent inside the documented
-    <OldConfiguration> wrapper to identify the record, and -NewMACAddress (if given) becomes
-    the new top-level <MACAddress> - measured working live, including on the record's own
-    key field, which most entities in this project cannot rename.
+        .PARAMETER MACAddress
+        Required. Current MAC address of the entry to update. Accepts pipeline input by
+        property name.
 
-.PARAMETER MACAddress
-    Current MAC address of the entry to update. Mandatory; accepts pipeline input by
-    property name.
+        .PARAMETER NewMACAddress
+        Optional. New MAC address to rename the entry to. If omitted, the MAC address is
+        kept unchanged.
 
-.PARAMETER NewMACAddress
-    New MAC address to rename the entry to. If omitted, the MAC address is kept unchanged.
+        .PARAMETER IPV4Association
+        Optional. One of 'Static', 'DHCP' or 'None'. If omitted, the current value is kept.
 
-.PARAMETER IPV4Association
-    'Static', 'DHCP' or 'None'. If omitted, the existing value is kept.
+        .PARAMETER IPV4Address
+        Optional. IPv4 address or comma-separated addresses. If omitted, the current value
+        is kept.
 
-.PARAMETER IPV4Address
-    IPv4 address(es), comma-separated for multiple values. If omitted, the existing value is
-    kept.
+        .PARAMETER IPV6Association
+        Optional. One of 'Static', 'DHCP' or 'None'. If omitted, the current value is kept.
 
-.PARAMETER IPV6Association
-    'Static', 'DHCP' or 'None'. If omitted, the existing value is kept.
+        .PARAMETER IPV6Address
+        Optional. IPv6 address or comma-separated addresses. If omitted, the current value
+        is kept.
 
-.PARAMETER IPV6Address
-    IPv6 address(es), comma-separated for multiple values. If omitted, the existing value is
-    kept.
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
-.PARAMETER Session
-A session object returned by Connect-SfosFirewall, or the name of a session
-registered with Connect-SfosFirewall -Name. Overrides the stored default
-connection context; any of -Firewall/-Port/-Username/-Password/
--SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
-.PARAMETER Firewall
-    Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs write permission for
+        trusted MAC entries. If omitted, the value from the current connection is used.
 
-.PARAMETER Port
-    Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
-.PARAMETER Username
-    Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER SkipCertificateCheck
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the
+        certificate is validated.
 
-.PARAMETER Password
-    Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection
+        is used.
 
-.PARAMETER SkipCertificateCheck
-    Skips SSL certificate validation for the API call.
+        .INPUTS
+        System.String. MACAddress can be bound from the pipeline, including by property
+        name, for example the output of Get-SfosTrustedMAC.
 
-.OUTPUTS
-    None. Throws an exception if the update fails.
+        .OUTPUTS
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        update.
 
-.EXAMPLE
-    # Change only the bound IPv4 address, everything else is preserved
-    Set-SfosTrustedMAC -MACAddress '00:16:76:00:00:01' -IPV4Address '10.99.60.20'
+        .EXAMPLE
+        Set-SfosTrustedMAC -MACAddress '00:16:76:00:00:01' -IPV4Address '10.99.60.20' -WhatIf
 
-.EXAMPLE
-    # Rename the MAC address itself
-    Set-SfosTrustedMAC -MACAddress '00:16:76:00:00:02' -NewMACAddress '00:16:76:00:00:99'
+        Shows what the call would change without sending it to the firewall.
 
-.NOTES
-    Minimum supported PowerShell version: 5.1
-    Verified live: both examples above were executed against test entries created for this
-    purpose - the rename in the second example was confirmed by the old MAC no longer
-    appearing on a follow-up Get and the new one carrying the unchanged IPV4Address - then
-    removed.
+        .EXAMPLE
+        Set-SfosTrustedMAC -MACAddress '00:16:76:00:00:01' -IPV4Address '10.99.60.20'
 
-.LINK
-    https://docs.sophos.com/nsg/sophos-firewall/22.0/API/PROTECT/Intrusion%20Prevention/TrustedMAC/operations/AddTrustedMAC%26UpdateTrustedMAC.html
+        Changes only the bound IPv4 address; everything else is preserved.
 
-.LINK
-    Get-SfosTrustedMAC
+        .EXAMPLE
+        Set-SfosTrustedMAC -MACAddress '00:16:76:00:00:02' -NewMACAddress '00:16:76:00:00:99'
+
+        Renames the entry to a new MAC address.
+
+        .LINK
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosTrustedMAC
 #>
 function Set-SfosTrustedMAC {
     [CmdletBinding(SupportsShouldProcess)]
@@ -4620,61 +4691,69 @@ function Set-SfosTrustedMAC {
 }
 
 <#
-.SYNOPSIS
-    Removes a TrustedMAC object from the Sophos Firewall.
+        .SYNOPSIS
+        Removes a trusted MAC entry from a Sophos Firewall.
 
-.DESCRIPTION
-    Removes a Trusted MAC entry using the Sophos Firewall XML API. Reads the object first
-    and throws a clear "not found" error if it does not exist, rather than passing through
-    the firewall's own answer for that case [measured: Remove on a nonexistent MACAddress
-    answers code 500 "Deleted some configurations. Couldn't delete all." - which already
-    fails closed, but names no specific object]. Supports ShouldProcess; use -WhatIf to
-    preview.
+        .DESCRIPTION
+        Deletes a trusted MAC entry by address. The cmdlet checks that the entry exists
+        before removing it and throws if the address is not found. It needs an open
+        connection from Connect-SfosFirewall, or the connection parameters supplied
+        directly, and an account with write permission for trusted MAC entries.
 
-.PARAMETER MACAddress
-    MAC address of the entry to remove. Mandatory; accepts pipeline input by property name.
+        .PARAMETER MACAddress
+        Required. MAC address of the entry to remove.
 
-.PARAMETER Session
-A session object returned by Connect-SfosFirewall, or the name of a session
-registered with Connect-SfosFirewall -Name. Overrides the stored default
-connection context; any of -Firewall/-Port/-Username/-Password/
--SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
-.PARAMETER Firewall
-    Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
-.PARAMETER Port
-    Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs write permission for
+        trusted MAC entries. If omitted, the value from the current connection is used.
 
-.PARAMETER Username
-    Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
-.PARAMETER Password
-    Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+        .PARAMETER SkipCertificateCheck
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the
+        certificate is validated.
 
-.PARAMETER SkipCertificateCheck
-    Skips SSL certificate validation for the API call.
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection
+        is used.
 
-.OUTPUTS
-    None. Throws an exception if the removal fails.
+        .INPUTS
+        System.String. MACAddress can be bound from the pipeline, including by property
+        name, for example the output of Get-SfosTrustedMAC.
 
-.EXAMPLE
-    Remove-SfosTrustedMAC -MACAddress '00:16:76:00:00:01'
+        .OUTPUTS
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        removal or the entry does not exist.
 
-.NOTES
-    Minimum supported PowerShell version: 5.1
-    Verified live: removed a test entry created for this purpose, confirmed gone with a
-    follow-up Get, then confirmed the "not found" error path against a MAC address that
-    never existed. Unlike DoSBypassRules, Remove on this entity correctly deletes exactly
-    the targeted record with only its documented key (MACAddress) - no full-field
-    workaround needed.
+        .EXAMPLE
+        Remove-SfosTrustedMAC -MACAddress '00:16:76:00:00:01' -WhatIf
 
-.LINK
-    https://docs.sophos.com/nsg/sophos-firewall/22.0/API/PROTECT/Intrusion%20Prevention/TrustedMAC/operations/Delete%20Trusted%20MAC.html
+        Shows what the call would remove without sending it to the firewall.
 
-.LINK
-    Get-SfosTrustedMAC
+        .EXAMPLE
+        Remove-SfosTrustedMAC -MACAddress '00:16:76:00:00:01'
+
+        Removes the named trusted MAC entry.
+
+        .LINK
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosTrustedMAC
 #>
 function Remove-SfosTrustedMAC {
     [CmdletBinding(SupportsShouldProcess)]
@@ -4739,60 +4818,71 @@ function Remove-SfosTrustedMAC {
 }
 
 <#
-.SYNOPSIS
-    Exports all TrustedMAC objects to a CSV or JSON file.
+        .SYNOPSIS
+        Exports trusted MAC entries from a Sophos Firewall to a file.
 
-.DESCRIPTION
-    Retrieves all TrustedMAC objects from the Sophos Firewall and exports them to a file at
-    the specified path. If the file already exists, an error is thrown unless -Overwrite is
-    used.
+        .DESCRIPTION
+        Retrieves every trusted MAC entry from the firewall using Get-SfosTrustedMAC and
+        writes them to a CSV or JSON file at the given path, for backup or transfer to
+        another firewall with Import-SfosTrustedMACs. If the file already exists, an error
+        is thrown unless -Overwrite is used. It needs an open connection from
+        Connect-SfosFirewall, or the connection parameters supplied directly.
 
-.PARAMETER FilePath
-    Full path to the output file.
+        .PARAMETER FilePath
+        Required. Full path to the output file.
 
-.PARAMETER Format
-    Export format: 'AsCSV' (default) or 'AsJSON'.
+        .PARAMETER Format
+        Optional. Export format, either 'AsCSV' or 'AsJSON'. Default: 'AsCSV'.
 
-.PARAMETER Overwrite
-    Overwrites the file if it already exists.
+        .PARAMETER Overwrite
+        Optional. Overwrites the file if it already exists. If omitted, an existing file
+        causes an error.
 
-.PARAMETER Session
-A session object returned by Connect-SfosFirewall, or the name of a session
-registered with Connect-SfosFirewall -Name. Overrides the stored default
-connection context; any of -Firewall/-Port/-Username/-Password/
--SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
-.PARAMETER Firewall
-    Sophos Firewall hostname or IP address. If omitted, uses the stored connection context.
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
-.PARAMETER Port
-    Management/API port number (typically 4444). If omitted, uses the stored connection context.
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs read permission for
+        trusted MAC entries. If omitted, the value from the current connection is used.
 
-.PARAMETER Username
-    Username for API authentication. If omitted, uses the stored connection context.
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
-.PARAMETER Password
-    Password for API authentication. If omitted, uses the stored connection context.
+        .PARAMETER SkipCertificateCheck
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the
+        certificate is validated.
 
-.PARAMETER SkipCertificateCheck
-    Skip SSL/TLS certificate validation for self-signed certificates.
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection
+        is used.
 
-.OUTPUTS
-    None. Writes the output file.
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
-.EXAMPLE
-    Export-SfosTrustedMACs -FilePath 'C:\Exports\SophosTrustedMACs.csv'
+        .OUTPUTS
+        None. The cmdlet writes the output file and raises an error if the file cannot be
+        written.
 
-.NOTES
-    Minimum supported PowerShell version: 5.1
-    This function depends on Get-SfosTrustedMAC to retrieve the data. IPV4Address/
-    IPV6Address are already plain CSV strings on the wire (see the region header), so no
-    array flattening is needed before Export-Csv - unlike Export-SfosIPHosts'
-    HostGroupList.
+        .EXAMPLE
+        Export-SfosTrustedMACs -FilePath 'C:\Exports\SophosTrustedMACs.csv'
 
-.LINK
-    Get-SfosTrustedMAC
+        Exports every trusted MAC entry to a CSV file.
+
+        .LINK
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosTrustedMAC
 #>
 function Export-SfosTrustedMACs {
     [CmdletBinding()]
@@ -4848,55 +4938,68 @@ function Export-SfosTrustedMACs {
 }
 
 <#
-.SYNOPSIS
-    Imports TrustedMAC objects from a CSV or JSON file.
+        .SYNOPSIS
+        Imports trusted MAC entries into a Sophos Firewall from a file.
 
-.DESCRIPTION
-    Reads TrustedMAC entries from a file previously written by Export-SfosTrustedMACs (or
-    matching its column layout) and creates them on the Sophos Firewall using
-    New-SfosTrustedMAC. Rows without a MACAddress, or with one already starting with '#',
-    are skipped.
+        .DESCRIPTION
+        Reads trusted MAC entries from a CSV or JSON file previously written by
+        Export-SfosTrustedMACs, or matching its column layout, and creates them on the
+        firewall using New-SfosTrustedMAC. Rows without a MAC address, or whose MAC address
+        starts with '#', are skipped. It needs an open connection from
+        Connect-SfosFirewall, or the connection parameters supplied directly, and an
+        account with write permission for trusted MAC entries.
 
-.PARAMETER FilePath
-    Full path to the input file.
+        .PARAMETER FilePath
+        Required. Full path to the input file.
 
-.PARAMETER Format
-    Import format: 'AsCSV' (default) or 'AsJSON'.
+        .PARAMETER Format
+        Optional. Import format, either 'AsCSV' or 'AsJSON'. Default: 'AsCSV'.
 
-.PARAMETER Session
-A session object returned by Connect-SfosFirewall, or the name of a session
-registered with Connect-SfosFirewall -Name. Overrides the stored default
-connection context; any of -Firewall/-Port/-Username/-Password/
--SkipCertificateCheck supplied explicitly still wins over it. Enables piping
-between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session fw2.
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
 
-.PARAMETER Firewall
-    Sophos Firewall hostname or IP address. If omitted, uses the stored connection context.
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
 
-.PARAMETER Port
-    Management/API port number (typically 4444). If omitted, uses the stored connection context.
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs write permission for
+        trusted MAC entries. If omitted, the value from the current connection is used.
 
-.PARAMETER Username
-    Username for API authentication. If omitted, uses the stored connection context.
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
 
-.PARAMETER Password
-    Password for API authentication. If omitted, uses the stored connection context.
+        .PARAMETER SkipCertificateCheck
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the
+        certificate is validated.
 
-.PARAMETER SkipCertificateCheck
-    Skip SSL/TLS certificate validation for self-signed certificates.
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection
+        is used.
 
-.OUTPUTS
-    None. Creates TrustedMAC objects on the Sophos Firewall.
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
 
-.EXAMPLE
-    Import-SfosTrustedMACs -FilePath 'C:\Imports\SophosTrustedMACs.csv'
+        .OUTPUTS
+        None. The cmdlet creates trusted MAC entries on the firewall and raises an error
+        for a row it cannot create.
 
-.NOTES
-    Minimum supported PowerShell version: 5.1
-    This function depends on New-SfosTrustedMAC to create the objects.
+        .EXAMPLE
+        Import-SfosTrustedMACs -FilePath 'C:\Imports\SophosTrustedMACs.csv'
 
-.LINK
-    New-SfosTrustedMAC
+        Creates a trusted MAC entry for every valid row in the file.
+
+        .LINK
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        New-SfosTrustedMAC
 #>
 function Import-SfosTrustedMACs {
     [CmdletBinding()]

@@ -3946,7 +3946,9 @@ function Set-SfosLoginSecurity {
     Refactored to a one-block write - see the region header. This cmdlet's request now
     carries only PasswordComplexitySettings; the other five AdminSettings blocks, including
     WebAdminSettings/HTTPSport and LoginSecurity/BlockLogin, are no longer sent and therefore
-    cannot be affected by this call. Safe, live-testable write.
+    cannot be affected by this call. Safe, live-confirmed: a MinimumPasswordLengthValue change
+    (10 to 11 and back) applied and reverted with HTTPSport and the appliance untouched - no
+    factory reset, unlike the historical incident below.
     HISTORICAL INCIDENT, predates this refactor: the one call once executed
     (-MinimumPasswordLengthValue 11 against the lab baseline of 10) was sent under the old
     full-replace assumption - all six AdminSettings blocks on the wire, not just this one. It
@@ -4104,7 +4106,8 @@ function Set-SfosAdminPasswordComplexity {
     Refactored to a one-block write - see the region header. This was the cmdlet used to
     measure that AdminSettings is a partial-update singleton: a request carrying only
     <LoginDisclaimer> left WebAdminSettings/HTTPSport and all other blocks unchanged. Safe,
-    live-testable write; touches no access-gating field.
+    live-confirmed: an Enable/Disable change applied and reverted, HTTPSport untouched, the
+    appliance stayed up.
 
 .LINK
     https://docs.sophos.com/nsg/sophos-firewall/22.0/API/SYSTEM/Administration/AdminSettings/operations/LoginDisclaimerSettings.html
@@ -4215,7 +4218,8 @@ function Set-SfosLoginDisclaimer {
     Refactored to a one-block write - see the region header and Set-SfosLoginDisclaimer's
     .NOTES for the measurement that made this a one-block write (this cmdlet's block was not
     itself the one measured, but shares the same request shape and the same measured
-    flat-per-block status path). Safe, live-testable write; touches no access-gating field.
+    flat-per-block status path). Safe, live-confirmed: a HostNameDesc change applied and
+    reverted, HTTPSport untouched, the appliance stayed up.
 
 .LINK
     https://docs.sophos.com/nsg/sophos-firewall/22.0/API/

@@ -5164,3 +5164,511 @@ function Remove-SfosLocalServiceACL {
 }
 
 #endregion
+
+#region NetFlowConfiguration
+# The NetFlowConfiguration singleton (SYSTEM > Administration > Netflow) holds the list of
+# Netflow collector servers the appliance sends flow records to. The wire root is
+# <NetFlowConfiguration>, with no <Name> child of its own; the servers sit underneath as
+# repeated <Server> blocks, each with <ServerName>, <NetflowServer> and <NetflowServerPort>.
+#
+# The attribute table names the first field 'Name'; the wire element is 'ServerName',
+# confirmed against a live object and matching the web admin field label. The table is
+# wrong.
+#
+# On an appliance with nothing configured, a Get on NetFlowConfiguration is accepted (no
+# 529) but returns no NetFlowConfiguration node at all - no empty element, no status - so
+# Get-SfosNetFlowConfiguration returns an empty array rather than throwing. Once a server has
+# been written, the same Get returns a NetFlowConfiguration node with one Server child per
+# server.
+#
+# The server list is not append-only: an update that sends an empty NetFlowConfiguration
+# body answers 200 and clears every server, confirmed by reading it back. There is no
+# <Remove> for this entity - a Remove is accepted but returns no status at all, so clearing
+# happens only through Set-SfosNetFlowConfiguration with empty arrays.
+#
+# The status of an update lands flat at /Response/NetFlowConfiguration/Status, since
+# NetFlowConfiguration is itself the root element with no further wrapper.
+
+<#
+.SYNOPSIS
+    Retrieves the Netflow server configuration from a Sophos Firewall.
+
+.DESCRIPTION
+    Returns the Netflow collector servers configured on the firewall (System >
+    Administration > Netflow). Each server is returned with its name, target address and
+    UDP port. Use this cmdlet to review the current list before changing it with
+    Set-SfosNetFlowConfiguration. The cmdlet only reads; nothing on the firewall is changed.
+    It needs an open connection from Connect-SfosFirewall, or the connection parameters
+    supplied directly.
+
+    On an appliance where no Netflow server has ever been configured, the firewall reports
+    no data for this setting; the cmdlet returns an empty array in that case rather than an
+    error.
+
+.PARAMETER Firewall
+    Optional. Host name or IP address of the firewall. If omitted, the value from the
+    current connection is used.
+
+.PARAMETER Port
+    Optional. TCP port of the management API, usually 4444. If omitted, the value from the
+    current connection is used.
+
+.PARAMETER Username
+    Optional. User name for the API login. The account needs read permission for the
+    administration settings. If omitted, the value from the current connection is used.
+
+.PARAMETER Password
+    Optional. Password for the API login, as a SecureString. If omitted, the value from the
+    current connection is used.
+
+.PARAMETER SkipCertificateCheck
+    Optional. Accepts the firewall certificate without validating it. Use this only for
+    appliances that still present a self-signed certificate. If omitted, the certificate is
+    validated.
+
+.PARAMETER Session
+    Optional. A session object from Connect-SfosFirewall, or the name of a session that was
+    registered with Connect-SfosFirewall -Name. Use it to address a specific firewall when
+    you work with more than one at a time. Any connection parameter you pass explicitly
+    still takes precedence. If omitted, the stored default connection is used.
+
+.PARAMETER AsXml
+    Optional. Returns the raw XML elements sent by the firewall instead of PowerShell
+    objects.
+
+.INPUTS
+    None. This cmdlet does not accept pipeline input.
+
+.OUTPUTS
+    System.Management.Automation.PSCustomObject. One object per configured Netflow server,
+    with the properties ServerName, NetflowServer and NetflowServerPort. Returns
+    System.Xml.XmlElement when -AsXml is used, and an empty array when no server is
+    configured.
+
+.EXAMPLE
+    Get-SfosNetFlowConfiguration
+
+    Lists every Netflow server configured on the firewall of the current connection.
+
+.EXAMPLE
+    Get-SfosNetFlowConfiguration -AsXml
+
+    Returns the raw XML of the configured servers, for example to check a field that the
+    standard output does not contain.
+
+.LINK
+    https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+.LINK
+    Set-SfosNetFlowConfiguration
+#>
+function Get-SfosNetFlowConfiguration {
+    [CmdletBinding()]
+    param(
+        [string]$Firewall,
+        [int]$Port,
+        [string]$Username,
+        [SecureString]$Password,
+        [switch]$SkipCertificateCheck,
+        [object]$Session,
+
+        [switch]$AsXml
+    )
+
+    $params = Resolve-SfosParameters -BoundParameters $PSBoundParameters
+
+    $inner = '<Get><NetFlowConfiguration></NetFlowConfiguration></Get>'
+
+    try {
+        $response = Invoke-SfosApi -Firewall $params.Firewall `
+            -Port $params.Port `
+            -Username $params.Username `
+            -Password $params.Password `
+            -InnerXml $inner -SkipCertificateCheck:$params.SkipCertificateCheck -ErrorAction Stop
+    }
+    catch {
+        throw "Failed to retrieve NetFlowConfiguration: $($_.Exception.Message)"
+    }
+
+    $XmlResponse = [xml]$response.Content
+    Assert-SfosApiReturnSuccess -Xml $XmlResponse -ObjectName 'NetFlowConfiguration' -Action 'get'
+
+    $serverNode = $XmlResponse.SelectSingleNode('/Response/NetFlowConfiguration/Server')
+
+    if ($AsXml) {
+        return @($serverNode | Where-Object { $_ })
+    }
+
+    $result = @()
+    if ($serverNode) {
+        # One Server wrapper holds every server. The three fields repeat inside it, one
+        # repetition per Netflow server, and belong together by position. The documentation
+        # sample shows a wrapper with a single field each, which reads as if the wrapper
+        # repeated; on the wire it does not.
+        $names = @($serverNode.SelectNodes('ServerName') | ForEach-Object -Process { $_.InnerText })
+        $addresses = @($serverNode.SelectNodes('NetflowServer') | ForEach-Object -Process { $_.InnerText })
+        $ports = @($serverNode.SelectNodes('NetflowServerPort') | ForEach-Object -Process { $_.InnerText })
+
+        for ($i = 0; $i -lt $names.Count; $i++) {
+            $result += [PSCustomObject]@{
+                ServerName        = [string]$names[$i]
+                NetflowServer     = [string]$(if ($i -lt $addresses.Count) { $addresses[$i] } else { '' })
+                NetflowServerPort = [string]$(if ($i -lt $ports.Count) { $ports[$i] } else { '' })
+            }
+        }
+    }
+
+    return $result
+}
+
+<#
+.SYNOPSIS
+    Updates the Netflow server configuration on a Sophos Firewall.
+
+.DESCRIPTION
+    Sets the list of Netflow collector servers under System > Administration > Netflow. The
+    three parameters are parallel arrays: the first entry of -ServerName, -NetflowServer and
+    -NetflowServerPort together describe one server, the second entries describe the next
+    server, and so on. The cmdlet reads the current list first; any of the three arrays you
+    do not pass keeps its current values, so you can change only the port of one server
+    while leaving the names and addresses of every server untouched. It needs an open
+    connection from Connect-SfosFirewall, or the connection parameters supplied directly,
+    and an account with administrative permission.
+
+    The setting applies device-wide: there is one server list for the whole appliance, not
+    one per zone or interface. Passing an empty array to all three parameters removes every
+    configured server; there is no separate cmdlet to remove a single server or the whole
+    list.
+
+.PARAMETER ServerName
+    Optional. Name of each Netflow server, one entry per server, 1 to 32 characters, no
+    commas. If omitted, the current server names are kept. Pass an empty array together with
+    empty -NetflowServer and -NetflowServerPort arrays to remove every configured server.
+
+.PARAMETER NetflowServer
+    Optional. IP address or domain name of each Netflow server, one entry per server. If
+    omitted, the current server addresses are kept. Pass an empty array together with empty
+    -ServerName and -NetflowServerPort arrays to remove every configured server.
+
+.PARAMETER NetflowServerPort
+    Optional. UDP port of each Netflow server, one entry per server, 1 to 65535. If omitted,
+    the current server ports are kept. Pass an empty array together with empty -ServerName
+    and -NetflowServer arrays to remove every configured server.
+
+.PARAMETER Firewall
+    Optional. Host name or IP address of the firewall. If omitted, the value from the
+    current connection is used.
+
+.PARAMETER Port
+    Optional. TCP port of the management API, usually 4444. If omitted, the value from the
+    current connection is used.
+
+.PARAMETER Username
+    Optional. User name for the API login. The account needs administrative permission. If
+    omitted, the value from the current connection is used.
+
+.PARAMETER Password
+    Optional. Password for the API login, as a SecureString. If omitted, the value from the
+    current connection is used.
+
+.PARAMETER SkipCertificateCheck
+    Optional. Accepts the firewall certificate without validating it. Use this only for
+    appliances that still present a self-signed certificate. If omitted, the certificate is
+    validated.
+
+.PARAMETER Session
+    Optional. A session object from Connect-SfosFirewall, or the name of a session that was
+    registered with Connect-SfosFirewall -Name. Use it to address a specific firewall when
+    you work with more than one at a time. Any connection parameter you pass explicitly
+    still takes precedence. If omitted, the stored default connection is used.
+
+.INPUTS
+    None. This cmdlet does not accept pipeline input.
+
+.OUTPUTS
+    None. The cmdlet writes no output and raises an error if the firewall rejects the
+    update.
+
+.EXAMPLE
+    Set-SfosNetFlowConfiguration -ServerName 'Collector1' -NetflowServer '10.0.0.50' -NetflowServerPort 2055 -WhatIf
+
+    Shows what the call would change without sending it to the firewall.
+
+.EXAMPLE
+    Set-SfosNetFlowConfiguration -ServerName 'Collector1' -NetflowServer '10.0.0.50' -NetflowServerPort 2055
+
+    Sets a single Netflow server. The cmdlet asks for confirmation before it writes.
+
+.EXAMPLE
+    Set-SfosNetFlowConfiguration -ServerName 'Collector1', 'Collector2' -NetflowServer '10.0.0.50', '10.0.0.51' -NetflowServerPort 2055, 2056 -Confirm:$false
+
+    Sets two Netflow servers without asking for confirmation, for use in scripts.
+
+.EXAMPLE
+    Set-SfosNetFlowConfiguration -ServerName @() -NetflowServer @() -NetflowServerPort @()
+
+    Removes every configured Netflow server. The cmdlet asks for confirmation before it
+    writes.
+
+.LINK
+    https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+.LINK
+    Get-SfosNetFlowConfiguration
+#>
+function Set-SfosNetFlowConfiguration {
+    [CmdletBinding(SupportsShouldProcess)]
+    param(
+        [ValidateLength(1, 32)]
+        [ValidatePattern('^[^,]+$')]
+        [string[]]$ServerName,
+
+        [string[]]$NetflowServer,
+
+        [ValidateRange(1, 65535)]
+        [int[]]$NetflowServerPort,
+
+        [string]$Firewall,
+        [int]$Port,
+        [string]$Username,
+        [SecureString]$Password,
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
+    )
+
+    $params = Resolve-SfosParameters -BoundParameters $PSBoundParameters
+
+    $existing = @(Get-SfosNetFlowConfiguration -Firewall $params.Firewall `
+            -Port $params.Port `
+            -Username $params.Username `
+            -Password $params.Password `
+            -SkipCertificateCheck:$params.SkipCertificateCheck)
+
+    $bp = $PSBoundParameters
+
+    # Wrap the whole if/else, not just each branch: PowerShell collapses a one-element array
+    # returned from an if/else assignment back to a scalar, and an index into that scalar
+    # string reads a single character instead of a whole array entry.
+    $targetServerName = @(if ($bp.ContainsKey('ServerName')) { $ServerName } else { @($existing | ForEach-Object -Process { $_.ServerName }) })
+    $targetNetflowServer = @(if ($bp.ContainsKey('NetflowServer')) { $NetflowServer } else { @($existing | ForEach-Object -Process { $_.NetflowServer }) })
+    $targetNetflowServerPort = @(if ($bp.ContainsKey('NetflowServerPort')) { $NetflowServerPort } else { @($existing | ForEach-Object -Process { $_.NetflowServerPort }) })
+
+    if ($targetServerName.Count -ne $targetNetflowServer.Count -or $targetServerName.Count -ne $targetNetflowServerPort.Count) {
+        throw "NetFlowConfiguration needs -ServerName, -NetflowServer and -NetflowServerPort with the same number of entries; one entry describes one Netflow server."
+    }
+
+    if (-not $PSCmdlet.ShouldProcess("NetFlowConfiguration on $($params.Firewall)", 'Update')) {
+        return
+    }
+
+    # Send the shape the appliance stores: one Server wrapper whose three fields repeat, one
+    # repetition per server. Sending one wrapper per server is accepted too, but the appliance
+    # rewrites it into this form, and relying on that rewrite is not worth the risk.
+    $serverXml = ''
+    if ($targetServerName.Count -gt 0) {
+        $namesXml = ''
+        $addressesXml = ''
+        $portsXml = ''
+        for ($i = 0; $i -lt $targetServerName.Count; $i++) {
+            $namesXml += "<ServerName>$(ConvertTo-SfosXmlEscaped -Text $targetServerName[$i])</ServerName>"
+            $addressesXml += "<NetflowServer>$(ConvertTo-SfosXmlEscaped -Text $targetNetflowServer[$i])</NetflowServer>"
+            $portsXml += "<NetflowServerPort>$(ConvertTo-SfosXmlEscaped -Text ([string]$targetNetflowServerPort[$i]))</NetflowServerPort>"
+        }
+        $serverXml = "<Server>$namesXml$addressesXml$portsXml</Server>"
+    }
+
+    $inner = @"
+<Set operation="update">
+  <NetFlowConfiguration>
+    $serverXml
+  </NetFlowConfiguration>
+</Set>
+"@
+
+    try {
+        $response = Invoke-SfosApi -Firewall $params.Firewall `
+            -Port $params.Port `
+            -Username $params.Username `
+            -Password $params.Password `
+            -InnerXml $inner -SkipCertificateCheck:$params.SkipCertificateCheck -ErrorAction Stop
+    }
+    catch {
+        throw "Failed to update NetFlowConfiguration: $($_.Exception.Message)"
+    }
+
+    $XmlResponse = [xml]$response.Content
+    # Status lands flat at /Response/NetFlowConfiguration/Status - see the region header.
+    Assert-SfosApiReturnSuccess -Xml $XmlResponse -ObjectName 'NetFlowConfiguration' -Action 'update'
+}
+#endregion
+
+# AdminPassword is a separate wire root, not part of the AdminSettings singleton: no
+# <Name> child, and the status of an update lands flat at /Response/AdminPassword/Status.
+# There is no Get for this entity - a <Get><AdminPassword> returns no element - and the
+# account name itself is not writable through this operation, so it always targets the
+# built-in admin account and this cmdlet has no -UserName parameter.
+
+<#
+.SYNOPSIS
+    Changes the password of the built-in administrator account on a Sophos Firewall.
+
+.DESCRIPTION
+    Sets AdminPassword (System > Administration > Set Admin Password), the password of the
+    appliance's built-in administrator account. The account name itself cannot be changed
+    through this operation, so this cmdlet always targets that one account and has no
+    parameter for the name. It needs an open connection from Connect-SfosFirewall, or the
+    connection parameters supplied directly, and the account's current password for
+    verification.
+
+    Anyone who uses this account to sign in to the web admin console must use the new
+    password there afterward.
+
+.PARAMETER CurrentPassword
+    Required. Current password of the built-in admin account, as a SecureString, up to 70
+    characters.
+
+.PARAMETER NewPassword
+    Required. New password for the built-in admin account, as a SecureString.
+
+.PARAMETER Firewall
+    Optional. Host name or IP address of the firewall. If omitted, the value from the
+    current connection is used.
+
+.PARAMETER Port
+    Optional. TCP port of the management API, usually 4444. If omitted, the value from the
+    current connection is used.
+
+.PARAMETER Username
+    Optional. User name for the API login. The account needs administrative permission. If
+    omitted, the value from the current connection is used.
+
+.PARAMETER Password
+    Optional. Password for the API login, as a SecureString. If omitted, the value from the
+    current connection is used.
+
+.PARAMETER SkipCertificateCheck
+    Optional. Accepts the firewall certificate without validating it. Use this only for
+    appliances that still present a self-signed certificate. If omitted, the certificate is
+    validated.
+
+.PARAMETER Session
+    Optional. A session object from Connect-SfosFirewall, or the name of a session that was
+    registered with Connect-SfosFirewall -Name. Use it to address a specific firewall when
+    you work with more than one at a time. Any connection parameter you pass explicitly
+    still takes precedence. If omitted, the stored default connection is used.
+
+.INPUTS
+    None. This cmdlet does not accept pipeline input.
+
+.OUTPUTS
+    None. The cmdlet writes no output and raises an error if the firewall rejects the
+    update.
+
+.EXAMPLE
+    $current = Read-Host -AsSecureString 'Current admin password'
+    $new = Read-Host -AsSecureString 'New admin password'
+    Set-SfosAdminPassword -CurrentPassword $current -NewPassword $new -WhatIf
+
+    Shows what the call would change without sending it to the firewall.
+
+.EXAMPLE
+    $current = Read-Host -AsSecureString 'Current admin password'
+    $new = Read-Host -AsSecureString 'New admin password'
+    Set-SfosAdminPassword -CurrentPassword $current -NewPassword $new
+
+    Changes the built-in admin account's password. The cmdlet asks for confirmation before
+    it writes.
+
+.EXAMPLE
+    Set-SfosAdminPassword -CurrentPassword $current -NewPassword $new -Confirm:$false
+
+    Changes the password without asking for confirmation, for use in scripts.
+
+.LINK
+    https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+.LINK
+    Get-SfosAdminSettings
+#>
+function Set-SfosAdminPassword {
+    [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
+    param(
+        [Parameter(Mandatory)]
+        [SecureString]$CurrentPassword,
+
+        [Parameter(Mandatory)]
+        [SecureString]$NewPassword,
+
+        [string]$Firewall,
+        [int]$Port,
+        [string]$Username,
+        [SecureString]$Password,
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
+    )
+
+    $params = Resolve-SfosParameters -BoundParameters $PSBoundParameters
+
+    if (-not $PSCmdlet.ShouldProcess("built-in admin account on $($params.Firewall)", 'Change password')) {
+        return
+    }
+
+    $currentBstr = $null
+    $newBstr = $null
+    $currentEscaped = $null
+    $newEscaped = $null
+
+    try {
+        $currentBstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($CurrentPassword)
+        $plainCurrent = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($currentBstr)
+
+        # 70 characters is the documented maximum for CurrentPassword only; NewPassword
+        # carries no documented limit and is therefore not validated here.
+        if ($plainCurrent.Length -gt 70) {
+            throw 'CurrentPassword exceeds the documented maximum length of 70 characters.'
+        }
+
+        $currentEscaped = ConvertTo-SfosXmlEscaped -Text $plainCurrent
+
+        $newBstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($NewPassword)
+        $plainNew = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($newBstr)
+        $newEscaped = ConvertTo-SfosXmlEscaped -Text $plainNew
+    }
+    finally {
+        if ($currentBstr -and $currentBstr -ne [IntPtr]::Zero) {
+            [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($currentBstr)
+        }
+        if ($newBstr -and $newBstr -ne [IntPtr]::Zero) {
+            [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($newBstr)
+        }
+        $plainCurrent = $null
+        $plainNew = $null
+    }
+
+    $inner = @"
+<Set operation="update">
+  <AdminPassword>
+    <CurrentPassword>$currentEscaped</CurrentPassword>
+    <NewPassword>$newEscaped</NewPassword>
+  </AdminPassword>
+</Set>
+"@
+
+    try {
+        $response = Invoke-SfosApi -Firewall $params.Firewall `
+            -Port $params.Port `
+            -Username $params.Username `
+            -Password $params.Password `
+            -InnerXml $inner -SkipCertificateCheck:$params.SkipCertificateCheck -ErrorAction Stop
+    }
+    catch {
+        throw "Failed to change the admin password: $($_.Exception.Message)"
+    }
+
+    $XmlResponse = [xml]$response.Content
+    # Status lands flat at /Response/AdminPassword/Status, like every other block in this
+    # API area - see the region header above Get-SfosAdminSettings.
+    Assert-SfosApiReturnSuccess -Xml $XmlResponse -ObjectName 'AdminPassword' -Action 'update'
+}

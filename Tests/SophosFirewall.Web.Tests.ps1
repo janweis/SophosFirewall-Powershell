@@ -39,8 +39,8 @@ Describe 'Module Loading' {
         Get-Module SophosFirewall.Core | Should -Not -BeNullOrEmpty
     }
 
-    It 'Should export exactly 52 functions' {
-        (Get-Module SophosFirewall.Web).ExportedFunctions.Count | Should -Be 52
+    It 'Should export exactly 54 functions' {
+        (Get-Module SophosFirewall.Web).ExportedFunctions.Count | Should -Be 54
     }
 
     Context 'Private helpers are not exported' {
@@ -2434,6 +2434,101 @@ Describe 'Settings Singletons' {
             { Set-SfosDefaultWebFilterNotificationSettings -Message @{ NotARealField = 'x' } @conn -Confirm:$false } | Should -Throw '*not a known*'
 
             Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -Times 1 -Exactly -ParameterFilter { $InnerXml -match '<Get>' }
+        }
+    }
+
+    Context 'Get-SfosWebFilterNotificationSettings' {
+        It 'Should exist and expose the connection and AsXml parameters' {
+            $cmd = Get-Command Get-SfosWebFilterNotificationSettings
+            $cmd | Should -Not -BeNullOrEmpty
+            $cmd.Parameters.ContainsKey('Firewall') | Should -Be $true
+            $cmd.Parameters.ContainsKey('Port') | Should -Be $true
+            $cmd.Parameters.ContainsKey('Username') | Should -Be $true
+            $cmd.Parameters.ContainsKey('Password') | Should -Be $true
+            $cmd.Parameters.ContainsKey('SkipCertificateCheck') | Should -Be $true
+            $cmd.Parameters.ContainsKey('Session') | Should -Be $true
+            $cmd.Parameters.ContainsKey('AsXml') | Should -Be $true
+        }
+
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -MockWith {
+                [PSCustomObject]@{ Content = @'
+<Response>
+  <WebFilterNotificationSettings>
+    <OverrideDefaultWarnedMessage>Disable</OverrideDefaultWarnedMessage>
+    <OverrideDefaultDeniedMessage>Enable</OverrideDefaultDeniedMessage>
+    <DeniedMessageImage>Default</DeniedMessageImage>
+  </WebFilterNotificationSettings>
+</Response>
+'@
+                }
+            }
+        }
+
+        It 'Should parse the three fields into a PSCustomObject' {
+            $result = Get-SfosWebFilterNotificationSettings @conn
+            $result.OverrideDefaultWarnedMessage | Should -Be 'Disable'
+            $result.OverrideDefaultDeniedMessage | Should -Be 'Enable'
+            $result.DeniedMessageImage | Should -Be 'Default'
+        }
+    }
+
+    Context 'Set-SfosWebFilterNotificationSettings' {
+        It 'Should exist and expose the three functional and all connection parameters' {
+            $cmd = Get-Command Set-SfosWebFilterNotificationSettings
+            $cmd | Should -Not -BeNullOrEmpty
+            $cmd.Parameters.ContainsKey('OverrideDefaultWarnedMessage') | Should -Be $true
+            $cmd.Parameters.ContainsKey('OverrideDefaultDeniedMessage') | Should -Be $true
+            $cmd.Parameters.ContainsKey('DeniedMessageImage') | Should -Be $true
+            $cmd.Parameters.ContainsKey('Firewall') | Should -Be $true
+            $cmd.Parameters.ContainsKey('Port') | Should -Be $true
+            $cmd.Parameters.ContainsKey('Username') | Should -Be $true
+            $cmd.Parameters.ContainsKey('Password') | Should -Be $true
+            $cmd.Parameters.ContainsKey('SkipCertificateCheck') | Should -Be $true
+            $cmd.Parameters.ContainsKey('Session') | Should -Be $true
+            $cmd.Parameters.ContainsKey('WhatIf') | Should -Be $true
+        }
+
+        BeforeEach {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -MockWith {
+                if ($InnerXml -match '<Get>') {
+                    [PSCustomObject]@{ Content = @'
+<Response>
+  <WebFilterNotificationSettings>
+    <OverrideDefaultWarnedMessage>Disable</OverrideDefaultWarnedMessage>
+    <OverrideDefaultDeniedMessage>Enable</OverrideDefaultDeniedMessage>
+    <DeniedMessageImage>Default</DeniedMessageImage>
+  </WebFilterNotificationSettings>
+</Response>
+'@
+                    }
+                }
+                else {
+                    [PSCustomObject]@{ Content = '<Response><WebFilterNotificationSettings><Status code="200">OK</Status></WebFilterNotificationSettings></Response>' }
+                }
+            }
+        }
+
+        It 'Should send the root element, operation="update" and all three fields' {
+            Set-SfosWebFilterNotificationSettings -OverrideDefaultWarnedMessage 'Enable' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Set operation="update">' -and
+                $InnerXml -match '<WebFilterNotificationSettings>' -and
+                $InnerXml -match '<OverrideDefaultWarnedMessage>Enable</OverrideDefaultWarnedMessage>' -and
+                $InnerXml -match '<OverrideDefaultDeniedMessage>Enable</OverrideDefaultDeniedMessage>' -and
+                $InnerXml -match '<DeniedMessageImage>Default</DeniedMessageImage>'
+            }
+        }
+
+        It 'Should keep the other two fields from the read-back object when only one is passed' {
+            Set-SfosWebFilterNotificationSettings -DeniedMessageImage 'Custom' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<DeniedMessageImage>Custom</DeniedMessageImage>' -and
+                $InnerXml -match '<OverrideDefaultWarnedMessage>Disable</OverrideDefaultWarnedMessage>' -and
+                $InnerXml -match '<OverrideDefaultDeniedMessage>Enable</OverrideDefaultDeniedMessage>'
+            }
         }
     }
 }

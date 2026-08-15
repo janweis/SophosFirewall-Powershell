@@ -99,15 +99,24 @@ function ConvertTo-SfosXmlEscaped {
     write.
 
 .PARAMETER Content
-    Required. Raw response body to check.
+    Required. Raw response body to check. Anything that is not text is ignored: a few
+    operations answer with a file instead of XML, and a rejected login is always XML.
 #>
 function Assert-SfosApiLoginSuccess {
     [CmdletBinding()]
     param(
         [AllowEmptyString()]
         [AllowNull()]
-        [string]$Content
+        [object]$Content
     )
+
+    # Certificate, certificate authority, CRL and form template answer with a downloaded
+    # file, so the body arrives as a byte array. Declaring this parameter as a string made
+    # the call fail on the binding, long before anything was read, and the caller saw a
+    # type conversion error instead of the response.
+    if ($Content -isnot [string]) {
+        return
+    }
 
     if (-not $Content) {
         return

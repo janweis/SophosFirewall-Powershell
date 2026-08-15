@@ -66,6 +66,8 @@
         'Get-SfosWebFilterAdvancedSettings',
         'Set-SfosWebFilterAdvancedSettings',
         'Get-SfosDefaultWebFilterNotificationSettings',
+        'Get-SfosWebFilterNotificationSettings',
+        'Set-SfosWebFilterNotificationSettings',
         'Set-SfosDefaultWebFilterNotificationSettings'
     )
 

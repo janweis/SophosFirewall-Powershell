@@ -73,6 +73,8 @@ Set-SfosApplianceAccess -Ping 'LAN', 'WiFi', 'DMZ' -WhatIf
 | `Set-SfosTime` | Updates the appliance time zone and clock. |
 | `Get-SfosMessages` | Reads the customizable end-user messages. |
 | `Set-SfosMessages` | Updates the customizable end-user messages. |
+| `Get-SfosNetFlowConfiguration` | Reads the Netflow collector server list. |
+| `Set-SfosNetFlowConfiguration` | Updates the Netflow collector server list. |
 | `Get-SfosApplianceAccess` | Reads the zone-per-service access matrix. |
 | `Set-SfosApplianceAccess` | Updates the zone-per-service access matrix. |
 | `Get-SfosAdminSettings` | Reads the admin settings singleton. |
@@ -82,6 +84,7 @@ Set-SfosApplianceAccess -Ping 'LAN', 'WiFi', 'DMZ' -WhatIf
 | `Set-SfosLoginDisclaimer` | Updates the admin login disclaimer toggle. |
 | `Set-SfosHostname` | Updates the appliance host name and description. |
 | `Reset-SfosToFactoryDefaults` | Resets the appliance to its factory default configuration. |
+| `Set-SfosAdminPassword` | Changes the password of the built-in administrator account. |
 | `Get-SfosLocalServiceACL` | Reads Local Service ACL rules. |
 | `New-SfosLocalServiceACL` | Creates a Local Service ACL rule. |
 | `Set-SfosLocalServiceACL` | Updates a Local Service ACL rule. |
@@ -109,6 +112,12 @@ This is the API's `DefaultConfigurationLanguage` field; the name suggests a lang
 setting, but the effect is a full reset. The cmdlet prompts for confirmation unless
 `-Confirm:$false` is passed.
 
+`Set-SfosAdminPassword` changes the password of the appliance's built-in `admin` account,
+not the account the module uses to sign in to the API - those are normally two different
+accounts. Supplying the wrong current password is rejected, but the appliance answers with
+an error about a deleted object that is unrelated to the actual problem; read it as "current
+password incorrect" and try again with the correct value.
+
 `Set-SfosNotification` cannot change `SmtpPort`, `NotificationServer` or
 `ManagementInterface` on this firmware: the request succeeds but the values stay unchanged.
 
@@ -118,6 +127,12 @@ non-empty replacements for both.
 
 `Set-SfosSNMPv3User` requires `-AuthenticationPassword` and `-EncryptionPassword` on every
 update. There is no way to keep the stored secrets while changing another field.
+
+`Set-SfosNetFlowConfiguration` takes `-ServerName`, `-NetflowServer` and `-NetflowServerPort`
+as parallel arrays; entries at the same index describe one server, and any array left out is
+filled from the current configuration. There is no cmdlet to remove a single server. To clear
+the whole list, pass all three arrays empty:
+`Set-SfosNetFlowConfiguration -ServerName @() -NetflowServer @() -NetflowServerPort @()`.
 
 ## License
 

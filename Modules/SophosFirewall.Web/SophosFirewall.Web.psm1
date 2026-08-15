@@ -10032,3 +10032,272 @@ function Set-SfosDefaultWebFilterNotificationSettings {
 
 #endregion
 
+#region WebFilterNotificationSettings
+
+<#
+        .SYNOPSIS
+        Retrieves the web filter notification settings of a Sophos Firewall.
+
+        .DESCRIPTION
+        Returns the web filter notification settings singleton: whether the default warned
+        and denied messages are overridden, and whether the notification page shows the
+        default or a custom image. There is exactly one instance of this object per
+        firewall. The cmdlet only reads; nothing on the firewall is changed. It needs an
+        open connection from Connect-SfosFirewall, or the connection parameters supplied
+        directly.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs read permission for the
+        web filter notification settings. If omitted, the value from the current
+        connection is used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER SkipCertificateCheck
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .PARAMETER AsXml
+        Optional. Returns the raw XML element sent by the firewall instead of a PowerShell
+        object.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
+
+        .OUTPUTS
+        System.Management.Automation.PSCustomObject. An object with the properties
+        OverrideDefaultWarnedMessage, OverrideDefaultDeniedMessage and DeniedMessageImage.
+        Returns System.Xml.XmlElement when -AsXml is used.
+
+        .EXAMPLE
+        Get-SfosWebFilterNotificationSettings
+
+        Returns the current web filter notification settings.
+
+        .LINK
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Set-SfosWebFilterNotificationSettings
+#>
+function Get-SfosWebFilterNotificationSettings {
+    # PSUseSingularNouns is suppressed on purpose. 'Settings' is not a plural container here
+    # but the name of the entity itself - the API element is <WebFilterNotificationSettings>, a
+    # singleton holding one configuration, and it has no <WebFilterNotificationSetting> child.
+    # The Sophos spelling goes above PowerShell habit here; the singular concession is
+    # reserved for elements that really do wrap a list, such as <Services> around <Service>.
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '')]
+    [CmdletBinding()]
+    param(
+        # Connection parameters (optional - use stored context if not provided)
+        [string]$Firewall,
+        [int]$Port,
+        [string]$Username,
+        [SecureString]$Password,
+        [switch]$SkipCertificateCheck,
+        [object]$Session,
+
+        # Output parameters
+        [switch]$AsXml
+    )
+
+    $params = Resolve-SfosParameters -BoundParameters $PSBoundParameters
+
+    $inner = '<Get><WebFilterNotificationSettings></WebFilterNotificationSettings></Get>'
+
+    try {
+        $response = Invoke-SfosApi -Firewall $params.Firewall `
+            -Port $params.Port `
+            -Username $params.Username `
+            -Password $params.Password `
+            -InnerXml $inner -SkipCertificateCheck:$params.SkipCertificateCheck -ErrorAction Stop
+    }
+    catch {
+        throw "Error retrieving WebFilterNotificationSettings: $($_.Exception.Message)"
+    }
+
+    $XmlResponse = [xml]$response.Content
+    Assert-SfosApiReturnSuccess -Xml $XmlResponse -ObjectName 'WebFilterNotificationSettings' -Action 'get'
+
+    $node = $XmlResponse.SelectSingleNode('/Response/WebFilterNotificationSettings')
+    if (-not $node) {
+        throw 'WebFilterNotificationSettings could not be retrieved from the firewall.'
+    }
+
+    if ($AsXml) {
+        return $node
+    }
+
+    return [PSCustomObject]@{
+        OverrideDefaultWarnedMessage = [string]$node.OverrideDefaultWarnedMessage
+        OverrideDefaultDeniedMessage = [string]$node.OverrideDefaultDeniedMessage
+        DeniedMessageImage           = [string]$node.DeniedMessageImage
+    }
+}
+
+<#
+        .SYNOPSIS
+        Updates the web filter notification settings of a Sophos Firewall.
+
+        .DESCRIPTION
+        Changes whether the default warned or denied messages are overridden, or whether
+        the notification page shows the default or a custom image. The cmdlet reads the
+        current settings first and sends them back complete, so a field you do not pass
+        keeps its current value. It needs an open connection from Connect-SfosFirewall, or
+        the connection parameters supplied directly, and an account with write permission.
+
+        This setting applies to every user behind the appliance. Turning an override off
+        reverts the block or warning page shown to users appliance-wide; read the current
+        values back with Get-SfosWebFilterNotificationSettings before changing them, so
+        they can be restored.
+
+        .PARAMETER OverrideDefaultWarnedMessage
+        Optional. Whether the default warned message is overridden, replacing the current
+        value. Observed values: 'Enable', 'Disable'. If omitted, the current value is kept.
+
+        .PARAMETER OverrideDefaultDeniedMessage
+        Optional. Whether the default denied message is overridden, replacing the current
+        value. Observed values: 'Enable', 'Disable'. If omitted, the current value is kept.
+
+        .PARAMETER DeniedMessageImage
+        Optional. Whether the notification page shows the default or a custom image,
+        replacing the current value. Observed values: 'Default', 'Custom'. If omitted, the
+        current value is kept.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs write permission for the
+        web filter notification settings. If omitted, the value from the current
+        connection is used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER SkipCertificateCheck
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the certificate
+        is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection is
+        used.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
+
+        .OUTPUTS
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        update.
+
+        .EXAMPLE
+        Set-SfosWebFilterNotificationSettings -OverrideDefaultWarnedMessage 'Enable' -WhatIf
+
+        Shows what the call would change without sending it to the firewall.
+
+        .EXAMPLE
+        Set-SfosWebFilterNotificationSettings -OverrideDefaultWarnedMessage 'Enable'
+
+        Turns on the override of the default warned message. OverrideDefaultDeniedMessage
+        and DeniedMessageImage are kept unchanged.
+
+        .LINK
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosWebFilterNotificationSettings
+#>
+function Set-SfosWebFilterNotificationSettings {
+    # PSUseSingularNouns is suppressed on purpose. 'Settings' is not a plural container here
+    # but the name of the entity itself - the API element is <WebFilterNotificationSettings>, a
+    # singleton holding one configuration, and it has no <WebFilterNotificationSetting> child.
+    # The Sophos spelling goes above PowerShell habit here; the singular concession is
+    # reserved for elements that really do wrap a list, such as <Services> around <Service>.
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '')]
+    [CmdletBinding(SupportsShouldProcess)]
+    param(
+        [string]$OverrideDefaultWarnedMessage,
+        [string]$OverrideDefaultDeniedMessage,
+        [string]$DeniedMessageImage,
+
+        # Connection parameters (optional - use stored context if not provided)
+        [string]$Firewall,
+        [int]$Port,
+        [string]$Username,
+        [SecureString]$Password,
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
+    )
+
+    $params = Resolve-SfosParameters -BoundParameters $PSBoundParameters
+
+    $existing = Get-SfosWebFilterNotificationSettings -Firewall $params.Firewall `
+        -Port $params.Port `
+        -Username $params.Username `
+        -Password $params.Password `
+        -SkipCertificateCheck:$params.SkipCertificateCheck
+
+    $bp = $PSBoundParameters
+    $targetOverrideDefaultWarnedMessage = if ($bp.ContainsKey('OverrideDefaultWarnedMessage')) { $OverrideDefaultWarnedMessage } else { $existing.OverrideDefaultWarnedMessage }
+    $targetOverrideDefaultDeniedMessage = if ($bp.ContainsKey('OverrideDefaultDeniedMessage')) { $OverrideDefaultDeniedMessage } else { $existing.OverrideDefaultDeniedMessage }
+    $targetDeniedMessageImage = if ($bp.ContainsKey('DeniedMessageImage')) { $DeniedMessageImage } else { $existing.DeniedMessageImage }
+
+    if (-not $PSCmdlet.ShouldProcess("WebFilterNotificationSettings on $($params.Firewall)", 'Update')) {
+        return
+    }
+
+    $inner = @"
+<Set operation="update">
+  <WebFilterNotificationSettings>
+    <OverrideDefaultWarnedMessage>$(ConvertTo-SfosXmlEscaped -Text ([string]$targetOverrideDefaultWarnedMessage))</OverrideDefaultWarnedMessage>
+    <OverrideDefaultDeniedMessage>$(ConvertTo-SfosXmlEscaped -Text ([string]$targetOverrideDefaultDeniedMessage))</OverrideDefaultDeniedMessage>
+    <DeniedMessageImage>$(ConvertTo-SfosXmlEscaped -Text ([string]$targetDeniedMessageImage))</DeniedMessageImage>
+  </WebFilterNotificationSettings>
+</Set>
+"@
+
+    try {
+        $response = Invoke-SfosApi -Firewall $params.Firewall `
+            -Port $params.Port `
+            -Username $params.Username `
+            -Password $params.Password `
+            -InnerXml $inner -SkipCertificateCheck:$params.SkipCertificateCheck -ErrorAction Stop
+    }
+    catch {
+        throw "Error updating WebFilterNotificationSettings: $($_.Exception.Message)"
+    }
+
+    $XmlResponse = [xml]$response.Content
+    Assert-SfosApiReturnSuccess -Xml $XmlResponse -ObjectName 'WebFilterNotificationSettings' -Action 'update'
+}
+
+#endregion

@@ -157,6 +157,8 @@ Set-SfosWebFilterSettings -WebCaching 'Enable'
 | `Set-SfosWebFilterProtectionSettings` | Updates the web filter protection settings. |
 | `Get-SfosWebFilterAdvancedSettings` | Reads the web filter advanced settings. |
 | `Set-SfosWebFilterAdvancedSettings` | Updates the web filter advanced settings. |
+| `Get-SfosWebFilterNotificationSettings` | Reads the web filter notification settings (override flags, denied message image). |
+| `Set-SfosWebFilterNotificationSettings` | Updates the web filter notification settings. |
 | `Get-SfosDefaultWebFilterNotificationSettings` | Reads the default web filter notification message text. |
 | `Set-SfosDefaultWebFilterNotificationSettings` | Updates the default web filter notification message text. |
 
@@ -189,6 +191,10 @@ so it can only be set once, at creation with `New-SfosFileType`.
 `WebFilterUserNotificationSettings` from the API documentation have no cmdlet of their own;
 their fields are reached through `WebFilterProtectionSettings`, `WebFilterAdvancedSettings`
 and `WebFilterSettings` instead.
+
+`WebFilterNotificationSettings` (override flags and the denied message image) is a separate
+entity from `DefaultWebFilterNotificationSettings` (around 70 notification message texts) -
+do not confuse the two cmdlet pairs.
 
 ## License
 

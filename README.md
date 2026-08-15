@@ -1,6 +1,6 @@
 ﻿# Sophos Firewall PowerShell Module Suite
 
-PowerShell module collection for Sophos XGS/SFOS firewall management. Twelve modules with 492
+PowerShell module collection for Sophos XGS/SFOS firewall management. Thirteen modules with 518
 cmdlets are shipped; roughly nine further areas of the API are still open.
 
 ## Quick Start
@@ -61,8 +61,9 @@ before — existing scripts are unaffected.
 | **SophosFirewall.ActiveThreatResponse** | 10 | Sophos X-Ops threat feeds (ATP) with host/threat exceptions, third-party threat feeds |
 | **SophosFirewall.Applications** | 20 | Application filter policies and rules, application objects, categories with QoS assignment, classification assignments |
 | **SophosFirewall.SystemServices** | 21 | QoS (traffic shaping) policies, syslog servers, the system service daemon manager, High Availability, RED configuration |
+| **SophosFirewall.Administration** | 26 | Notification mail server, SNMP (agent, communities, v3 users), appliance access, admin/web-admin settings, time, admin messages, local service ACL |
 
-492 cmdlets in total. Every one of them was called against a live SFOS 22.0 appliance, not
+518 cmdlets in total. Every one of them was called against a live SFOS 22.0 appliance, not
 only against mocks — the firmware behaviour that differs from the vendor documentation is
 recorded in the `.NOTES` of the affected function and summarised in each module README.
 
@@ -86,10 +87,11 @@ state carry `ConfirmImpact = 'High'` and prompt unless `-Confirm:$false` is pass
 - [SophosFirewall.ActiveThreatResponse README](Modules/SophosFirewall.ActiveThreatResponse/README.md) - ATP / Sophos X-Ops threat feeds and third-party feeds; note the measured remove/update quirks
 - [SophosFirewall.Applications README](Modules/SophosFirewall.Applications/README.md) - Application control; several rule-list fields are computed server-side, read the known behaviour section first
 - [SophosFirewall.SystemServices README](Modules/SophosFirewall.SystemServices/README.md) - QoS/traffic shaping, syslog, the service daemon manager, HA and RED; the daemon manager only starts/stops/restarts, and HA/RED are documentation-faithful without the hardware
+- [SophosFirewall.Administration README](Modules/SophosFirewall.Administration/README.md) - Notification, SNMP, appliance access, admin/web-admin/time/message settings and the local service ACL; the access-critical writes (appliance access, web-admin port, login security) are documentation-faithful and unconfirmed to avoid a lock-out
 
 ## Key Features
 
-- 492 functions covering twelve of roughly twenty API areas
+- 518 functions covering thirteen of roughly twenty API areas
 - PowerShell 5.1 and 7.x
 - Session management: connect once, use every module
 - Pipeline support between cmdlets

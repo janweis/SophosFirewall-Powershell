@@ -3746,10 +3746,10 @@ function Get-SfosSSLVPNPolicy {
     needs an open connection from Connect-SfosFirewall, or the connection parameters
     supplied directly, and an account with permission to change VPN objects.
 
-    Naming a user group in -Member changes that group's own SSL VPN policy assignment as a
-    side effect. Use a dedicated test group while trying this cmdlet out; to undo the
-    change on a group, set its policy assignment back to its original value with
-    Set-SfosUserGroup (Authentication module).
+    Naming a group in -Member writes back onto the referenced UserGroup: the call changes
+    that group's own SSL VPN policy assignment as a side effect. Use a dedicated test
+    group while trying this cmdlet out; to undo the change on a group, set its policy
+    assignment back to its original value with Set-SfosUserGroup (Authentication module).
 
 .PARAMETER Name
     Required. Name of the policy. Must not contain a comma.
@@ -3761,9 +3761,9 @@ function Get-SfosSSLVPNPolicy {
     Optional. Free-text description. If omitted, the description is left empty.
 
 .PARAMETER Member
-    Optional. Names of one or more user groups to assign this policy to. See the warning in
-    .DESCRIPTION about the side effect on the named groups. If omitted, no group is
-    assigned.
+    Optional. Names of one or more user groups to assign this policy to. The cmdlet
+    description above explains the side effect on the named groups. If omitted, no group
+    is assigned.
 
 .PARAMETER UseAsDefaultGateway
     Tunnel policies only. Routes all client traffic through the tunnel: On or Off. Default:
@@ -3970,10 +3970,10 @@ function New-SfosSSLVPNPolicy {
     from Connect-SfosFirewall, or the connection parameters supplied directly, and an
     account with permission to change VPN objects.
 
-    Naming a user group in -Member changes that group's own SSL VPN policy assignment as a
-    side effect. Use a dedicated test group while trying this cmdlet out; to undo the
-    change on a group, set its policy assignment back to its original value with
-    Set-SfosUserGroup (Authentication module).
+    Naming a group in -Member writes back onto the referenced UserGroup: the call changes
+    that group's own SSL VPN policy assignment as a side effect. Use a dedicated test
+    group while trying this cmdlet out; to undo the change on a group, set its policy
+    assignment back to its original value with Set-SfosUserGroup (Authentication module).
 
 .PARAMETER Name
     Required. Name of the policy to update. Accepts pipeline input by property name.
@@ -3986,9 +3986,8 @@ function New-SfosSSLVPNPolicy {
     Optional. Free-text description. If omitted, the current value is kept.
 
 .PARAMETER Member
-    Optional. Complete replacement list of user group names. See the warning in
-    .DESCRIPTION about the side effect on the named groups. If omitted, the current list is
-    kept.
+    Optional. Complete replacement list of user group names. The cmdlet description above
+    explains the side effect on the named groups. If omitted, the current list is kept.
 
 .PARAMETER UseAsDefaultGateway
     Tunnel policies only. Routes all client traffic through the tunnel: On or Off. If
@@ -6352,8 +6351,8 @@ function New-SfosSiteToSiteClient {
     Optional. Proxy authentication user name. If omitted, the current value is kept.
 
 .PARAMETER ProxySecurePassword
-    Optional. Proxy authentication password, as a SecureString. See the note in
-    .DESCRIPTION about this field.
+    Optional. Proxy authentication password, as a SecureString. The cmdlet description
+    above explains how this field is handled.
 
 .PARAMETER PeerHost
     Optional. Overrides the peer host name from the configuration file: Enable or Disable.

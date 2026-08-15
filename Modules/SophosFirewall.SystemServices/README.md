@@ -19,7 +19,7 @@ the system service daemon manager, High Availability configuration, and RED
   `Set-SfosSystemService` to read and start/stop/restart the ten
   daemon-managed services (AntiSpam, AntiVirus, Authentication, DHCPServer,
   DNSServer, IPS, WebProxy, WAF, DHCPv6Server, RouterAdvertisementService)
-- **High Availability**: `Get-`/`Set-`/`Reset-`/`Disable-SfosHAConfiguration` for interactive and QuickHA
+- **High Availability**: `Get-`/`Initialize-`/`Reset-`/`Disable-SfosHAConfiguration` for interactive and QuickHA
   setup, disable and reset
 - **RED**: `Get-`/`Set-SfosREDConfiguration` for the broker registration, plus
   TLS version settings, automatic device deauthorization settings, and the
@@ -127,9 +127,12 @@ Get-SfosSystemServiceStatus -NameLike 'DHCP' | Set-SfosSystemService -Action Res
 
 ### High Availability
 
-The dedicated HA link must be an unbound, DMZ, LAG or VLAN interface - interactive mode
-accepts DMZ/LAG/VLAN, QuickHA also accepts an unbound physical port. Both appliances must
-run identical firmware or the cluster will not form.
+`Initialize-SfosHAConfiguration` configures **and forms** a cluster (the appliance reboots
+and pairs immediately - it is not a passive setting). The dedicated HA link must be an
+unbound, DMZ, LAG or VLAN interface - interactive mode accepts DMZ/LAG/VLAN, QuickHA also
+accepts an unbound physical port. Both appliances must run identical firmware or the cluster
+will not form. **Interactive mode also requires SSH allowed on the dedicated link's zone
+(Appliance Access) on both appliances** - without it the primary write answers 556.
 
 ```powershell
 Get-SfosHAConfiguration
@@ -137,11 +140,11 @@ Get-SfosHAConfiguration
 $pw = Read-Host -AsSecureString
 
 # QuickHA (auto HA-link IPs) with an unbound physical port: auxiliary first, then primary.
-Set-SfosHAConfiguration -Quick -Device Auxilliary -NodeName node2 -DedicatedLink Port4 -Passphrase $pw
-Set-SfosHAConfiguration -Quick -Device Active_Passive -NodeName node1 -DedicatedLink Port4 -Passphrase $pw
+Initialize-SfosHAConfiguration -Quick -Device Auxilliary -NodeName node2 -DedicatedLink Port4 -Passphrase $pw
+Initialize-SfosHAConfiguration -Quick -Device Active_Passive -NodeName node1 -DedicatedLink Port4 -Passphrase $pw
 
 # Interactive mode with monitored ports and a peer administration address (DMZ/LAG/VLAN link).
-Set-SfosHAConfiguration -HAConfigurationMode Active_Passive -Device Active_Passive -NodeName node1 `
+Initialize-SfosHAConfiguration -Device Active_Passive -NodeName node1 `
     -ClusterID 1 -Passphrase $pw -DedicatedLink PortB.100 -DedicatedLinkIPAddress '169.254.0.2' `
     -MonitorPort Port2,Port3 -PeerAdministrationInterface Port3 -PeerAdministrationIPv4 '10.0.0.60' -WhatIf
 
@@ -190,7 +193,7 @@ Set-SfosREDBetaFirmware -RunBetaFirmware Disable -WhatIf
 
 ### High Availability (2 functions)
 - `Get-SfosHAConfiguration` - Retrieves the High Availability (HA) configuration of the Sophos Firewall.
-- `Set-SfosHAConfiguration` - Configures High Availability (HA) in interactive or QuickHA mode.
+- `Initialize-SfosHAConfiguration` - Configures and forms an HA cluster in interactive or QuickHA mode.
 - `Reset-SfosHAConfiguration` - Resets the interactive HA configuration back to unconfigured.
 - `Disable-SfosHAConfiguration` - Disables High Availability on the Sophos Firewall.
 

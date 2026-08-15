@@ -85,13 +85,14 @@ Describe 'Module Loading' {
 
     It 'Every documented function exists' {
         $expected = @(
-            'Get-SfosHAConfiguration', 'Get-SfosQoSPolicy', 'Get-SfosREDConfiguration',
-            'Get-SfosREDDeviceDeauthorizationSettings', 'Get-SfosREDTLSVersionSettings',
-            'Get-SfosSyslogServer', 'Get-SfosSystemServiceStatus', 'New-SfosQoSPolicy',
-            'New-SfosSyslogServer', 'Remove-SfosQoSPolicy', 'Remove-SfosSyslogServer',
-            'Set-SfosHAConfiguration', 'Set-SfosQoSPolicy', 'Set-SfosREDBetaFirmware',
-            'Set-SfosREDConfiguration', 'Set-SfosREDDeviceDeauthorizationSettings',
-            'Set-SfosREDTLSVersionSettings', 'Set-SfosSyslogServer', 'Set-SfosSystemService'
+            'Disable-SfosHAConfiguration', 'Get-SfosHAConfiguration', 'Get-SfosQoSPolicy',
+            'Get-SfosREDConfiguration', 'Get-SfosREDDeviceDeauthorizationSettings',
+            'Get-SfosREDTLSVersionSettings', 'Get-SfosSyslogServer', 'Get-SfosSystemServiceStatus',
+            'Initialize-SfosHAConfiguration', 'New-SfosQoSPolicy', 'New-SfosSyslogServer',
+            'Remove-SfosQoSPolicy', 'Remove-SfosSyslogServer', 'Reset-SfosHAConfiguration',
+            'Set-SfosQoSPolicy', 'Set-SfosREDBetaFirmware', 'Set-SfosREDConfiguration',
+            'Set-SfosREDDeviceDeauthorizationSettings', 'Set-SfosREDTLSVersionSettings',
+            'Set-SfosSyslogServer', 'Set-SfosSystemService'
         )
         foreach ($name in $expected) {
             Get-Command $name -Module SophosFirewall.SystemServices -ErrorAction SilentlyContinue | Should -Not -BeNullOrEmpty -Because "$name should be exported"

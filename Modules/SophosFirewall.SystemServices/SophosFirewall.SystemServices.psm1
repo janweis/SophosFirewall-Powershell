@@ -1882,19 +1882,17 @@ between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session f
 
 .NOTES
     Minimum supported PowerShell version: 5.1
-    Measured live and identical on both lab firewalls (neither has an HA peer): the response
-    carries only <HA_Interactive><Status>Transaction fail</Status></HA_Interactive>, with none
-    of the configuration fields documented in the Sample XML populated. The field parsing
-    below (Device, NodeName, ClusterID, ...) has never been exercised against a configured HA
-    pair and follows the operation page's Sample XML only - see the Notes section on
-    Set-SfosHAConfiguration for the full field-naming disagreement between that Sample and
-    the attribute table.
+    Verified live against formed clusters: on an unconfigured appliance the response carries only
+    <HA_Interactive><Status>Transaction fail</Status></HA_Interactive> (reported as an empty
+    result), and on a formed QuickHA or interactive cluster the fields below (Device, NodeName,
+    ClusterID, DedicatedLink, DedicatedLinkIPAddress, ...) are populated and were read back after
+    forming a cluster with Initialize-SfosHAConfiguration.
 
 .LINK
     https://docs.sophos.com/nsg/sophos-firewall/22.0/API/CONFIGURE/System%20Services/HAConfiguration/operations/HAConfiguration-HASettings.html
 
 .LINK
-    Set-SfosHAConfiguration
+    Initialize-SfosHAConfiguration
 #>
 function Get-SfosHAConfiguration {
     [CmdletBinding()]
@@ -1971,45 +1969,41 @@ function Get-SfosHAConfiguration {
 
 <#
 .SYNOPSIS
-    Configures, disables or resets High Availability (HA) on the Sophos Firewall.
+    Initializes High Availability - configures and forms an HA cluster on the Sophos Firewall.
 
 .DESCRIPTION
-    [RISK - NOT EXECUTED LIVE] Builds the HAConfigure request for the documented "HA
-    Configuration-HA Settings" operation. Supports ShouldProcess; use -WhatIf to preview.
+    Writes the HAConfigure request that puts an appliance into a cluster role. This is not a
+    passive setting: applying it makes the appliance reboot and form the cluster immediately,
+    so the verb is Initialize rather than Set. Supports ShouldProcess and carries a high
+    confirm impact; use -WhatIf to preview.
 
-    Neither lab firewall has an HA peer, and activating HA is disruptive and not reversible
-    from this side alone, so this cmdlet was never run against a real appliance - only its
-    generated XML was checked, by shadowing Invoke-SfosApi in the calling session and
-    inspecting the captured request. It is documentation-faithful and unconfirmed.
+    Two request shapes:
+    - QuickHA (-Quick): the firewall auto-assigns the HA link IPs and monitored ports, so only
+      Device/NodeName/DedicatedLink/Passphrase apply. QuickHA accepts an unbound physical port
+      as the dedicated link.
+    - Interactive (default): you supply the cluster ID, the peer HA link IP, keepalive values
+      and optionally the monitored ports and peer administration address. The dedicated link
+      must be a DMZ, LAG or VLAN interface carrying a subnet (the peer HA link IP sits in it).
 
-    Three mutually exclusive operations, one parameter set each:
-    - 'Interactive' (default): configure Interactive HA mode, sending an <HA_Interactive>
-      block built from Sample XML field names.
-    - -Disable: sends the documented empty <DisableHA/> toggle.
-    - -Reset: sends the documented empty <HA_Interactive_Reset/> toggle.
+    Configure the auxiliary appliance first (-Device Auxilliary), then the primary. Both nodes
+    must run identical firmware or the cluster will not form.
 
-    Deliberately NOT implemented: Quick HA mode (<HA_Quick>) and the <MonitorPorts>/
-    <PeerAdministrationList> sub-structures of Interactive mode. The attribute table and the
-    Sample XML disagree on almost every field name for this entity (see NOTES), and with no
-    live object ever returned by Get-SfosHAConfiguration to settle a single one of those
-    disagreements, guessing the nested list shapes risked inventing element names outright -
-    the exact mistake this project's rules call out by name. The scalar fields below follow
-    the Sample, which is the form Get-SfosHAConfiguration's own field parsing also assumes.
+    PREREQUISITE for interactive mode: the HA link runs over the dedicated link's zone, and
+    that zone must allow SSH in Appliance Access on BOTH appliances. Measured: with the DMZ HA
+    link, a missing SSH-on-DMZ entry on the peer makes the primary write answer 556 (operation
+    failed) - the firmware cannot establish the HA sync over the link. Enable SSH for the DMZ
+    zone on both appliances before forming an interactive cluster.
 
-    This Set does not accept pipeline input, unlike other Set-* cmdlets in this project: a
-    singleton with three mutually exclusive request shapes (build/disable/reset) cannot be
-    safely round-tripped through Get-SfosHAConfiguration's output object, so the usual
-    parameter-set/pipeline conflict this project avoids does not apply here in the first
-    place.
-
-.PARAMETER HAConfigurationMode
-    'Active_Active', 'Active_Passive' or 'Auxilliary' [doc, table only - absent from the
-    Sample XML entirely, so its placement inside <HA_Interactive> is inferred, not measured].
+    Teardown and clearing are separate cmdlets: Disable-SfosHAConfiguration tears down a running
+    cluster (<DisableHA/>), Reset-SfosHAConfiguration clears a configured-but-not-yet-formed
+    setup (<HA_Interactive_Reset/>). This cmdlet does not accept pipeline input: an HA singleton
+    cannot be safely round-tripped through Get-SfosHAConfiguration's output object.
 
 .PARAMETER Device
-    Value of the Sample's <Device> field. Its meaning is not established by either the
-    attribute table (which does not list it at all) or any live object; documented here only
-    because the Sample shows it as part of both <HA_Quick> and <HA_Interactive>.
+    The role this appliance takes: 'Active_Active', 'Active_Passive' (primary) or 'Auxilliary'
+    (the standby peer). This is the mode discriminator - a live cluster object carries it in
+    <Device> and has no separate mode element, so it is the only value that selects the cluster
+    type. The Sophos spelling 'Auxilliary' (double 'l') is the wire form and is kept deliberately.
 
 .PARAMETER NodeName
     Node name, 1-30 characters [doc, table mandatory].
@@ -2095,21 +2089,25 @@ between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session f
     None. Throws an exception if the request fails.
 
 .EXAMPLE
-    $pw = Read-Host -AsSecureString
-    Set-SfosHAConfiguration -HAConfigurationMode Active_Passive -Device 'unit1' -NodeName 'node1' `
-        -ClusterID 1 -Passphrase $pw -DedicatedLink 'PortB' -WhatIf
+    $pw = Read-Host -AsSecureString "HA passphrase (needs a special character)"
+    Initialize-SfosHAConfiguration -Device Auxilliary -NodeName node2 -DedicatedLink Port1 -Passphrase $pw -Session fw2
+    Initialize-SfosHAConfiguration -Device Active_Passive -NodeName node1 -ClusterID 1 -DedicatedLink Port1 -DedicatedLinkIPAddress '169.254.192.2' -Passphrase $pw -PeerAdministrationInterface Port3 -PeerAdministrationIPv4 '10.0.0.60' -Session fw1
+
+    Forms an interactive active-passive cluster: the auxiliary first, then the primary. The
+    dedicated link is a DMZ interface whose subnet holds the peer HA link IP.
 
 .EXAMPLE
-    Set-SfosHAConfiguration -Quick -Device Auxilliary -NodeName node2 -DedicatedLink Port4 -Passphrase (Read-Host -AsSecureString)
+    Initialize-SfosHAConfiguration -Quick -Device Auxilliary -NodeName node2 -DedicatedLink Port1 -Passphrase (Read-Host -AsSecureString)
+
+    QuickHA: the firewall auto-assigns the HA link IPs. Run the same for the primary with
+    -Device Active_Passive.
 
 .NOTES
     Minimum supported PowerShell version: 5.1
-    [RISK] Not executed against a live firewall - see .DESCRIPTION. Verified only by
-    shadowing Invoke-SfosApi in-session and confirming the captured request XML parses and
-    matches the field names documented above.
-    Table vs Sample field-name disagreement for this entity is close to total - see the
-    per-parameter notes above and the module's doc inventory. Nothing here should be treated
-    as more than documentation-faithful until it is run once against a real HA pair.
+    Verified live against two SFOS 22.0 appliances: both QuickHA and interactive active-passive
+    clusters were formed with this cmdlet and read back with Get-SfosHAConfiguration. Interactive
+    mode requires SSH allowed on the dedicated link's DMZ zone on BOTH appliances (see
+    .DESCRIPTION) and identical firmware on both, or the cluster does not form.
 
 .LINK
     https://docs.sophos.com/nsg/sophos-firewall/22.0/API/CONFIGURE/System%20Services/HAConfiguration/operations/HAConfiguration-HASettings.html
@@ -2117,14 +2115,9 @@ between firewalls, e.g. Get-SfosIPHost -Session $fw1 | New-SfosIPHost -Session f
 .LINK
     Get-SfosHAConfiguration
 #>
-function Set-SfosHAConfiguration {
+function Initialize-SfosHAConfiguration {
     [CmdletBinding(SupportsShouldProcess, DefaultParameterSetName = 'Interactive')]
     param(
-        # Primary-only; omitted for the Auxilliary role.
-        [Parameter(ParameterSetName = 'Interactive')]
-        [ValidateSet('Active_Active', 'Active_Passive', 'Auxilliary')]
-        [string]$HAConfigurationMode,
-
         # Drives the request shape: 'Auxilliary' nests DedicatedLink/Passphrase in <Auxilliary>,
         # the two active roles use the flat primary shape. 'Primary'/'Auxiliary' are rejected.
         [Parameter(Mandatory, ParameterSetName = 'Interactive')]
@@ -2195,7 +2188,7 @@ function Set-SfosHAConfiguration {
     $params = Resolve-SfosParameters -BoundParameters $PSBoundParameters
 
     if ($true) {
-        if (-not $PSCmdlet.ShouldProcess("HAConfigure on $($params.Firewall)", "Configure HA ($Device)")) {
+        if (-not $PSCmdlet.ShouldProcess("HAConfigure on $($params.Firewall)", "Initialize HA ($Device)")) {
             return
         }
 
@@ -2276,17 +2269,19 @@ function Set-SfosHAConfiguration {
 "@
         }
         else {
-            if (-not $HAConfigurationMode) { throw "-HAConfigurationMode is required for the '$Device' role." }
             if (-not $PSBoundParameters.ContainsKey('ClusterID')) { throw "-ClusterID is required for the '$Device' role." }
             if (-not $DedicatedLinkIPAddress) { throw "-DedicatedLinkIPAddress (the peer HA link IPv4) is required for the '$Device' role." }
+            # The wire carries the mode in <Device>; a live cluster object holds no <HAConfigurationMode>
+            # element, so it is not sent. An empty <PeerAdministrationList> matches the shape of a
+            # formed cluster when no peer administration is supplied.
+            $emptyPeerAdmin = if ($PeerAdministrationInterface -or $PeerAdministrationIPv4 -or $PeerAdministrationIPv6) { '' } else { "      <PeerAdministrationList></PeerAdministrationList>`n" }
             $inner = @"
 <Set operation="update">
   <HAConfigure>
     <HA_Interactive>
-      <HAConfigurationMode>$HAConfigurationMode</HAConfigurationMode>
       <Device>$deviceEsc</Device>
       <NodeName>$nodeNameEsc</NodeName>
-      <ClusterID>$ClusterID</ClusterID>
+$emptyPeerAdmin      <ClusterID>$ClusterID</ClusterID>
       <Passphrase>$passphraseEsc</Passphrase>
       <DedicatedLink>$dedicatedLinkEsc</DedicatedLink>
 $optionalFields    </HA_Interactive>
@@ -2319,7 +2314,7 @@ $optionalFields    </HA_Interactive>
 .DESCRIPTION
     Sends the documented <HA_Interactive_Reset/> toggle, clearing a configured (but not yet
     fully formed) HA setup and returning HAConfigure to its unconfigured state. Verified live:
-    it cleanly reverts a device that Set-SfosHAConfiguration has put into a primary or
+    it cleanly reverts a device that Initialize-SfosHAConfiguration has put into a primary or
     auxiliary role.
 
 .PARAMETER Session
@@ -2348,7 +2343,7 @@ $optionalFields    </HA_Interactive>
     Reset-SfosHAConfiguration
 
 .LINK
-    Set-SfosHAConfiguration
+    Initialize-SfosHAConfiguration
 #>
 function Reset-SfosHAConfiguration {
     [CmdletBinding(SupportsShouldProcess)]
@@ -2409,7 +2404,7 @@ function Reset-SfosHAConfiguration {
     Disable-SfosHAConfiguration
 
 .LINK
-    Set-SfosHAConfiguration
+    Initialize-SfosHAConfiguration
 #>
 function Disable-SfosHAConfiguration {
     [CmdletBinding(SupportsShouldProcess)]
@@ -2434,7 +2429,8 @@ function Disable-SfosHAConfiguration {
         throw "Failed to disable HAConfigure: $($_.Exception.Message)"
     }
 
-    Assert-SfosApiReturnSuccess -Xml ([xml]$response.Content) -ObjectName 'HA_Interactive' -Action 'update' -Target 'HA (disable)'
+    # Measured: the disable status lands at /Response/DisableHA/Status, not under HA_Interactive.
+    Assert-SfosApiReturnSuccess -Xml ([xml]$response.Content) -ObjectName 'DisableHA' -Action 'update' -Target 'HA (disable)'
 }
 
 #endregion

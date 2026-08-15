@@ -10,7 +10,7 @@ The cmdlets involved:
 
 | Cmdlet | Role |
 |---|---|
-| `Set-SfosHAConfiguration` | Puts an appliance into a primary or auxiliary role (Quick or interactive) |
+| `Initialize-SfosHAConfiguration` | Puts an appliance into a primary or auxiliary role (Quick or interactive) |
 | `Get-SfosHAConfiguration` | Reads the current HA state |
 | `Reset-SfosHAConfiguration` | Clears a configured-but-not-yet-formed HA setup back to unconfigured |
 | `Disable-SfosHAConfiguration` | Turns off a running HA cluster |
@@ -27,11 +27,17 @@ without complaint, and the cluster then silently never forms.
    not form. The API will apply the HA config on each node and answer success; the peers
    simply never pair. Verify the firmware version on both before starting.
 3. **A dedicated HA-link interface on each appliance.** In interactive mode this link must
-   be a **DMZ, LAG, VLAN, or unbound** interface — a bound physical port (one that already
-   carries a zone) is rejected with `501`. **QuickHA additionally accepts an unbound
+   be a **DMZ, LAG, or VLAN** interface carrying a subnet (the peer HA link IP sits in it) —
+   a bound physical port is rejected with `501`. **QuickHA additionally accepts an unbound
    physical port**, which is the easiest link to arrange in a small lab (see
    [step 1](#step-1-free-the-ha-link-port-if-it-is-a-physical-port)).
-4. **The same admin credentials** reachable on both appliances' API port (4444 by default).
+4. **Interactive mode: SSH allowed on the HA-link zone, on BOTH appliances.** The HA sync
+   runs over SSH on the dedicated link. If the link is a DMZ interface, the DMZ zone must
+   list SSH under **Administration > Appliance Access** on *both* nodes. Measured: a missing
+   SSH-on-DMZ entry on the peer makes the primary write answer **`556` (operation failed)** —
+   the config is valid but the cluster cannot form. QuickHA is not affected (it manages its
+   own link).
+5. **The same admin credentials** reachable on both appliances' API port (4444 by default).
 
 Connect to both appliances up front and keep the two sessions side by side:
 
@@ -64,7 +70,7 @@ port you intend to use for the HA link on **both** appliances before configuring
 ```powershell
 $pass = Read-Host -AsSecureString "HA passphrase (must contain a special character)"
 
-Set-SfosHAConfiguration -Session fw2 `
+Initialize-SfosHAConfiguration -Session fw2 `
     -Quick `
     -Device Auxilliary `
     -NodeName "FW2-Aux" `
@@ -82,7 +88,7 @@ Use the **same passphrase and the same `-DedicatedLink` interface name** as the 
 and pick the active role you want the cluster to run in:
 
 ```powershell
-Set-SfosHAConfiguration -Session fw1 `
+Initialize-SfosHAConfiguration -Session fw1 `
     -Quick `
     -Device Active_Passive `
     -NodeName "FW1-Primary" `
@@ -116,7 +122,7 @@ link and passphrase (interactive auxiliary uses a nested request shape internall
 the cmdlet handles for you):
 
 ```powershell
-Set-SfosHAConfiguration -Session fw2 `
+Initialize-SfosHAConfiguration -Session fw2 `
     -Device Auxilliary `
     -NodeName "FW2-Aux" `
     -DedicatedLink "PortB" `
@@ -126,8 +132,7 @@ Set-SfosHAConfiguration -Session fw2 `
 The **primary** node carries the full configuration:
 
 ```powershell
-Set-SfosHAConfiguration -Session fw1 `
-    -HAConfigurationMode Active_Passive `
+Initialize-SfosHAConfiguration -Session fw1 `
     -Device Active_Passive `
     -NodeName "FW1-Primary" `
     -ClusterID 1 `
@@ -144,7 +149,12 @@ Set-SfosHAConfiguration -Session fw1 `
 
 Key points, all measured against the firmware:
 
-- **`-DedicatedLinkIPAddress` is the _peer's_ HA-link IPv4**, not this appliance's.
+- **The HA-link zone must allow SSH on both appliances** (see [prerequisite 4](#prerequisites)).
+  A missing SSH-on-DMZ entry on the peer is the measured cause of a `556` on the primary write.
+- **`-Device` is the mode discriminator** (`Active_Passive`/`Active_Active`/`Auxilliary`); there
+  is no separate mode parameter.
+- **`-DedicatedLinkIPAddress` is the _peer's_ HA-link IPv4**, not this appliance's, and sits in
+  the DMZ link's subnet.
 - `-ClusterID` is `0–63`; both nodes must share the same value.
 - `-KeepAliveInterval` is `250–500` ms, `-KeepAliveAttempts` is `16–24`.
 - `-MonitorPort` and the `-PeerAdministration*` fields are optional; the peer-administration
@@ -182,6 +192,7 @@ paired" case that a firmware mismatch produces.
 
 | Symptom | Cause | Fix |
 |---|---|---|
+| `556` (operation failed) on the interactive primary write | SSH is not allowed on the HA-link (DMZ) zone on one of the appliances — the HA sync over the link cannot establish | Allow SSH for the DMZ zone under Administration > Appliance Access on **both** nodes, then retry |
 | `501` naming `DedicatedLink` | The HA-link port is a bound physical interface | Unbind it, or use a DMZ/LAG/VLAN interface; QuickHA accepts an unbound physical port |
 | `501` naming `Passphrase`/`DedicatedLink` on an auxiliary | — | The cmdlet already emits the required nested shape for `-Device Auxilliary`; make sure you passed `Auxilliary`, not `Primary`/`Auxiliary` |
 | Config applies (success) but the cluster never forms | Firmware mismatch between the two appliances | Bring both to the same firmware build, then reset both and reconfigure |

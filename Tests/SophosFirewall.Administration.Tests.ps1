@@ -9,12 +9,13 @@
     Tests cmdlet structure and, above all, the XML actually sent to the firewall.
     Invoke-SfosApi is always mocked; no test touches a real firewall.
 
-    Coverage: module loading/manifest agreement and existence of all 26 exported
-    functions; New-SfosSNMPCommunity XML generation; the measured Name/Location/
-    ContactPerson mandatory-field guard on Set-SfosSNMPAgentConfiguration; the partial
-    (single-field) update shape of Set-SfosMessages; the shared status-parsing error
-    paths (5xx throws, login failure throws, "No. of records Zero." yields @()); and
-    the -Session parameter against a named, non-default session.
+    Coverage: module loading/manifest agreement and existence of all 29 exported
+    functions; New-SfosSNMPCommunity XML generation; New-SfosLocalServiceACL XML
+    generation; the measured Name/Location/ContactPerson mandatory-field guard on
+    Set-SfosSNMPAgentConfiguration; the partial (single-field) update shape of
+    Set-SfosMessages; the shared status-parsing error paths (5xx throws, login
+    failure throws, "No. of records Zero." yields @()); and the -Session parameter
+    against a named, non-default session.
 
 .NOTES
     Minimum supported PowerShell version: 5.1
@@ -47,11 +48,11 @@ Describe 'Module Loading' {
         Get-Module SophosFirewall.Core | Should -Not -BeNullOrEmpty
     }
 
-    It 'Should export exactly 26 functions' {
-        (Get-Module SophosFirewall.Administration).ExportedFunctions.Count | Should -Be 26
+    It 'Should export exactly 29 functions' {
+        (Get-Module SophosFirewall.Administration).ExportedFunctions.Count | Should -Be 29
     }
 
-    It 'Manifest FunctionsToExport should list exactly 26 functions, matching the loaded module' {
+    It 'Manifest FunctionsToExport should list exactly 29 functions, matching the loaded module' {
         $modulesDir = Join-Path (Split-Path -Parent $PSScriptRoot) 'Modules'
         $manifestPath = Join-Path $modulesDir 'SophosFirewall.Administration\SophosFirewall.Administration.psd1'
 
@@ -64,7 +65,7 @@ Describe 'Module Loading' {
             $env:PSModulePath = $originalModulePath
         }
 
-        $manifest.ExportedFunctions.Count | Should -Be 26
+        $manifest.ExportedFunctions.Count | Should -Be 29
     }
 
     It 'Every documented function exists' {
@@ -72,12 +73,13 @@ Describe 'Module Loading' {
             'Get-SfosAdminSettings', 'Get-SfosApplianceAccess', 'Get-SfosLocalServiceACL',
             'Get-SfosMessages', 'Get-SfosNotification', 'Get-SfosSNMPAgentConfiguration',
             'Get-SfosSNMPCommunity', 'Get-SfosSNMPv3User', 'Get-SfosTime',
-            'New-SfosSNMPCommunity', 'New-SfosSNMPv3User', 'Remove-SfosSNMPCommunity',
+            'New-SfosLocalServiceACL', 'New-SfosSNMPCommunity', 'New-SfosSNMPv3User',
+            'Remove-SfosLocalServiceACL', 'Remove-SfosSNMPCommunity',
             'Remove-SfosSNMPv3User', 'Set-SfosAdminPasswordComplexity', 'Set-SfosApplianceAccess',
-            'Set-SfosDefaultLanguage', 'Set-SfosHostname', 'Set-SfosLoginDisclaimer',
-            'Set-SfosLoginSecurity', 'Set-SfosMessages', 'Set-SfosNotification',
-            'Set-SfosSNMPAgentConfiguration', 'Set-SfosSNMPCommunity', 'Set-SfosSNMPv3User',
-            'Set-SfosTime', 'Set-SfosWebAdminSettings'
+            'Set-SfosDefaultLanguage', 'Set-SfosHostname', 'Set-SfosLocalServiceACL',
+            'Set-SfosLoginDisclaimer', 'Set-SfosLoginSecurity', 'Set-SfosMessages',
+            'Set-SfosNotification', 'Set-SfosSNMPAgentConfiguration', 'Set-SfosSNMPCommunity',
+            'Set-SfosSNMPv3User', 'Set-SfosTime', 'Set-SfosWebAdminSettings'
         )
         foreach ($name in $expected) {
             Get-Command $name -Module SophosFirewall.Administration -ErrorAction SilentlyContinue |
@@ -112,6 +114,42 @@ Describe 'New-SfosSNMPCommunity - XML generation' {
             $InnerXml -match '<Name>monitoring-ro</Name>' -and
             $InnerXml -match 'p4ssStr1ng'
         }
+    }
+}
+
+Describe 'New-SfosLocalServiceACL - XML generation' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    BeforeEach {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Administration -MockWith {
+            [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><LocalServiceACL><Status code="200">Configuration applied successfully.</Status></LocalServiceACL></Response>' }
+        }
+    }
+
+    It 'sends an add operation carrying the rule name and service' {
+        New-SfosLocalServiceACL -RuleName 'AllowLANHttps' -Service HTTPS -SourceZone 'LAN' -Action accept @conn -Confirm:$false
+
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Administration -Times 1 -Exactly -ParameterFilter {
+            $InnerXml -match '<Set operation="add">' -and
+            $InnerXml -match '<LocalServiceACL>' -and
+            $InnerXml -match '<RuleName>AllowLANHttps</RuleName>' -and
+            $InnerXml -match '<Services><Service>HTTPS</Service></Services>' -and
+            $InnerXml -match '<SourceZone>LAN</SourceZone>' -and
+            $InnerXml -match '<Action>accept</Action>'
+        }
+    }
+
+    It 'throws client-side when no -Service is supplied' {
+        { New-SfosLocalServiceACL -RuleName 'NoService' -Service @() @conn -Confirm:$false } |
+            Should -Throw '*empty array*'
     }
 }
 

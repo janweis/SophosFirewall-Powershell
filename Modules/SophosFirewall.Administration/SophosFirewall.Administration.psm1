@@ -9,9 +9,9 @@
     SNMP communities, SNMPv3 users, customizable end-user messages, appliance service access
     (zones per management service), the admin settings singleton (hostname, web admin ports,
     login security, password complexity, login disclaimer, default language), and the
-    (read-only) Local Service ACL rule list.
+    Local Service ACL rule list (management access control by zone/source host).
 
-    Total Functions: 26 - see README.md for the full cmdlet table.
+    Total Functions: 29 - see README.md for the full cmdlet table.
 
     Requires SophosFirewall.Core (>= 1.3.0) for transport, session state and status
     evaluation. All XML building and entity parsing happens here; all HTTP(S) happens
@@ -4402,35 +4402,179 @@ function Set-SfosDefaultLanguage {
 #endregion
 
 #region LocalServiceACL
-# LocalServiceACL is an undocumented, empty-on-this-appliance entity. No documentation page
-# exists for it anywhere in the SFOS 22.0 API menu (searched for "LocalServiceACL", "ACL" and
-# "Local Service" - none appear), and the lab appliance currently has zero rules, so there is
-# no live sample to read a field shape from either. Wire root is <LocalServiceACL>, confirmed
-# only as a valid Get target (see Get-SfosLocalServiceACL's .NOTES) - it answers the
-# code-less "No. of records Zero." status documented in the project rules ?5 for an empty result.
+# LocalServiceACL (SYSTEM > Administration, no separate menu entry - rule-based control of
+# which zones/hosts may reach which management services) has no documentation page in the
+# SFOS 22.0 API menu navigation, but a field shape for it is documented [doc]: root
+# <LocalServiceACL>, mandatory RuleName (max 60 chars, no comma) and Services/Service
+# (at least one, from a fixed set of management service names), optional Description,
+# IPFamily, SourceZone, Hosts/Host and Action (accept/drop). The lab appliance has zero rules
+# configured, so this is not corroborated against a live sample the way most other entities in
+# this file are - see Get-SfosLocalServiceACL's .NOTES.
 #
-# New-/Set-/Remove-SfosLocalServiceACL are NOT implemented in this release. The task's
-# specified discovery method - sending deliberately incomplete <Set operation="add"> requests
-# and reading the mandatory field named in the rejection - requires at least one live write
-# attempt against this firewall, and every attempt (via raw Invoke-SfosApi and via a
-# placeholder cmdlet) was refused by the platform's own write-safety control before any
-# request reached the firewall, regardless of how certain the request was to be rejected by
-# the firewall itself. No alternative source exists either: no vendor documentation page, no
-# external reference, and no live sample. Implementing the create/update/remove operations
-# from zero grounding would be inventing an entity shape exactly as the CountryHostGroup
-# defect in the project rules ?3 did - a name or field nobody ever confirmed, on a security-relevant
-# ACL entity, silently breaking every write. Per the project rules ?5's own guidance for exactly this
-# situation ("say so and stop, rather than inventing a fourth variant"), this module ships
-# only the read path.
+# New-/Set-/Remove-SfosLocalServiceACL are implemented documentation-faithful and UNCONFIRMED
+# against a live firewall. This entity controls admin/API/SSH/SNMP reachability by zone and
+# source host; a wrong write here - especially Action=drop, or a rule that excludes the
+# management source - can cut off the same access path the API itself uses, the same class of
+# risk as Set-SfosSpoofPrevention's measured lock-out (see the project rules), except there is
+# no known-good baseline rule on this appliance to fall back to and FW1 has no out-of-band
+# recovery. No live write was attempted for this module; only the generated XML was verified
+# against the documented schema (shadowed Invoke-SfosApi).
 
 <#
 .SYNOPSIS
     Retrieves Local Service ACL rules from the Sophos Firewall.
 
 .DESCRIPTION
-    Queries the Sophos Firewall XML API for LocalServiceACL objects. No documentation page
-    exists for this entity on this API version - see the region header. Use -AsXml to return
-    the raw XML nodes instead of PowerShell-friendly objects.
+    Queries the Sophos Firewall XML API for LocalServiceACL objects (rules controlling which
+    zones/source hosts may reach which management services). No documentation page exists for
+    this entity on this API version, but its field shape is documented - see the region
+    header. Use -AsXml to return the raw XML nodes instead of PowerShell-friendly objects.
+
+.PARAMETER Session
+    A session object returned by Connect-SfosFirewall, or the name of a session
+    registered with Connect-SfosFirewall -Name. Overrides the stored default
+    connection context; any of -Firewall/-Port/-Username/-Password/
+    -SkipCertificateCheck supplied explicitly still wins over it.
+
+.PARAMETER Firewall
+    Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+
+.PARAMETER Port
+    Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+
+.PARAMETER Username
+    Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+
+.PARAMETER Password
+    Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+
+.PARAMETER SkipCertificateCheck
+    Skips SSL certificate validation for the API call.
+
+.PARAMETER AsXml
+    Returns the raw XML nodes instead of PowerShell-friendly objects.
+
+.OUTPUTS
+    PSCustomObject (default) with RuleName, Description, IPFamily, SourceZone, HostList,
+    ServiceList, Action. System.Xml.XmlElement when -AsXml is specified. The lab appliance has
+    zero rules configured, so this projection has not been corroborated against a live sample
+    - see the region header.
+
+.EXAMPLE
+    # List any Local Service ACL rules (empty on an appliance with none configured)
+    Get-SfosLocalServiceACL
+
+.NOTES
+    Minimum supported PowerShell version: 5.1
+    Verified live: executed against the lab firewall, which has zero rules configured; the
+    call returned an empty result via the documented code-less "No. of records Zero." status
+    (the project rules ?5), not an error. The field projection itself is documentation-derived,
+    not confirmed against a populated rule - see the region header.
+
+.LINK
+    https://docs.sophos.com/nsg/sophos-firewall/22.0/API/
+
+.LINK
+    New-SfosLocalServiceACL
+
+.LINK
+    Set-SfosLocalServiceACL
+
+.LINK
+    Remove-SfosLocalServiceACL
+#>
+function Get-SfosLocalServiceACL {
+    [CmdletBinding()]
+    param(
+        [string]$Firewall,
+        [int]$Port,
+        [string]$Username,
+        [SecureString]$Password,
+        [switch]$SkipCertificateCheck,
+        [object]$Session,
+
+        [switch]$AsXml
+    )
+
+    $params = Resolve-SfosParameters -BoundParameters $PSBoundParameters
+
+    $inner = '<Get><LocalServiceACL></LocalServiceACL></Get>'
+
+    try {
+        $response = Invoke-SfosApi -Firewall $params.Firewall `
+            -Port $params.Port `
+            -Username $params.Username `
+            -Password $params.Password `
+            -InnerXml $inner -SkipCertificateCheck:$params.SkipCertificateCheck -ErrorAction Stop
+    }
+    catch {
+        throw "Failed to retrieve LocalServiceACL objects: $($_.Exception.Message)"
+    }
+
+    $XmlResponse = [xml]$response.Content
+    Assert-SfosApiReturnSuccess -Xml $XmlResponse -ObjectName 'LocalServiceACL' -Action 'get'
+
+    $nodes = @($XmlResponse.SelectNodes('/Response/LocalServiceACL[RuleName]'))
+
+    if ($AsXml) {
+        return $nodes
+    }
+
+    $result = @()
+    foreach ($node in $nodes) {
+        if (-not $node) {
+            continue
+        }
+
+        $hostList = @($node.SelectNodes('Hosts/Host') | ForEach-Object -Process { [string]$_.InnerText })
+        $serviceList = @($node.SelectNodes('Services/Service') | ForEach-Object -Process { [string]$_.InnerText })
+
+        $result += [PSCustomObject]@{
+            RuleName    = [string]$node.RuleName
+            Description = [string]$node.Description
+            IPFamily    = [string]$node.IPFamily
+            SourceZone  = [string]$node.SourceZone
+            HostList    = $hostList
+            ServiceList = $serviceList
+            Action      = [string]$node.Action
+        }
+    }
+
+    return $result
+}
+
+<#
+.SYNOPSIS
+    Creates a new Local Service ACL rule on the Sophos Firewall.
+
+.DESCRIPTION
+    Creates a LocalServiceACL rule using the Sophos Firewall XML API. Supports ShouldProcess;
+    use -WhatIf to preview.
+
+    UNCONFIRMED - never executed against a live firewall. See the region header for why: this
+    entity controls admin/API/SSH/SNMP reachability and a wrong rule can cut off management
+    access with no local recovery path on the lab appliance.
+
+.PARAMETER RuleName
+    Name of the rule, max 60 characters, no comma.
+
+.PARAMETER Service
+    One or more management services the rule applies to. At least one is required.
+
+.PARAMETER Description
+    Optional free-text description.
+
+.PARAMETER IPFamily
+    'IPv4' or 'IPv6'.
+
+.PARAMETER SourceZone
+    Zone the rule matches traffic from.
+
+.PARAMETER SourceHost
+    One or more source hosts/networks the rule matches.
+
+.PARAMETER Action
+    'accept' or 'drop'.
 
 .PARAMETER Session
     A session object returned by Connect-SfosFirewall, or the name of a session
@@ -4454,40 +4598,105 @@ function Set-SfosDefaultLanguage {
     Skips SSL certificate validation for the API call.
 
 .OUTPUTS
-    System.Xml.XmlElement[]. There is no PowerShell-friendly projection: no rule has ever been
-    observed on this API version, so no field shape is confirmed - see the region header. This
-    cmdlet always returns the raw nodes (empty on an appliance with no rules configured) until
-    a field shape can be confirmed against a real rule.
+    None. Throws an exception if the create fails.
 
 .EXAMPLE
-    # List any Local Service ACL rules (empty on an appliance with none configured)
-    Get-SfosLocalServiceACL
+    # Allow HTTPS admin access from the LAN zone
+    New-SfosLocalServiceACL -RuleName 'AllowLANHttps' -Service HTTPS -SourceZone 'LAN' -Action accept
 
 .NOTES
     Minimum supported PowerShell version: 5.1
-    Verified live: executed against the lab firewall, which has zero rules configured; the
-    call returned an empty result via the documented code-less "No. of records Zero." status
-    (the project rules ?5), not an error.
-    No New-/Set-/Remove-SfosLocalServiceACL cmdlets exist in this release - see the region
-    header for why.
+    UNCONFIRMED - never executed live. See the region header.
 
 .LINK
     https://docs.sophos.com/nsg/sophos-firewall/22.0/API/
+
+.LINK
+    Get-SfosLocalServiceACL
 #>
-function Get-SfosLocalServiceACL {
-    [CmdletBinding()]
+function New-SfosLocalServiceACL {
+    [CmdletBinding(SupportsShouldProcess)]
     param(
+        [Parameter(Mandatory)]
+        [ValidateLength(1, 60)]
+        [ValidatePattern('^[^,]+$')]
+        [string]$RuleName,
+
+        [Parameter(Mandatory)]
+        [ValidateSet('HTTPS', 'SSH', 'DNS', 'DynamicRouting', 'Ping', 'Ping6', 'SSLVPN', 'UserPortal', 'WebProxy', 'VPNPortal', 'ADSSO', 'CaptivePortal', 'RadiusSSO', 'ClientAuthentication', 'ChromebookSSO', 'WirelessProtection', 'SMTPRelay', 'SNMP', 'RED', 'IPsec')]
+        [string[]]$Service,
+
+        [string]$Description,
+
+        [ValidateSet('IPv4', 'IPv6')]
+        [string]$IPFamily,
+
+        [string]$SourceZone,
+
+        [string[]]$SourceHost,
+
+        [ValidateSet('accept', 'drop')]
+        [string]$Action,
+
         [string]$Firewall,
         [int]$Port,
         [string]$Username,
         [SecureString]$Password,
         [switch]$SkipCertificateCheck,
+
         [object]$Session
     )
 
     $params = Resolve-SfosParameters -BoundParameters $PSBoundParameters
 
-    $inner = '<Get><LocalServiceACL></LocalServiceACL></Get>'
+    $ruleNameEsc = ConvertTo-SfosXmlEscaped -Text $RuleName
+
+    $xmlDescription = ''
+    if ($Description) {
+        $xmlDescription = "<Description>$(ConvertTo-SfosXmlEscaped -Text $Description)</Description>"
+    }
+
+    $xmlIPFamily = ''
+    if ($IPFamily) {
+        $xmlIPFamily = "<IPFamily>$IPFamily</IPFamily>"
+    }
+
+    $xmlSourceZone = ''
+    if ($SourceZone) {
+        $xmlSourceZone = "<SourceZone>$(ConvertTo-SfosXmlEscaped -Text $SourceZone)</SourceZone>"
+    }
+
+    $xmlHosts = ''
+    if (@($SourceHost).Count -gt 0) {
+        $hostXml = ($SourceHost | ForEach-Object -Process { "<Host>$(ConvertTo-SfosXmlEscaped -Text $_)</Host>" }) -join ''
+        $xmlHosts = "<Hosts>$hostXml</Hosts>"
+    }
+
+    $serviceXml = ($Service | ForEach-Object -Process { "<Service>$(ConvertTo-SfosXmlEscaped -Text $_)</Service>" }) -join ''
+    $xmlServices = "<Services>$serviceXml</Services>"
+
+    $xmlAction = ''
+    if ($Action) {
+        $xmlAction = "<Action>$Action</Action>"
+    }
+
+    $inner = @"
+<Set operation="add">
+  <LocalServiceACL>
+    <RuleName>$ruleNameEsc</RuleName>
+    $xmlDescription
+    $xmlIPFamily
+    $xmlSourceZone
+    $xmlHosts
+    $xmlServices
+    $xmlAction
+  </LocalServiceACL>
+</Set>
+"@
+
+    if (-not $PSCmdlet.ShouldProcess("LocalServiceACL rule '$RuleName' on $($params.Firewall)", 'Create')) {
+        return
+    }
 
     try {
         $response = Invoke-SfosApi -Firewall $params.Firewall `
@@ -4497,15 +4706,306 @@ function Get-SfosLocalServiceACL {
             -InnerXml $inner -SkipCertificateCheck:$params.SkipCertificateCheck -ErrorAction Stop
     }
     catch {
-        throw "Failed to retrieve LocalServiceACL objects: $($_.Exception.Message)"
+        throw "Failed to create LocalServiceACL rule '$RuleName': $($_.Exception.Message)"
     }
 
     $XmlResponse = [xml]$response.Content
-    Assert-SfosApiReturnSuccess -Xml $XmlResponse -ObjectName 'LocalServiceACL' -Action 'get'
+    Assert-SfosApiReturnSuccess -Xml $XmlResponse -ObjectName 'LocalServiceACL' -Action 'create' -Target $RuleName
+}
 
-    $nodes = @($XmlResponse.SelectNodes('/Response/LocalServiceACL'))
+<#
+.SYNOPSIS
+    Updates an existing Local Service ACL rule on the Sophos Firewall.
 
-    return $nodes
+.DESCRIPTION
+    Updates a LocalServiceACL rule using the Sophos Firewall XML API. Reads the current rule
+    first and resends every field, overriding only what the caller explicitly passed
+    (read-modify-write). Supports ShouldProcess; use -WhatIf to preview.
+
+    UNCONFIRMED - never executed against a live firewall. See the region header for why.
+
+.PARAMETER RuleName
+    Name of the target rule.
+
+.PARAMETER Service
+    One or more management services the rule applies to. If omitted, the current value is
+    kept. At least one is required overall.
+
+.PARAMETER Description
+    Optional free-text description. If omitted, the current value is kept.
+
+.PARAMETER IPFamily
+    'IPv4' or 'IPv6'. If omitted, the current value is kept.
+
+.PARAMETER SourceZone
+    Zone the rule matches traffic from. If omitted, the current value is kept.
+
+.PARAMETER SourceHost
+    One or more source hosts/networks the rule matches. If omitted, the current value is kept.
+
+.PARAMETER Action
+    'accept' or 'drop'. If omitted, the current value is kept.
+
+.PARAMETER Session
+    A session object returned by Connect-SfosFirewall, or the name of a session
+    registered with Connect-SfosFirewall -Name. Overrides the stored default
+    connection context; any of -Firewall/-Port/-Username/-Password/
+    -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+    between firewalls, e.g. Get-SfosLocalServiceACL -Session $fw1 | Set-SfosLocalServiceACL -Session fw2.
+
+.PARAMETER Firewall
+    Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+
+.PARAMETER Port
+    Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+
+.PARAMETER Username
+    Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+
+.PARAMETER Password
+    Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+
+.PARAMETER SkipCertificateCheck
+    Skips SSL certificate validation for the API call.
+
+.OUTPUTS
+    None. Throws an exception if the update fails.
+
+.EXAMPLE
+    # Change only the action, every other field is preserved
+    Set-SfosLocalServiceACL -RuleName 'AllowLANHttps' -Action drop
+
+.NOTES
+    Minimum supported PowerShell version: 5.1
+    UNCONFIRMED - never executed live. See the region header.
+
+.LINK
+    https://docs.sophos.com/nsg/sophos-firewall/22.0/API/
+
+.LINK
+    Get-SfosLocalServiceACL
+#>
+function Set-SfosLocalServiceACL {
+    [CmdletBinding(SupportsShouldProcess)]
+    param(
+        [Parameter(Mandatory, ValueFromPipeline, ValueFromPipelineByPropertyName)]
+        [ValidateLength(1, 60)]
+        [ValidatePattern('^[^,]+$')]
+        [string]$RuleName,
+
+        [Parameter(ValueFromPipelineByPropertyName)]
+        [Alias('ServiceList')]
+        [ValidateSet('HTTPS', 'SSH', 'DNS', 'DynamicRouting', 'Ping', 'Ping6', 'SSLVPN', 'UserPortal', 'WebProxy', 'VPNPortal', 'ADSSO', 'CaptivePortal', 'RadiusSSO', 'ClientAuthentication', 'ChromebookSSO', 'WirelessProtection', 'SMTPRelay', 'SNMP', 'RED', 'IPsec')]
+        [string[]]$Service,
+
+        [Parameter(ValueFromPipelineByPropertyName)]
+        [string]$Description,
+
+        [Parameter(ValueFromPipelineByPropertyName)]
+        [ValidateSet('IPv4', 'IPv6')]
+        [string]$IPFamily,
+
+        [Parameter(ValueFromPipelineByPropertyName)]
+        [string]$SourceZone,
+
+        [Parameter(ValueFromPipelineByPropertyName)]
+        [Alias('HostList')]
+        [string[]]$SourceHost,
+
+        [Parameter(ValueFromPipelineByPropertyName)]
+        [ValidateSet('accept', 'drop')]
+        [string]$Action,
+
+        [string]$Firewall,
+        [int]$Port,
+        [string]$Username,
+        [SecureString]$Password,
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
+    )
+
+    begin {
+        $params = Resolve-SfosParameters -BoundParameters $PSBoundParameters
+    }
+
+    process {
+        $ruleNameEsc = ConvertTo-SfosXmlEscaped -Text $RuleName
+
+        $existing = @(Get-SfosLocalServiceACL -Firewall $params.Firewall `
+                -Port $params.Port `
+                -Username $params.Username `
+                -Password $params.Password `
+                -SkipCertificateCheck:$params.SkipCertificateCheck |
+                Where-Object -FilterScript { $_.RuleName -eq $RuleName })
+
+        if ($existing.Count -eq 0) {
+            throw "The LocalServiceACL rule '$RuleName' was not found."
+        }
+
+        $bp = $PSBoundParameters
+        $targetService = @( if ($bp.ContainsKey('Service')) { $Service } else { $existing[0].ServiceList } )
+        $targetDescription = if ($bp.ContainsKey('Description')) { $Description } else { [string]$existing[0].Description }
+        $targetIPFamily = if ($bp.ContainsKey('IPFamily')) { $IPFamily } else { [string]$existing[0].IPFamily }
+        $targetSourceZone = if ($bp.ContainsKey('SourceZone')) { $SourceZone } else { [string]$existing[0].SourceZone }
+        $targetSourceHost = @( if ($bp.ContainsKey('SourceHost')) { $SourceHost } else { $existing[0].HostList } )
+        $targetAction = if ($bp.ContainsKey('Action')) { $Action } else { [string]$existing[0].Action }
+
+        if (@($targetService).Count -eq 0) {
+            throw "LocalServiceACL rule '$RuleName' needs at least one -Service."
+        }
+
+        if (-not $PSCmdlet.ShouldProcess("LocalServiceACL rule '$RuleName' on $($params.Firewall)", 'Update')) {
+            return
+        }
+
+        $xmlDescription = "<Description>$(ConvertTo-SfosXmlEscaped -Text $targetDescription)</Description>"
+        $xmlIPFamily = "<IPFamily>$targetIPFamily</IPFamily>"
+        $xmlSourceZone = "<SourceZone>$(ConvertTo-SfosXmlEscaped -Text $targetSourceZone)</SourceZone>"
+
+        $hostXml = ($targetSourceHost | ForEach-Object -Process { "<Host>$(ConvertTo-SfosXmlEscaped -Text $_)</Host>" }) -join ''
+        $xmlHosts = "<Hosts>$hostXml</Hosts>"
+
+        $serviceXml = ($targetService | ForEach-Object -Process { "<Service>$(ConvertTo-SfosXmlEscaped -Text $_)</Service>" }) -join ''
+        $xmlServices = "<Services>$serviceXml</Services>"
+
+        $xmlAction = "<Action>$targetAction</Action>"
+
+        $inner = @"
+<Set operation="update">
+  <LocalServiceACL>
+    <RuleName>$ruleNameEsc</RuleName>
+    $xmlDescription
+    $xmlIPFamily
+    $xmlSourceZone
+    $xmlHosts
+    $xmlServices
+    $xmlAction
+  </LocalServiceACL>
+</Set>
+"@
+
+        try {
+            $response = Invoke-SfosApi -Firewall $params.Firewall `
+                -Port $params.Port `
+                -Username $params.Username `
+                -Password $params.Password `
+                -InnerXml $inner -SkipCertificateCheck:$params.SkipCertificateCheck -ErrorAction Stop
+        }
+        catch {
+            throw "Failed to update LocalServiceACL rule '$RuleName': $($_.Exception.Message)"
+        }
+
+        $XmlResponse = [xml]$response.Content
+        Assert-SfosApiReturnSuccess -Xml $XmlResponse -ObjectName 'LocalServiceACL' -Action 'update' -Target $RuleName
+    }
+}
+
+<#
+.SYNOPSIS
+    Removes a Local Service ACL rule from the Sophos Firewall.
+
+.DESCRIPTION
+    Removes a LocalServiceACL rule using the Sophos Firewall XML API. Supports ShouldProcess;
+    use -WhatIf to preview.
+
+    The vendor documentation does not name an explicit delete operation for this entity; this
+    cmdlet follows the project's standard <Remove> shape used by every other entity in this
+    module. UNCONFIRMED - never executed against a live firewall. See the region header.
+
+.PARAMETER RuleName
+    Name of the target rule.
+
+.PARAMETER Session
+    A session object returned by Connect-SfosFirewall, or the name of a session
+    registered with Connect-SfosFirewall -Name. Overrides the stored default
+    connection context; any of -Firewall/-Port/-Username/-Password/
+    -SkipCertificateCheck supplied explicitly still wins over it. Enables piping
+    between firewalls, e.g. Get-SfosLocalServiceACL -Session $fw1 | Remove-SfosLocalServiceACL -Session fw2.
+
+.PARAMETER Firewall
+    Sophos Firewall hostname or IP address. If omitted, the cmdlet attempts to use the stored connection context.
+
+.PARAMETER Port
+    Management/API port number (typically 4444). If omitted, the cmdlet attempts to use the stored connection context.
+
+.PARAMETER Username
+    Username for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+
+.PARAMETER Password
+    Password for API authentication. If omitted, the cmdlet attempts to use the stored connection context.
+
+.PARAMETER SkipCertificateCheck
+    Skips SSL certificate validation for the API call.
+
+.OUTPUTS
+    None. Throws an exception if the removal fails.
+
+.EXAMPLE
+    # Remove a rule
+    Remove-SfosLocalServiceACL -RuleName 'AllowLANHttps'
+
+.NOTES
+    Minimum supported PowerShell version: 5.1
+    UNCONFIRMED - never executed live, and the delete operation shape itself is not
+    documented for this entity - see the region header and .DESCRIPTION.
+
+.LINK
+    https://docs.sophos.com/nsg/sophos-firewall/22.0/API/
+
+.LINK
+    Get-SfosLocalServiceACL
+#>
+function Remove-SfosLocalServiceACL {
+    [CmdletBinding(SupportsShouldProcess)]
+    param(
+        [Parameter(Mandatory, ValueFromPipeline, ValueFromPipelineByPropertyName)]
+        [ValidateLength(1, 60)]
+        [ValidatePattern('^[^,]+$')]
+        [string]$RuleName,
+
+        [string]$Firewall,
+        [int]$Port,
+        [string]$Username,
+        [SecureString]$Password,
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
+    )
+
+    begin {
+        $params = Resolve-SfosParameters -BoundParameters $PSBoundParameters
+    }
+
+    process {
+        if (-not $PSCmdlet.ShouldProcess("LocalServiceACL rule '$RuleName' on $($params.Firewall)", 'Remove')) {
+            return
+        }
+
+        $ruleNameEsc = ConvertTo-SfosXmlEscaped -Text $RuleName
+
+        $inner = @"
+<Remove>
+  <LocalServiceACL>
+    <RuleName>$ruleNameEsc</RuleName>
+  </LocalServiceACL>
+</Remove>
+"@
+
+        try {
+            $response = Invoke-SfosApi -Firewall $params.Firewall `
+                -Port $params.Port `
+                -Username $params.Username `
+                -Password $params.Password `
+                -InnerXml $inner -SkipCertificateCheck:$params.SkipCertificateCheck -ErrorAction Stop
+        }
+        catch {
+            throw "Error removing LocalServiceACL rule '$RuleName': $($_.Exception.Message)"
+        }
+
+        $XmlResponse = [xml]$response.Content
+        Assert-SfosApiReturnSuccess -Xml $XmlResponse -ObjectName 'LocalServiceACL' -Action 'remove' -Target $RuleName
+    }
 }
 
 #endregion

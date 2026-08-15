@@ -3,14 +3,15 @@
 ## Overview
 
 The **Administration** module provides PowerShell cmdlets for the **SYSTEM >
-Administration** area of the Sophos XGS / SFOS 22.0 API documentation. With 26
+Administration** area of the Sophos XGS / SFOS 22.0 API documentation. With 29
 exported functions, it manages mail server notification settings, SNMP agent
 configuration, system date/time, SNMP communities, SNMPv3 users,
 customizable end-user messages, the appliance service access matrix (which
 zones may reach which management service), the admin settings singleton
 (hostname, web admin/portal HTTPS ports, login security, password
 complexity, login disclaimer, default language), and Local Service ACL
-rules (read-only). Requires `SophosFirewall.Core` (minimum version 1.3.0).
+rules (management access by zone/source host/service). Requires
+`SophosFirewall.Core` (minimum version 1.3.0).
 
 **Several cmdlets in this module are access-critical**: a wrong value can
 make the appliance unreachable with no way to revert the change remotely.
@@ -40,8 +41,9 @@ Read the Known Limitations section below before using
   `Set-SfosAdminPasswordComplexity`, `Set-SfosLoginDisclaimer`,
   `Set-SfosHostname`, `Set-SfosDefaultLanguage` - each reading and resending
   the whole six-block singleton, changing only its own block
-- **Local Service ACL**: `Get-SfosLocalServiceACL` (read-only; no
-  documentation exists for this entity and no rule was ever observed - see
+- **Local Service ACL**: `Get-`/`New-`/`Set-`/`Remove-SfosLocalServiceACL`
+  for rules controlling which zones/source hosts may reach which management
+  services (`New`/`Set`/`Remove` are UNCONFIRMED - never executed live, see
   Known Limitations)
 - **API Integration**: Full integration with the Sophos XGS/SFOS firewall XML
   API
@@ -114,6 +116,8 @@ Set-SfosHostname -HostNameDesc 'Lab firewall'
 Set-SfosDefaultLanguage -DefaultConfigurationLanguage 'English'
 
 Get-SfosLocalServiceACL
+# UNCONFIRMED - never executed live, see Known Limitations before using these cmdlets.
+# New-SfosLocalServiceACL -RuleName 'AllowLANHttps' -Service HTTPS -SourceZone 'LAN' -Action accept
 ```
 
 ## Cmdlet Reference
@@ -145,7 +149,10 @@ Get-SfosLocalServiceACL
 | `Set-SfosLoginDisclaimer` | Updates the admin login disclaimer toggle |
 | `Set-SfosHostname` | Updates the appliance hostname/description |
 | `Set-SfosDefaultLanguage` | Updates the default configuration language |
-| `Get-SfosLocalServiceACL` | Reads Local Service ACL rules (read-only) |
+| `Get-SfosLocalServiceACL` | Reads Local Service ACL rules |
+| `New-SfosLocalServiceACL` | Creates a Local Service ACL rule (UNCONFIRMED) |
+| `Set-SfosLocalServiceACL` | Updates a Local Service ACL rule (UNCONFIRMED) |
+| `Remove-SfosLocalServiceACL` | Removes a Local Service ACL rule (UNCONFIRMED) |
 
 ## Known Limitations
 
@@ -241,19 +248,19 @@ Get-SfosLocalServiceACL
   their status path was measured on that call, but none of the three has
   been run itself. Do not treat this incident as resolved; investigate
   appliance reachability before any further write to this firewall.
-- **`New-`/`Set-`/`Remove-SfosLocalServiceACL` are not implemented.** This
-  entity has no documentation page anywhere in the SFOS 22.0 API menu and
-  the lab appliance has zero rules configured, so there is no live sample to
-  read a field shape from either. The intended discovery method - sending
-  deliberately incomplete, guaranteed-to-be-rejected create requests and
-  reading the mandatory field named in the error - requires at least one
-  live write attempt, and every attempt was refused by the platform's own
-  write-safety control before any request reached the firewall. Implementing
-  create/update/remove from zero grounding would mean inventing field names
-  for a security-relevant ACL entity, the same class of mistake the
-  `CountryHostGroup` incident documents elsewhere in this project - so only
-  the read path ships. `Get-SfosLocalServiceACL` always returns raw XML
-  nodes (never a `PSCustomObject`) for the same reason.
+- **`New-`/`Set-`/`Remove-SfosLocalServiceACL` were never executed against a
+  live firewall.** This entity has no documentation page anywhere in the
+  SFOS 22.0 API menu, though a field shape for it (`RuleName`, `Services`
+  mandatory; `Description`, `IPFamily`, `SourceZone`, `Hosts`, `Action`
+  optional) is documented. The lab appliance has zero rules configured, so
+  none of this is corroborated against a live sample. This entity controls
+  admin/API/SSH/SNMP reachability by zone and source host - a wrong write
+  (especially `Action drop`, or a rule excluding the management source) can
+  cut off the same access path the API itself uses, with no out-of-band
+  recovery on this lab, the same class of risk as `Set-SfosSpoofPrevention`'s
+  measured lock-out elsewhere in this project. All three cmdlets are shipped
+  documentation-faithful and UNCONFIRMED; only the generated request XML was
+  verified, by shadowing `Invoke-SfosApi` (no network call).
 
 ## License
 

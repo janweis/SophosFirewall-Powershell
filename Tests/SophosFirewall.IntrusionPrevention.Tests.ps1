@@ -9,14 +9,15 @@
     Tests for cmdlet structure and, above all, the XML actually sent to the firewall.
     Invoke-SfosApi is always mocked; no test touches a real firewall.
 
-    Coverage: module loading/manifest agreement and existence of all 29 exported
+    Coverage: module loading/manifest agreement and existence of all 30 exported
     functions; the IPSSwitch/IPSFullSignaturePack code-less Status-as-data special case
     (measured live: <IPSSwitch><Status>Enable</Status></IPSSwitch> with no code attribute
     is a data field, not an API status); XML-generation checks for New-SfosIPSPolicy
     (including a nested Rule built via New-SfosIPSPolicyRule), New-SfosDoSBypassRule and
     Set-SfosIPSSwitch; XML escaping; the DoSBypassRules 'any'-to-'*' netmask translation on
-    Remove; and the shared error paths (5xx throws, a failed login with no entity status
-    throws, "No. of records Zero." yields @()).
+    Remove; Import-SfosTrustedMACList's Upload_TrustedMAC multipart envelope; and the
+    shared error paths (5xx throws, a failed login with no entity status throws, "No. of
+    records Zero." yields @()).
 
 .NOTES
     Minimum supported PowerShell version: 5.1
@@ -68,11 +69,11 @@ Describe 'Module Loading' {
         Get-Module SophosFirewall.Core | Should -Not -BeNullOrEmpty
     }
 
-    It 'Should export exactly 29 functions' {
-        (Get-Module SophosFirewall.IntrusionPrevention).ExportedFunctions.Count | Should -Be 29
+    It 'Should export exactly 30 functions' {
+        (Get-Module SophosFirewall.IntrusionPrevention).ExportedFunctions.Count | Should -Be 30
     }
 
-    It 'Manifest FunctionsToExport should list exactly 29 functions, matching the loaded module' {
+    It 'Manifest FunctionsToExport should list exactly 30 functions, matching the loaded module' {
         $modulesDir = Join-Path (Split-Path -Parent $PSScriptRoot) 'Modules'
         $manifestPath = Join-Path $modulesDir 'SophosFirewall.IntrusionPrevention\SophosFirewall.IntrusionPrevention.psd1'
 
@@ -90,7 +91,7 @@ Describe 'Module Loading' {
             $env:PSModulePath = $originalModulePath
         }
 
-        $manifest.ExportedFunctions.Count | Should -Be 29
+        $manifest.ExportedFunctions.Count | Should -Be 30
     }
 
     It 'Every documented function exists' {
@@ -98,7 +99,7 @@ Describe 'Module Loading' {
             'Add-SfosIPSPolicyRule', 'Export-SfosTrustedMACs', 'Get-SfosDoSBypassRule',
             'Get-SfosDoSSettings', 'Get-SfosIPSCustomSignature', 'Get-SfosIPSFullSignaturePack',
             'Get-SfosIPSPolicy', 'Get-SfosIPSSwitch', 'Get-SfosSpoofPrevention', 'Get-SfosTrustedMAC',
-            'Import-SfosTrustedMACs', 'New-SfosDoSBypassRule', 'New-SfosIPSCustomSignature',
+            'Import-SfosTrustedMACList', 'Import-SfosTrustedMACs', 'New-SfosDoSBypassRule', 'New-SfosIPSCustomSignature',
             'New-SfosIPSPolicy', 'New-SfosIPSPolicyRule', 'New-SfosTrustedMAC',
             'Remove-SfosDoSBypassRule', 'Remove-SfosIPSCustomSignature', 'Remove-SfosIPSPolicy',
             'Remove-SfosIPSPolicyRule', 'Remove-SfosTrustedMAC', 'Set-SfosDoSBypassRule',
@@ -1268,6 +1269,71 @@ Describe 'Import-SfosTrustedMACs' {
         $path = Join-Path -Path 'TestDrive:\' -ChildPath 'does-not-exist.csv'
 
         { Import-SfosTrustedMACs -FilePath $path @conn } | Should -Throw '*was not found*'
+    }
+}
+
+Describe 'Import-SfosTrustedMACList' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    It 'sends the Upload_TrustedMAC envelope with the file base name and the matching MultipartFile field' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.IntrusionPrevention -MockWith {
+            [PSCustomObject]@{ Content = '<Response><Upload_TrustedMAC><Status code="200">Configuration applied successfully.</Status></Upload_TrustedMAC></Response>' }
+        }
+
+        $path = Join-Path -Path 'TestDrive:\' -ChildPath 'trustedmaclist.csv'
+        Set-Content -Path $path -Value 'MAC Address, IP Association, IP Address'
+
+        Import-SfosTrustedMACList -FilePath $path @conn -Confirm:$false
+
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.IntrusionPrevention -Times 1 -Exactly -ParameterFilter {
+            $InnerXml -eq '<Set operation="add"><Upload_TrustedMAC><TrustedMACListFile>trustedmaclist.csv</TrustedMACListFile></Upload_TrustedMAC></Set>' -and
+            $MultipartFile.Count -eq 1 -and
+            $MultipartFile['TrustedMACListFile'] -eq $path
+        }
+    }
+
+    It 'throws when the file does not exist, without calling the API' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.IntrusionPrevention -MockWith {
+            [PSCustomObject]@{ Content = '<Response><Upload_TrustedMAC><Status code="200">Configuration applied successfully.</Status></Upload_TrustedMAC></Response>' }
+        }
+
+        $path = Join-Path -Path 'TestDrive:\' -ChildPath 'does-not-exist.csv'
+
+        { Import-SfosTrustedMACList -FilePath $path @conn -Confirm:$false } | Should -Throw '*was not found*'
+
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.IntrusionPrevention -Times 0 -Exactly
+    }
+
+    It 'sends no write request under -WhatIf' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.IntrusionPrevention -MockWith {
+            [PSCustomObject]@{ Content = '<Response><Upload_TrustedMAC><Status code="200">Configuration applied successfully.</Status></Upload_TrustedMAC></Response>' }
+        }
+
+        $path = Join-Path -Path 'TestDrive:\' -ChildPath 'trustedmaclist-whatif.csv'
+        Set-Content -Path $path -Value 'MAC Address, IP Association, IP Address'
+
+        Import-SfosTrustedMACList -FilePath $path @conn -WhatIf
+
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.IntrusionPrevention -Times 0 -Exactly
+    }
+
+    It 'throws when the firewall reports a bad-format error' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.IntrusionPrevention -MockWith {
+            [PSCustomObject]@{ Content = '<Response><Upload_TrustedMAC><Status code="400">invalid file format: expected headers ''MAC Address, IP Association, IP Address''</Status></Upload_TrustedMAC></Response>' }
+        }
+
+        $path = Join-Path -Path 'TestDrive:\' -ChildPath 'trustedmaclist-badformat.csv'
+        Set-Content -Path $path -Value 'wrong,header,row'
+
+        { Import-SfosTrustedMACList -FilePath $path @conn -Confirm:$false } | Should -Throw '*400*'
     }
 }
 

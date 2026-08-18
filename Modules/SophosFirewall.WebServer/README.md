@@ -13,7 +13,7 @@ It is for administrators who publish internal web applications through the firew
 
 ## Requirements
 
-- `SophosFirewall.Core` 1.3.1 or later (installed automatically as a dependency)
+- `SophosFirewall.Core` 1.3.2 or later (installed automatically as a dependency)
 - PowerShell 5.1 or 7.x
 - HTTPS access to the firewall's management API
 - A firewall account with administrative permission
@@ -60,6 +60,8 @@ Get-SfosWebServerSlowHTTPProtectionSettings
 | `Set-SfosWebServerAuthenticationPolicy` | Updates an authentication policy. |
 | `Remove-SfosWebServerAuthenticationPolicy` | Removes an authentication policy. |
 | `Get-SfosWebServerAuthenticationTemplate` | Downloads an authentication form template. |
+| `New-SfosWebServerAuthenticationTemplate` | Uploads a new authentication form template. |
+| `Set-SfosWebServerAuthenticationTemplate` | Replaces the template (and assets) of an authentication form template. |
 | `Remove-SfosWebServerAuthenticationTemplate` | Removes an authentication form template. |
 | `Get-SfosWebServerSlowHTTPProtectionSettings` | Reads the slow HTTP protection settings. |
 | `Set-SfosWebServerSlowHTTPProtectionSettings` | Updates the slow HTTP protection settings. |
@@ -69,21 +71,42 @@ a bare `Get-SfosAuthenticationPolicy` would not say which kind of authentication
 
 ## Limitations
 
-**Authentication templates can be read and removed, but not created or changed.** Both write
-operations require a multipart file upload that the XML transport cannot carry. There is no
-`New-`/`Set-SfosWebServerAuthenticationTemplate`, and adding one needs multipart support in
-`SophosFirewall.Core` first.
+**Authentication templates can be created and changed, but not removed.** `New-` and
+`Set-SfosWebServerAuthenticationTemplate` upload the HTML template file (and, optionally, one
+or more asset files such as a stylesheet) through the multipart transport added to
+`SophosFirewall.Core` 1.3.2 - the file name given to `-TemplateFile`/`-AssetFile` is what the
+firewall stores as the reference, so the file itself and its XML reference always agree.
+`Set-*` cannot do the usual read-modify-write: a `Get` on this entity never returns parsed
+fields (see below), so there is nothing to merge into. It checks the object exists, then
+uploads a full replacement - a `Set-*` call without `-AssetFile` does not know whether assets
+existed before and cannot preserve them.
+
+**The firewall corrupts any stored template byte 0x80 or higher on the way back out**, no
+matter which transport uploaded it. Plain-ASCII HTML round-trips correctly; content with
+accented characters, curly quotes, or other non-ASCII bytes does not - confirmed to be a
+defect in the entity's own tar export on the firmware this was measured against, not in the
+upload or the module's HTTP handling.
+
+**`-AssetFile` is accepted but does nothing on this firmware.** The request is built exactly as
+the API documentation describes it - its own multipart part per asset file, referenced from an
+`Assets`/`Asset` list in the request XML - and the firewall answers `200`, but the asset never
+appears in a later `Get`: neither in the archive nor in its `Entities.xml`. Measured with
+different file extensions and with the multipart parts in both possible orders; none stored the
+asset. The parameter stays because it matches the documented contract and costs nothing to keep,
+but do not build a workflow around it actually attaching an asset.
 
 **A template that exists is returned as the raw archive the firewall sends**
 (`application/octet-stream`), not as parsed fields - the firewall answers this endpoint with a
 file, not with XML. Only the empty result is regular XML.
 
-**Removing a template that does not exist is answered with `200` by the firewall.**
-`Remove-SfosWebServerAuthenticationTemplate` therefore checks that the object exists before it
-sends the request and throws if it does not; without that check the caller would be told a
-removal succeeded that never happened. For the three other entities the firewall answers a
-removal of a non-existent object with `504 Deleting entity referred by another entity`, which
-is misleading but at least not a success.
+**The firewall answers every template removal with `200`, including the ones it does not
+perform.** A template that does not exist is reported as removed, and so is one that does -
+which is still there afterwards. `Remove-SfosWebServerAuthenticationTemplate` therefore checks
+that the object exists before sending the request and reads it back afterwards, throwing in
+both cases rather than passing a success on. On this firmware a template can only be removed
+in the web admin console. For the three other entities the firewall answers a removal of a
+non-existent object with `504 Deleting entity referred by another entity`, which is misleading
+but at least not a success.
 
 **`-HostName` on a web server is the name of an existing `IPHost` of type `IP`**, not an
 address. A raw IP address is rejected with `501`, and so are the built-in system hosts; create

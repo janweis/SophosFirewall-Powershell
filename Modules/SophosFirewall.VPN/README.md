@@ -141,9 +141,13 @@ be created, `Set-SfosIPsecConnection` and `Set-SfosL2TPConnection` have no `-Pre
 parameter - a field this module cannot read back is not offered for write, so an update can
 never silently clear it.
 
-`New-SfosSiteToSiteClient`'s `-ServerConfigurationFile` is a file upload that this module's
-transport cannot carry; creating a site-to-site client connection does not work through this
-module. `SiteToSiteServer` and `L2TPConnection` names must not contain a hyphen.
+`-ServerConfigurationFile` on `New-`/`Set-SfosSiteToSiteClient` takes a local path to a
+`.apc`/`.epc` file and is uploaded as a multipart file; the file must exist locally when the
+cmdlet runs. The upload mechanism is confirmed against a live firewall (an invalid probe file
+now gets a content-specific `501` from the firewall's own file parser instead of the old
+field-less `500`), but the success path with a genuine exported configuration file has not
+been verified - no lab appliance exposes a server-side configuration download through the
+API. `SiteToSiteServer` and `L2TPConnection` names must not contain a hyphen.
 
 `Set-SfosL2TPConfiguration` and `Set-SfosPPTPConfiguration` require `-StartIP`, `-EndIP` and
 `-PrimaryDNSServer` on every update, and once a value has been written to either singleton

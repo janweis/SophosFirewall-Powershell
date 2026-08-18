@@ -1,6 +1,6 @@
 ﻿@{
     RootModule           = 'SophosFirewall.VPN.psm1'
-    ModuleVersion        = '1.3.1'
+    ModuleVersion        = '1.3.2'
     GUID                 = '2d774502-71be-403a-987f-12fad7d243b9'
     Author               = 'Jan Weis'
     Description          = 'PowerShell module for managing VPN on Sophos XGS / SFOS 22.0 firewalls via API: IPsec connections, SSL VPN, L2TP, PPTP, VPN profiles and failover groups.'
@@ -10,7 +10,7 @@
     RequiredModules      = @(
         @{
             ModuleName    = 'SophosFirewall.Core'
-            ModuleVersion = '1.3.1'
+            ModuleVersion = '1.3.2'
         }
     )
 
@@ -77,7 +77,7 @@
             Tags         = @('Sophos', 'Firewall', 'API', 'XGS', 'SFOS', 'VPN', 'IPsec', 'SSLVPN', 'L2TP')
             LicenseUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/blob/main/Modules/SophosFirewall.VPN/LICENSE.txt'
             ProjectUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/tree/main/Modules/SophosFirewall.VPN'
-            ReleaseNotes = 'Documentation revised for production use: rewritten cmdlet help, module description and README.'
+            ReleaseNotes = '-ServerConfigurationFile on New-/Set-SfosSiteToSiteClient now uploads a local .apc/.epc file via the Core multipart transport, replacing the earlier content-string parameter that never worked against the firewall.'
         }
     }
 }

@@ -8720,8 +8720,10 @@ function Set-SfosMalwareProtection {
         needs an open connection from Connect-SfosFirewall, or the connection parameters
         supplied directly.
 
-        TopImageFile and BottomImageFile are not available through this module: they
-        require a file upload that the transport does not support.
+        TopImageFile and BottomImageFile (the top/bottom images of the block/warn page) can
+        be uploaded with Set-SfosWebFilterSettings, but the firewall never returns them: this
+        cmdlet's output has no TopImageFile or BottomImageFile property, so an uploaded image
+        cannot be read back or verified through the API.
 
         .PARAMETER Firewall
         Optional. Host name or IP address of the firewall. If omitted, the value from the
@@ -8867,8 +8869,14 @@ function Get-SfosWebFilterSettings {
         Connect-SfosFirewall, or the connection parameters supplied directly, and an
         account with write permission.
 
-        TopImageFile and BottomImageFile are not available through this module: they
-        require a file upload that the transport does not support.
+        TopImageFile and BottomImageFile upload the top/bottom image of the block/warn page
+        alongside the request, using the multipart transport of SophosFirewall.Core
+        (Invoke-SfosApi -MultipartFile). The Sophos API accepts jpg/jpeg only. These two
+        fields are write-only: Get-SfosWebFilterSettings never returns them, so this cmdlet
+        cannot read back or preserve a previously uploaded image, and there is no way to
+        verify through the API that an upload took effect. Passing neither parameter leaves
+        both image fields out of the request entirely; whether that clears a previously set
+        image on the firewall is unmeasured, because there is no read path to check it with.
 
         .PARAMETER WebCaching
         Optional. Whether web caching is active, for example Enable or Disable,
@@ -8935,6 +8943,17 @@ function Get-SfosWebFilterSettings {
         current list. If omitted, the current list is kept. Pass an empty array to clear
         it.
 
+        .PARAMETER TopImageFile
+        Optional. Path to a local jpg/jpeg file to upload as the top image of the block/warn
+        page. The file must exist; a missing path throws before any request is sent. The
+        firewall does not return this field on a Get, so it cannot be read back or verified.
+
+        .PARAMETER BottomImageFile
+        Optional. Path to a local jpg/jpeg file to upload as the bottom image of the
+        block/warn page. The file must exist; a missing path throws before any request is
+        sent. The firewall does not return this field on a Get, so it cannot be read back or
+        verified.
+
         .PARAMETER Firewall
         Optional. Host name or IP address of the firewall. If omitted, the value from the
         current connection is used.
@@ -8980,6 +8999,13 @@ function Get-SfosWebFilterSettings {
 
         Turns web caching on. Every other setting is kept unchanged.
 
+        .EXAMPLE
+        Set-SfosWebFilterSettings -TopImageFile 'C:\branding\top.jpg' -BottomImageFile 'C:\branding\bottom.jpg'
+
+        Uploads new top and bottom images for the block/warn page. Every other setting is
+        kept unchanged. The upload cannot be verified afterwards, because Get-SfosWebFilterSettings
+        does not return these fields.
+
         .LINK
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
 
@@ -9011,6 +9037,8 @@ function Set-SfosWebFilterSettings {
         [string]$OverrideDefaultQuotaMessage,
         [string]$DefaultQuotaMessage,
         [string[]]$PUAWhitelist,
+        [string]$TopImageFile,
+        [string]$BottomImageFile,
 
         # Connection parameters (optional - use stored context if not provided)
         [string]$Firewall,
@@ -9023,6 +9051,13 @@ function Set-SfosWebFilterSettings {
     )
 
     $params = Resolve-SfosParameters -BoundParameters $PSBoundParameters
+
+    if ($PSBoundParameters.ContainsKey('TopImageFile') -and -not (Test-Path -LiteralPath $TopImageFile -PathType Leaf)) {
+        throw "Failed to update WebFilterSettings: top image file not found: $TopImageFile"
+    }
+    if ($PSBoundParameters.ContainsKey('BottomImageFile') -and -not (Test-Path -LiteralPath $BottomImageFile -PathType Leaf)) {
+        throw "Failed to update WebFilterSettings: bottom image file not found: $BottomImageFile"
+    }
 
     $existing = Get-SfosWebFilterSettings -Firewall $params.Firewall `
         -Port $params.Port `
@@ -9061,6 +9096,22 @@ function Set-SfosWebFilterSettings {
         $puaXml += "<PUA>$puaEsc</PUA>"
     }
 
+    # TopImageFile/BottomImageFile are write-only (see help): sent only when the caller
+    # passes a path, and matched to the uploaded file through the multipart contract in
+    # SophosFirewall.Core - the element's text is the file's base name, and the multipart
+    # field name equals the element name.
+    $multipartFile = @{}
+    $topImageXml = ''
+    if ($PSBoundParameters.ContainsKey('TopImageFile')) {
+        $multipartFile['TopImageFile'] = $TopImageFile
+        $topImageXml = "<TopImageFile>$(ConvertTo-SfosXmlEscaped -Text (Split-Path -Path $TopImageFile -Leaf))</TopImageFile>"
+    }
+    $bottomImageXml = ''
+    if ($PSBoundParameters.ContainsKey('BottomImageFile')) {
+        $multipartFile['BottomImageFile'] = $BottomImageFile
+        $bottomImageXml = "<BottomImageFile>$(ConvertTo-SfosXmlEscaped -Text (Split-Path -Path $BottomImageFile -Leaf))</BottomImageFile>"
+    }
+
     $inner = @"
 <Set operation="update">
   <WebFilterSettings>
@@ -9073,6 +9124,7 @@ function Set-SfosWebFilterSettings {
     <OverrideDefaultDeniedMessage>$(ConvertTo-SfosXmlEscaped -Text ([string]$targetOverrideDenied))</OverrideDefaultDeniedMessage>
     <DefaultDeniedMessage>$(ConvertTo-SfosXmlEscaped -Text ([string]$targetDeniedMsg))</DefaultDeniedMessage>
     <DeniedMessageImage>$(ConvertTo-SfosXmlEscaped -Text ([string]$targetDeniedImg))</DeniedMessageImage>
+    $topImageXml$bottomImageXml
     <DefaultFiletypeDeniedMessage>$(ConvertTo-SfosXmlEscaped -Text ([string]$targetFtDenied))</DefaultFiletypeDeniedMessage>
     <DefaultFiletypeWarnedMessage>$(ConvertTo-SfosXmlEscaped -Text ([string]$targetFtWarned))</DefaultFiletypeWarnedMessage>
     <OverrideDefaultOverrideMessage>$(ConvertTo-SfosXmlEscaped -Text ([string]$targetOverrideOverride))</OverrideDefaultOverrideMessage>
@@ -9089,7 +9141,8 @@ function Set-SfosWebFilterSettings {
             -Port $params.Port `
             -Username $params.Username `
             -Password $params.Password `
-            -InnerXml $inner -SkipCertificateCheck:$params.SkipCertificateCheck -ErrorAction Stop
+            -InnerXml $inner -MultipartFile $multipartFile `
+            -SkipCertificateCheck:$params.SkipCertificateCheck -ErrorAction Stop
     }
     catch {
         throw "Error updating WebFilterSettings: $($_.Exception.Message)"

@@ -8,7 +8,8 @@
     of firewall entities such as hosts, services or rules; that lives in the domain modules
     that depend on this one.
 
-    Total Functions: 8 - see README.md for the full cmdlet table.
+    Total Functions: 11 (8 exported, 3 internal helpers) - see README.md for the full
+    cmdlet table.
 
     API reference:
     https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
@@ -85,6 +86,119 @@ function ConvertTo-SfosXmlEscaped {
                 -replace '>', '&gt;' `
                 -replace '"', '&quot;' `
                 -replace "'", '&apos;')
+    }
+}
+
+<#
+.SYNOPSIS
+    Builds a multipart/form-data request body. Internal helper, not exported.
+
+.DESCRIPTION
+    Builds the byte-exact body Invoke-SfosApi sends when a call carries a file upload: the
+    request XML as its own raw (not URL-encoded) 'reqxml' part, followed by one part per
+    file. Kept separate from Invoke-SfosApi so the body can be tested without a network
+    call - measured for FormTemplate against a live firewall, and reused unmeasured for the
+    other multipart operations that share the same field-name-equals-XML-element contract
+    (Certificate, CertificateAuthority, CRL, TrustedMAC list, VPN client config).
+
+    Built by hand rather than with Invoke-WebRequest -Form so the same code path runs under
+    PowerShell 5.1, which has no -Form parameter. File content is read as bytes and written
+    straight into the body stream, never through a string, so a binary upload such as a
+    certificate is never subjected to character encoding.
+
+.PARAMETER RequestXml
+    Required. The complete request envelope, exactly as Invoke-SfosApi would otherwise
+    URL-encode into the non-multipart body.
+
+.PARAMETER MultipartFile
+    Required. Hashtable of multipart field name to one file path or an array of file paths.
+    The field name must match the XML element in RequestXml that references the upload; the
+    element's text content must be the file's base name.
+#>
+function New-SfosMultipartRequestBody {
+    # PSUseShouldProcessForStateChangingFunctions: the New- verb here builds an in-memory
+    # byte array and reads local files; it changes nothing on the firewall or the caller's
+    # system, so ShouldProcess would be a no-op prompt with nothing meaningful to confirm.
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '')]
+    [CmdletBinding()]
+    [OutputType([PSCustomObject])]
+    param(
+        [Parameter(Mandatory)]
+        [string]$RequestXml,
+
+        [Parameter(Mandatory)]
+        [hashtable]$MultipartFile
+    )
+
+    $boundary = 'SfosBoundary' + [guid]::NewGuid().ToString('N')
+    $crlf = "`r`n"
+    # No BOM: a BOM at the start of the 'reqxml' part would be sent to the firewall as part
+    # of the XML text.
+    $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+
+    $extensionContentType = @{
+        '.xml'  = 'text/xml'
+        '.html' = 'text/html'
+        '.htm'  = 'text/html'
+        '.txt'  = 'text/plain'
+        '.csv'  = 'text/csv'
+    }
+
+    $stream = [System.IO.MemoryStream]::new()
+    try {
+        # reqxml is a form field like any other here, but its value is the raw request XML -
+        # it must not be URL-encoded the way the non-multipart body encodes it, or the
+        # firewall receives literal percent-escapes instead of the request.
+        $reqxmlHeader = "--$boundary$crlf" +
+        "Content-Disposition: form-data; name=`"reqxml`"$crlf" +
+        "Content-Type: text/xml$crlf$crlf"
+        $bytes = $utf8NoBom.GetBytes($reqxmlHeader)
+        $stream.Write($bytes, 0, $bytes.Length)
+        $bytes = $utf8NoBom.GetBytes($RequestXml)
+        $stream.Write($bytes, 0, $bytes.Length)
+        $bytes = $utf8NoBom.GetBytes($crlf)
+        $stream.Write($bytes, 0, $bytes.Length)
+
+        foreach ($fieldName in $MultipartFile.Keys) {
+            foreach ($path in @($MultipartFile[$fieldName])) {
+                if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+                    throw "MultipartFile field '$fieldName' refers to a file that does not exist: $path"
+                }
+
+                $fileName = Split-Path -Path $path -Leaf
+                $extension = [System.IO.Path]::GetExtension($fileName).ToLowerInvariant()
+                $contentType = 'application/octet-stream'
+                if ($extensionContentType.ContainsKey($extension)) {
+                    $contentType = $extensionContentType[$extension]
+                }
+
+                $fileHeader = "--$boundary$crlf" +
+                "Content-Disposition: form-data; name=`"$fieldName`"; filename=`"$fileName`"$crlf" +
+                "Content-Type: $contentType$crlf$crlf"
+                $bytes = $utf8NoBom.GetBytes($fileHeader)
+                $stream.Write($bytes, 0, $bytes.Length)
+
+                # Binary-safe: file bytes go from disk straight into the stream, never
+                # through a string, so a certificate or other binary upload is never run
+                # through character encoding.
+                $fileBytes = [System.IO.File]::ReadAllBytes($path)
+                $stream.Write($fileBytes, 0, $fileBytes.Length)
+
+                $bytes = $utf8NoBom.GetBytes($crlf)
+                $stream.Write($bytes, 0, $bytes.Length)
+            }
+        }
+
+        $bytes = $utf8NoBom.GetBytes("--$boundary--$crlf")
+        $stream.Write($bytes, 0, $bytes.Length)
+
+        return [PSCustomObject]@{
+            Body        = $stream.ToArray()
+            ContentType = "multipart/form-data; boundary=$boundary"
+        }
+    }
+    finally {
+        $stream.Dispose()
     }
 }
 
@@ -193,6 +307,15 @@ function Assert-SfosApiLoginSuccess {
     Connect-SfosFirewall -Name. Firewall, Port, Username, Password and
     SkipCertificateCheck are all taken from it.
 
+.PARAMETER MultipartFile
+    Optional. Hashtable of multipart field name to one file path or an array of file paths,
+    for the handful of operations that upload a file alongside the request XML (for example
+    FormTemplate, Certificate, CertificateAuthority, CRL). The field name must match the XML
+    element in -InnerXml that references the upload, and that element's text content must be
+    the file's base name - the match between the two is how the firewall connects the
+    uploaded file to the request. When omitted, the request is sent exactly as before this
+    parameter existed: a single URL-encoded form field.
+
 .INPUTS
     None. This cmdlet does not accept pipeline input.
 
@@ -218,6 +341,16 @@ function Assert-SfosApiLoginSuccess {
 
     Sends a raw request against a session that was registered earlier with
     Connect-SfosFirewall -Firewall 'fw2.example.test' -Credential $cred -Name 'fw2'.
+
+.EXAMPLE
+    $uploadInner = Get-Content .\add-formtemplate.xml -Raw
+    Invoke-SfosApi -Session 'fw2' -InnerXml $uploadInner -MultipartFile @{ Template = 'C:\templates\portal.html' }
+
+    Uploads a file alongside the request XML. The XML element referencing the upload
+    ('Template') must equal the multipart field name, and its text must be the file's base
+    name ('portal.html'), matching the file at the given path. The inner XML is read from a
+    file here because the help renderer discards raw angle brackets together with the rest
+    of the line.
 
 .LINK
     https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
@@ -252,6 +385,8 @@ function Invoke-SfosApi {
 
         [Parameter(ParameterSetName = 'Explicit')]
         [switch]$SkipCertificateCheck,
+
+        [hashtable]$MultipartFile,
 
         [Parameter(Mandatory, ParameterSetName = 'Session')]
         [object]$Session
@@ -297,16 +432,32 @@ function Invoke-SfosApi {
         }
         $requestXml = "<Request$versionAttribute><Login><Username>$usernameEscaped</Username><Password>$passwordEscaped</Password></Login>$InnerXml</Request>"
 
-        # The body is form-encoded, so the XML has to be URL-encoded. Left unencoded, any
-        # '&' - including every '&amp;' produced by XML escaping - terminates the reqxml
-        # field and SFOS rejects the request with code 529 'Input request file is Invalid'.
-        $body = 'reqxml=' + [uri]::EscapeDataString($requestXml)
-        
-        $invokeParams = @{
-            Uri         = $uri
-            Method      = 'Post'
-            Body        = $body
-            ErrorAction = 'Stop'
+        if ($MultipartFile -and $MultipartFile.Count -gt 0) {
+            # Multipart transport: reqxml travels as its own raw part, and the file(s) as
+            # further parts. Built by hand so the same code path runs under PS 5.1, which
+            # has no -Form parameter on Invoke-WebRequest.
+            $multipart = New-SfosMultipartRequestBody -RequestXml $requestXml -MultipartFile $MultipartFile
+
+            $invokeParams = @{
+                Uri         = $uri
+                Method      = 'Post'
+                Body        = $multipart.Body
+                ContentType = $multipart.ContentType
+                ErrorAction = 'Stop'
+            }
+        }
+        else {
+            # The body is form-encoded, so the XML has to be URL-encoded. Left unencoded, any
+            # '&' - including every '&amp;' produced by XML escaping - terminates the reqxml
+            # field and SFOS rejects the request with code 529 'Input request file is Invalid'.
+            $body = 'reqxml=' + [uri]::EscapeDataString($requestXml)
+
+            $invokeParams = @{
+                Uri         = $uri
+                Method      = 'Post'
+                Body        = $body
+                ErrorAction = 'Stop'
+            }
         }
 
         # -TimeoutSec is identical on Invoke-WebRequest under PS 5.1 and PS 7+, so no version

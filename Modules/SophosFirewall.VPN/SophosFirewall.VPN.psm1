@@ -3081,13 +3081,18 @@ function Get-SfosSophosConnectClient {
 #    normal read-modify-write is safe here: Set-SfosSSLBookmark reads the current (hashed)
 #    Password and resends it verbatim when the caller does not pass -Password.
 # 6. SiteToSiteClient.ServerConfigurationFile is a genuine file upload (.apc/.epc), not a
-#    text field - the doc sample itself says so. Every attempt to create a SiteToSiteClient
-#    through this module's urlencoded reqxml transport failed with a field-less 500: with no
-#    ServerConfigurationFile element, with an empty element, and with a base64 placeholder
-#    string in it. Core has no multipart transport. New-/Set-/Get-/Remove-SfosSiteToSiteClient
-#    are implemented documentation-faithful; because Add never succeeds, whether
-#    FilePassword/the proxy Password survive a read-modify-write cannot be established -
-#    Set-SfosSiteToSiteClient does not attempt to preserve them (see its .NOTES).
+#    text field. New-/Set-SfosSiteToSiteClient now send it through Core's -MultipartFile
+#    (field name ServerConfigurationFile, matching the XML element; the element's text is the
+#    file's base name). Measured against a live firewall with a syntactically invalid probe
+#    file: the response moved from the old field-less 500 to
+#    /Response/SiteToSiteClient/Status code 501 "Configuration parameters validation failed"
+#    - proof the upload now reaches the firewall's own file parser instead of being rejected
+#    for lack of a file at all. No genuine .apc/.epc export was available to complete the
+#    success path (create/Get/Remove with a real file), so that path is unverified; the
+#    status XPath is measured and unchanged from before (flat, /Response/SiteToSiteClient/
+#    Status). Because Add has still not been observed to succeed, whether FilePassword/the
+#    proxy Password survive a read-modify-write remains unestablished - Set-SfosSiteToSiteClient
+#    does not attempt to preserve them.
 # 7. SiteToSiteServer.Name rejects a hyphen: <Set operation="add"> with
 #    Name=Portal-S2SServer1 answers 501 naming /SiteToSiteServer/Name; the same request
 #    with the hyphen removed succeeds.
@@ -6086,8 +6091,10 @@ function Get-SfosSiteToSiteClient {
     digits and underscore only.
 
 .PARAMETER ServerConfigurationFile
-    Required. Content of the .apc/.epc configuration file exported from the SSL VPN server
-    side.
+    Required. Path to the .apc/.epc configuration file exported from the SSL VPN server
+    side. Sent to the firewall as a multipart file upload; the file must exist locally when
+    the cmdlet runs. Earlier versions of this cmdlet took the file's content as a string,
+    which never worked - SiteToSiteClient needs a genuine upload, not a text field.
 
 .PARAMETER FilePassword
     Optional. Password protecting the configuration file, as a SecureString, up to 60
@@ -6163,14 +6170,14 @@ function Get-SfosSiteToSiteClient {
     request.
 
 .EXAMPLE
-    New-SfosSiteToSiteClient -Name 'MyS2SClient' -ServerConfigurationFile $apcFileContent -WhatIf
+    New-SfosSiteToSiteClient -Name 'MyS2SClient' -ServerConfigurationFile 'C:\Sophos\portal.apc' -WhatIf
 
     Shows what the connection would look like without sending it to the firewall.
 
 .EXAMPLE
-    New-SfosSiteToSiteClient -Name 'MyS2SClient' -ServerConfigurationFile $apcFileContent
+    New-SfosSiteToSiteClient -Name 'MyS2SClient' -ServerConfigurationFile 'C:\Sophos\portal.apc'
 
-    Creates a client connection from the given configuration file content.
+    Creates a client connection, uploading the given configuration file.
 
 .LINK
     https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
@@ -6231,14 +6238,18 @@ function New-SfosSiteToSiteClient {
     if ($PeerHost -eq 'Enable' -and -not $HostName) {
         throw "SiteToSiteClient '$Name': -PeerHost Enable requires -HostName."
     }
+    if (-not (Test-Path -LiteralPath $ServerConfigurationFile -PathType Leaf)) {
+        throw "SiteToSiteClient '$Name': ServerConfigurationFile not found: $ServerConfigurationFile"
+    }
 
     if (-not $PSCmdlet.ShouldProcess("SiteToSiteClient '$Name' on $($params.Firewall)", 'Create')) {
         return
     }
 
+    $cfgFileName = [System.IO.Path]::GetFileName($ServerConfigurationFile)
     $nameEsc = ConvertTo-SfosXmlEscaped -Text $Name
     $descEsc = ConvertTo-SfosXmlEscaped -Text $Description
-    $cfgEsc = ConvertTo-SfosXmlEscaped -Text $ServerConfigurationFile
+    $cfgEsc = ConvertTo-SfosXmlEscaped -Text $cfgFileName
 
     $filePasswordPlain = ''
     if ($PSBoundParameters.ContainsKey('FilePassword')) {
@@ -6295,7 +6306,9 @@ function New-SfosSiteToSiteClient {
             -Port $params.Port `
             -Username $params.Username `
             -Password $params.Password `
-            -InnerXml $inner -SkipCertificateCheck:$params.SkipCertificateCheck -ErrorAction Stop
+            -InnerXml $inner `
+            -MultipartFile @{ ServerConfigurationFile = $ServerConfigurationFile } `
+            -SkipCertificateCheck:$params.SkipCertificateCheck -ErrorAction Stop
     }
     catch {
         throw "Error creating SiteToSiteClient object '$Name': $($_.Exception.Message)"
@@ -6323,8 +6336,9 @@ function New-SfosSiteToSiteClient {
     Required. Name of the connection to update. Accepts pipeline input by property name.
 
 .PARAMETER ServerConfigurationFile
-    Optional. Content of the .apc/.epc configuration file. If omitted, the current value is
-    kept.
+    Optional. Path to a replacement .apc/.epc configuration file, sent as a multipart file
+    upload; the file must exist locally when the cmdlet runs. If omitted, the current value
+    is kept.
 
 .PARAMETER FilePassword
     Optional. Password protecting the configuration file, as a SecureString. See the note
@@ -6486,6 +6500,9 @@ function Set-SfosSiteToSiteClient {
             Status              = if ($bp.ContainsKey('Status')) { $Status } else { $current.Status }
         }
         $targetConfig = if ($bp.ContainsKey('ServerConfigurationFile')) { $ServerConfigurationFile } else { $null }
+        if ($targetConfig -and -not (Test-Path -LiteralPath $targetConfig -PathType Leaf)) {
+            throw "SiteToSiteClient '$Name': ServerConfigurationFile not found: $targetConfig"
+        }
 
         $filePasswordPlain = $null
         if ($bp.ContainsKey('FilePassword')) {
@@ -6516,7 +6533,10 @@ function Set-SfosSiteToSiteClient {
         $descEsc = ConvertTo-SfosXmlEscaped -Text $t.Description
 
         $optionalXml = ''
-        if ($targetConfig) { $optionalXml += "<ServerConfigurationFile>$(ConvertTo-SfosXmlEscaped -Text $targetConfig)</ServerConfigurationFile>" }
+        if ($targetConfig) {
+            $cfgFileName = [System.IO.Path]::GetFileName($targetConfig)
+            $optionalXml += "<ServerConfigurationFile>$(ConvertTo-SfosXmlEscaped -Text $cfgFileName)</ServerConfigurationFile>"
+        }
         if ($bp.ContainsKey('FilePassword')) { $optionalXml += "<FilePassword>$(ConvertTo-SfosXmlEscaped -Text $filePasswordPlain)</FilePassword>" }
         if ($t.HttpProxyServer -eq 'Enable') {
             $optionalXml += "<ProxyServer>$(ConvertTo-SfosXmlEscaped -Text $t.ProxyServer)</ProxyServer>"
@@ -6542,12 +6562,21 @@ function Set-SfosSiteToSiteClient {
 </Set>
 "@
 
+        $invokeParams = @{
+            Firewall             = $params.Firewall
+            Port                 = $params.Port
+            Username             = $params.Username
+            Password             = $params.Password
+            InnerXml             = $inner
+            SkipCertificateCheck = $params.SkipCertificateCheck
+            ErrorAction          = 'Stop'
+        }
+        if ($targetConfig) {
+            $invokeParams['MultipartFile'] = @{ ServerConfigurationFile = $targetConfig }
+        }
+
         try {
-            $response = Invoke-SfosApi -Firewall $params.Firewall `
-                -Port $params.Port `
-                -Username $params.Username `
-                -Password $params.Password `
-                -InnerXml $inner -SkipCertificateCheck:$params.SkipCertificateCheck -ErrorAction Stop
+            $response = Invoke-SfosApi @invokeParams
         }
         catch {
             throw "Error updating SiteToSiteClient object '$Name': $($_.Exception.Message)"

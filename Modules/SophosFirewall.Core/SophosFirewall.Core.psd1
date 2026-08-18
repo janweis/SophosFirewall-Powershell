@@ -1,6 +1,6 @@
 ﻿@{
     RootModule           = 'SophosFirewall.Core.psm1'
-    ModuleVersion        = '1.3.1'
+    ModuleVersion        = '1.3.2'
     GUID                 = 'cf0350d0-30af-4cd9-ae9e-8eb43356718d'
     Author               = 'Jan Weis'
     Description          = 'Core helper functions for Sophos Firewall API modules. Provides session management, API communication, XML escaping, and response validation.'
@@ -28,7 +28,7 @@
             Tags         = @('Sophos', 'Firewall', 'XGS', 'SFOS', 'API', 'Core', 'Helper')
             LicenseUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/blob/main/Modules/SophosFirewall.Core/LICENSE.txt'
             ProjectUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/tree/main/Modules/SophosFirewall.Core'
-            ReleaseNotes = 'Documentation revised for production use: rewritten cmdlet help, module description and README.'
+            ReleaseNotes = 'Invoke-SfosApi gained -MultipartFile, for the operations that upload a file alongside the request XML (FormTemplate, Certificate and similar). Existing calls without it are unaffected.'
         }
     }
 }

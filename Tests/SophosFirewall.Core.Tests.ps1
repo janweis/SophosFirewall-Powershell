@@ -968,3 +968,164 @@ Describe 'Invoke-SfosApi - TimeoutSec' {
         }
     }
 }
+
+Describe 'Invoke-SfosApi - MultipartFile (regression)' {
+
+    BeforeAll {
+        $callArgs = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    BeforeEach {
+        Mock -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -MockWith {
+            [PSCustomObject]@{
+                StatusCode = 200
+                Content    = '<Response APIVersion="2200.1"><Login><status>Authentication Successful</status></Login></Response>'
+            }
+        }
+    }
+
+    It 'Should still send the URL-encoded reqxml body and no Content-Type when -MultipartFile is not used' {
+        Invoke-SfosApi @callArgs -InnerXml '<Get><IPHost/></Get>' | Out-Null
+
+        Should -Invoke -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -Times 1 -Exactly -ParameterFilter {
+            $Body -is [string] -and $Body -like 'reqxml=%3CRequest%3E%3CLogin%3E*' -and $null -eq $ContentType
+        }
+    }
+}
+
+Describe 'New-SfosMultipartRequestBody - Multipart Body Construction' {
+
+    Context 'Body shape' {
+        It 'Should include the boundary, the reqxml part and a file part with matching name and filename' {
+            $filePath = Join-Path $TestDrive 'portal.html'
+            Set-Content -LiteralPath $filePath -Value '<html></html>' -Encoding ascii -NoNewline
+
+            $result = InModuleScope SophosFirewall.Core -Parameters @{ FilePath = $filePath } {
+                param($FilePath)
+                New-SfosMultipartRequestBody -RequestXml '<Request><Login/><Set operation="add"><FormTemplate><Name>Portal1</Name><Template>portal.html</Template></FormTemplate></Set></Request>' -MultipartFile @{ Template = $FilePath }
+            }
+
+            $result.ContentType | Should -Match '^multipart/form-data; boundary='
+
+            $bodyText = [System.Text.Encoding]::GetEncoding(28591).GetString($result.Body)
+            $boundary = ([regex]::Match($result.ContentType, 'boundary=(.+)$')).Groups[1].Value
+            $bodyText | Should -Match ([regex]::Escape("--$boundary"))
+            $bodyText | Should -Match 'name="reqxml"'
+            $bodyText | Should -Match 'name="Template"; filename="portal.html"'
+        }
+    }
+
+    Context 'reqxml part travels raw, not URL-encoded' {
+        It 'Should not URL-encode the request XML' {
+            $filePath = Join-Path $TestDrive 'portal.html'
+            Set-Content -LiteralPath $filePath -Value '<html></html>' -Encoding ascii -NoNewline
+
+            # '&' and ' ' both change under URL encoding (%26, %20/+), so their presence
+            # unchanged proves the part was not run through EscapeDataString.
+            $requestXml = '<Request><Login><Username>a&amp;b c</Username></Login></Request>'
+
+            $result = InModuleScope SophosFirewall.Core -Parameters @{ FilePath = $filePath; RequestXml = $requestXml } {
+                param($FilePath, $RequestXml)
+                New-SfosMultipartRequestBody -RequestXml $RequestXml -MultipartFile @{ Template = $FilePath }
+            }
+
+            $bodyText = [System.Text.Encoding]::GetEncoding(28591).GetString($result.Body)
+            $bodyText | Should -Match ([regex]::Escape($requestXml))
+            $bodyText | Should -Not -Match '%26|%20|%3C|%3E'
+        }
+    }
+
+    Context 'Binary fidelity' {
+        It 'Should carry file bytes through unchanged, byte for byte' {
+            $filePath = Join-Path $TestDrive 'binary.bin'
+            $originalBytes = [byte[]](0x00, 0x01, 0x7F, 0x80, 0xC2, 0xFF, 0x0D, 0x0A)
+            [System.IO.File]::WriteAllBytes($filePath, $originalBytes)
+
+            $result = InModuleScope SophosFirewall.Core -Parameters @{ FilePath = $filePath } {
+                param($FilePath)
+                New-SfosMultipartRequestBody -RequestXml '<Request><Login/><Get/></Request>' -MultipartFile @{ Template = $FilePath }
+            }
+
+            # Latin-1 maps one byte to one char with no loss, so the character offset found
+            # this way is also the exact byte offset in $result.Body.
+            $latin1 = [System.Text.Encoding]::GetEncoding(28591)
+            $bodyText = $latin1.GetString($result.Body)
+            $headerIndex = $bodyText.IndexOf('filename="binary.bin"')
+            $headerIndex | Should -BeGreaterThan -1
+            $headerEnd = $bodyText.IndexOf("`r`n`r`n", $headerIndex) + 4
+            $extracted = $result.Body[$headerEnd..($headerEnd + $originalBytes.Length - 1)]
+
+            # Byte-for-byte, not a string comparison - a string round trip through any
+            # encoding would hide exactly the corruption this test exists to catch.
+            [Convert]::ToBase64String($extracted) | Should -Be ([Convert]::ToBase64String($originalBytes))
+        }
+    }
+
+    Context 'Multiple files' {
+        It 'Should create one part per path when a field name maps to an array' {
+            $file1 = Join-Path $TestDrive 'one.txt'
+            $file2 = Join-Path $TestDrive 'two.txt'
+            Set-Content -LiteralPath $file1 -Value 'one' -Encoding ascii -NoNewline
+            Set-Content -LiteralPath $file2 -Value 'two' -Encoding ascii -NoNewline
+
+            $result = InModuleScope SophosFirewall.Core -Parameters @{ File1 = $file1; File2 = $file2 } {
+                param($File1, $File2)
+                New-SfosMultipartRequestBody -RequestXml '<Request><Login/><Get/></Request>' -MultipartFile @{ MacList = @($File1, $File2) }
+            }
+
+            $bodyText = [System.Text.Encoding]::GetEncoding(28591).GetString($result.Body)
+            $bodyText | Should -Match 'name="MacList"; filename="one.txt"'
+            $bodyText | Should -Match 'name="MacList"; filename="two.txt"'
+        }
+
+        It 'Should create a part per distinct field name' {
+            $file1 = Join-Path $TestDrive 'a.txt'
+            $file2 = Join-Path $TestDrive 'b.txt'
+            Set-Content -LiteralPath $file1 -Value 'a' -Encoding ascii -NoNewline
+            Set-Content -LiteralPath $file2 -Value 'b' -Encoding ascii -NoNewline
+
+            $result = InModuleScope SophosFirewall.Core -Parameters @{ File1 = $file1; File2 = $file2 } {
+                param($File1, $File2)
+                New-SfosMultipartRequestBody -RequestXml '<Request><Login/><Get/></Request>' -MultipartFile @{ FieldA = $File1; FieldB = $File2 }
+            }
+
+            $bodyText = [System.Text.Encoding]::GetEncoding(28591).GetString($result.Body)
+            $bodyText | Should -Match 'name="FieldA"; filename="a.txt"'
+            $bodyText | Should -Match 'name="FieldB"; filename="b.txt"'
+        }
+    }
+
+    Context 'Missing file' {
+        It 'Should throw naming the field and the path when the file does not exist' {
+            $missingPath = Join-Path $TestDrive 'does-not-exist.bin'
+
+            {
+                InModuleScope SophosFirewall.Core -Parameters @{ MissingPath = $missingPath } {
+                    param($MissingPath)
+                    New-SfosMultipartRequestBody -RequestXml '<Request><Login/><Get/></Request>' -MultipartFile @{ Template = $MissingPath }
+                }
+            } | Should -Throw "*Template*$missingPath*"
+        }
+    }
+
+    Context 'Closing boundary' {
+        It 'Should end the body with the closing boundary line' {
+            $filePath = Join-Path $TestDrive 'closing.txt'
+            Set-Content -LiteralPath $filePath -Value 'x' -Encoding ascii -NoNewline
+
+            $result = InModuleScope SophosFirewall.Core -Parameters @{ FilePath = $filePath } {
+                param($FilePath)
+                New-SfosMultipartRequestBody -RequestXml '<Request><Login/><Get/></Request>' -MultipartFile @{ Template = $FilePath }
+            }
+
+            $boundary = ([regex]::Match($result.ContentType, 'boundary=(.+)$')).Groups[1].Value
+            $bodyText = [System.Text.Encoding]::GetEncoding(28591).GetString($result.Body)
+            $bodyText.EndsWith("--$boundary--`r`n") | Should -BeTrue
+        }
+    }
+}

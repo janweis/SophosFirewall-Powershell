@@ -9,7 +9,7 @@
     Tests for cmdlet structure and, above all, the XML actually sent to the firewall.
     Invoke-SfosApi is always mocked; no test touches a real firewall.
 
-    Coverage: module loading/manifest agreement and existence of all 16 exported functions
+    Coverage: module loading/manifest agreement and existence of all 18 exported functions
     with their identifying and connection parameters; inner XML generation (root element,
     operation, name, XML escaping) for every New/Set/Remove cmdlet across the five entities
     RealServers, ProtocolSecurity, ReverseAuthentication, FormTemplate and WAFSlowHTTP; the
@@ -17,9 +17,12 @@
     ProtocolSecurity, including the round trip that must not reconvert an untouched value; the
     undocumented but mandatory FrontendRealm field on ReverseAuthentication; the binary-vs-XML
     transport branch and the misleading 200-on-nonexistent-object Remove behaviour of
-    FormTemplate; the WAFSlowHTTP singleton no-op round trip; -WhatIf suppressing every write
-    call; and the shared status-parsing error paths (5xx throws, a failed login with no entity
-    status throws, "No. of records Zero." yields an empty array).
+    FormTemplate; the multipart upload of New-/Set-SfosWebServerAuthenticationTemplate,
+    including the Assets/Asset XML and the Asset multipart field for multiple files, the
+    existence check ahead of Set, and a missing local file failing before any API call; the
+    WAFSlowHTTP singleton no-op round trip; -WhatIf suppressing every write call; and the
+    shared status-parsing error paths (5xx throws, a failed login with no entity status
+    throws, "No. of records Zero." yields an empty array).
 
 .NOTES
     Minimum supported PowerShell version: 5.1
@@ -65,11 +68,11 @@ Describe 'Module Loading' {
         Get-Module SophosFirewall.Core | Should -Not -BeNullOrEmpty
     }
 
-    It 'Should export exactly 16 functions' {
-        (Get-Module SophosFirewall.WebServer).ExportedFunctions.Count | Should -Be 16
+    It 'Should export exactly 18 functions' {
+        (Get-Module SophosFirewall.WebServer).ExportedFunctions.Count | Should -Be 18
     }
 
-    It 'Manifest FunctionsToExport should list exactly 16 functions, matching the loaded module' {
+    It 'Manifest FunctionsToExport should list exactly 18 functions, matching the loaded module' {
         $modulesDir = Join-Path (Split-Path -Parent $PSScriptRoot) 'Modules'
         $manifestPath = Join-Path $modulesDir 'SophosFirewall.WebServer\SophosFirewall.WebServer.psd1'
 
@@ -82,7 +85,7 @@ Describe 'Module Loading' {
             $env:PSModulePath = $originalModulePath
         }
 
-        $manifest.ExportedFunctions.Count | Should -Be 16
+        $manifest.ExportedFunctions.Count | Should -Be 18
     }
 }
 
@@ -103,6 +106,8 @@ $script:CmdletParameterCases = @(
     @{ Function = 'Remove-SfosWebServerAuthenticationPolicy'; IdParam = 'Name'; Mandatory = $true }
 
     @{ Function = 'Get-SfosWebServerAuthenticationTemplate'; IdParam = 'NameLike'; Mandatory = $false }
+    @{ Function = 'New-SfosWebServerAuthenticationTemplate'; IdParam = 'Name'; Mandatory = $true }
+    @{ Function = 'Set-SfosWebServerAuthenticationTemplate'; IdParam = 'Name'; Mandatory = $true }
     @{ Function = 'Remove-SfosWebServerAuthenticationTemplate'; IdParam = 'Name'; Mandatory = $true }
 )
 
@@ -643,6 +648,198 @@ Describe 'FormTemplate - binary transport and the misleading Remove success' {
         Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.WebServer -Times 0 -Exactly -ParameterFilter {
             $InnerXml -match '<Remove>'
         }
+    }
+}
+
+Describe 'New-SfosWebServerAuthenticationTemplate and Set-SfosWebServerAuthenticationTemplate - multipart upload' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    It 'New-SfosWebServerAuthenticationTemplate sends an add operation carrying the template file name and uploads it via MultipartFile' {
+        $templatePath = Join-Path $TestDrive 'login.html'
+        Set-Content -LiteralPath $templatePath -Value '<html></html>'
+
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.WebServer -MockWith {
+            [PSCustomObject]@{ Content = '<Response><FormTemplate><Status code="200">Configuration applied successfully.</Status></FormTemplate></Response>' }
+        }
+
+        New-SfosWebServerAuthenticationTemplate -Name 'CustomLoginForm' -TemplateFile $templatePath @conn -Confirm:$false
+
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.WebServer -Times 1 -Exactly -ParameterFilter {
+            $InnerXml -match '<Set operation="add">' -and
+            $InnerXml -match '<FormTemplate>' -and
+            $InnerXml -match '<Name>CustomLoginForm</Name>' -and
+            $InnerXml -match '<Template>login\.html</Template>' -and
+            $MultipartFile.Template -eq $templatePath
+        }
+    }
+
+    It 'New-SfosWebServerAuthenticationTemplate with multiple -AssetFile paths sends the Assets/Asset XML and an Asset multipart field carrying all paths' {
+        $templatePath = Join-Path $TestDrive 'login.html'
+        $assetPath1 = Join-Path $TestDrive 'style.css'
+        $assetPath2 = Join-Path $TestDrive 'logo.png'
+        Set-Content -LiteralPath $templatePath -Value '<html></html>'
+        Set-Content -LiteralPath $assetPath1 -Value 'body{}'
+        Set-Content -LiteralPath $assetPath2 -Value 'not really a png'
+
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.WebServer -MockWith {
+            [PSCustomObject]@{ Content = '<Response><FormTemplate><Status code="200">Configuration applied successfully.</Status></FormTemplate></Response>' }
+        }
+
+        New-SfosWebServerAuthenticationTemplate -Name 'CustomLoginForm' -TemplateFile $templatePath -AssetFile $assetPath1, $assetPath2 @conn -Confirm:$false
+
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.WebServer -Times 1 -Exactly -ParameterFilter {
+            $InnerXml -match '<Assets><Asset>style\.css</Asset><Asset>logo\.png</Asset></Assets>' -and
+            $MultipartFile.Asset.Count -eq 2 -and
+            $MultipartFile.Asset -contains $assetPath1 -and
+            $MultipartFile.Asset -contains $assetPath2
+        }
+    }
+
+    It 'New-SfosWebServerAuthenticationTemplate throws naming the entity and object for a missing template file, without calling the API' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.WebServer
+
+        { New-SfosWebServerAuthenticationTemplate -Name 'CustomLoginForm' -TemplateFile (Join-Path $TestDrive 'missing.html') @conn -Confirm:$false } |
+            Should -Throw '*FormTemplate*CustomLoginForm*'
+
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.WebServer -Times 0 -Exactly
+    }
+
+    It 'New-SfosWebServerAuthenticationTemplate -WhatIf does not send the add' {
+        $templatePath = Join-Path $TestDrive 'login.html'
+        Set-Content -LiteralPath $templatePath -Value '<html></html>'
+
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.WebServer
+
+        New-SfosWebServerAuthenticationTemplate -Name 'CustomLoginForm' -TemplateFile $templatePath @conn -WhatIf
+
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.WebServer -Times 0 -Exactly
+    }
+
+    It 'New-SfosWebServerAuthenticationTemplate throws on a duplicate name (measured 502)' {
+        $templatePath = Join-Path $TestDrive 'login.html'
+        Set-Content -LiteralPath $templatePath -Value '<html></html>'
+
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.WebServer -MockWith {
+            [PSCustomObject]@{ Content = '<Response><FormTemplate><Status code="502">Operation failed. Entity having same name already exists.</Status></FormTemplate></Response>' }
+        }
+
+        { New-SfosWebServerAuthenticationTemplate -Name 'CustomLoginForm' -TemplateFile $templatePath @conn -Confirm:$false } | Should -Throw '*502*'
+    }
+
+    It 'Set-SfosWebServerAuthenticationTemplate checks the object exists first, then sends an update operation carrying MultipartFile' {
+        $templatePath = Join-Path $TestDrive 'login-v2.html'
+        Set-Content -LiteralPath $templatePath -Value '<html>v2</html>'
+
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.WebServer -MockWith {
+            if ($InnerXml -match '<Get>') {
+                [PSCustomObject]@{
+                    Content = [byte[]]@(1, 2, 3)
+                    Headers = @{ 'Content-Type' = 'application/octet-stream' }
+                }
+            }
+            else {
+                [PSCustomObject]@{ Content = '<Response><FormTemplate><Status code="200">Configuration applied successfully.</Status></FormTemplate></Response>' }
+            }
+        }
+
+        Set-SfosWebServerAuthenticationTemplate -Name 'CustomLoginForm' -TemplateFile $templatePath @conn -Confirm:$false
+
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.WebServer -Times 1 -Exactly -ParameterFilter {
+            $InnerXml -match '<Get>'
+        }
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.WebServer -Times 1 -Exactly -ParameterFilter {
+            $InnerXml -match '<Set operation="update">' -and
+            $InnerXml -match '<FormTemplate>' -and
+            $InnerXml -match '<Name>CustomLoginForm</Name>' -and
+            $InnerXml -match '<Template>login-v2\.html</Template>' -and
+            $MultipartFile.Template -eq $templatePath
+        }
+    }
+
+    It 'Set-SfosWebServerAuthenticationTemplate throws "was not found" for a nonexistent template and does not send an update' {
+        $templatePath = Join-Path $TestDrive 'login-v2.html'
+        Set-Content -LiteralPath $templatePath -Value '<html>v2</html>'
+
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.WebServer -MockWith {
+            [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><FormTemplate transactionid=""><Status>No. of records Zero.</Status></FormTemplate></Response>' }
+        }
+
+        { Set-SfosWebServerAuthenticationTemplate -Name 'DoesNotExist' -TemplateFile $templatePath @conn -Confirm:$false } | Should -Throw '*was not found*'
+
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.WebServer -Times 0 -Exactly -ParameterFilter {
+            $InnerXml -match '<Set operation="update">'
+        }
+    }
+
+    It 'Set-SfosWebServerAuthenticationTemplate throws naming the entity and object for a missing template file, without sending an update' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.WebServer -MockWith {
+            if ($InnerXml -match '<Get>') {
+                [PSCustomObject]@{
+                    Content = [byte[]]@(1, 2, 3)
+                    Headers = @{ 'Content-Type' = 'application/octet-stream' }
+                }
+            }
+            else {
+                [PSCustomObject]@{ Content = '<Response><FormTemplate><Status code="200">Configuration applied successfully.</Status></FormTemplate></Response>' }
+            }
+        }
+
+        { Set-SfosWebServerAuthenticationTemplate -Name 'CustomLoginForm' -TemplateFile (Join-Path $TestDrive 'missing.html') @conn -Confirm:$false } |
+            Should -Throw '*FormTemplate*CustomLoginForm*'
+
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.WebServer -Times 0 -Exactly -ParameterFilter {
+            $InnerXml -match '<Set operation="update">'
+        }
+    }
+
+    It 'Set-SfosWebServerAuthenticationTemplate -WhatIf does not send the update' {
+        $templatePath = Join-Path $TestDrive 'login-v2.html'
+        Set-Content -LiteralPath $templatePath -Value '<html>v2</html>'
+
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.WebServer -MockWith {
+            if ($InnerXml -match '<Get>') {
+                [PSCustomObject]@{
+                    Content = [byte[]]@(1, 2, 3)
+                    Headers = @{ 'Content-Type' = 'application/octet-stream' }
+                }
+            }
+            else {
+                [PSCustomObject]@{ Content = '<Response><FormTemplate><Status code="200">Configuration applied successfully.</Status></FormTemplate></Response>' }
+            }
+        }
+
+        Set-SfosWebServerAuthenticationTemplate -Name 'CustomLoginForm' -TemplateFile $templatePath @conn -WhatIf
+
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.WebServer -Times 0 -Exactly -ParameterFilter {
+            $InnerXml -match '<Set operation="update">'
+        }
+    }
+
+    It 'Set-SfosWebServerAuthenticationTemplate throws on a 5xx status code' {
+        $templatePath = Join-Path $TestDrive 'login-v2.html'
+        Set-Content -LiteralPath $templatePath -Value '<html>v2</html>'
+
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.WebServer -MockWith {
+            if ($InnerXml -match '<Get>') {
+                [PSCustomObject]@{
+                    Content = [byte[]]@(1, 2, 3)
+                    Headers = @{ 'Content-Type' = 'application/octet-stream' }
+                }
+            }
+            else {
+                [PSCustomObject]@{ Content = '<Response><FormTemplate><Status code="502">Operation failed. Entity having same name already exists.</Status></FormTemplate></Response>' }
+            }
+        }
+
+        { Set-SfosWebServerAuthenticationTemplate -Name 'CustomLoginForm' -TemplateFile $templatePath @conn -Confirm:$false } | Should -Throw '*502*'
     }
 }
 

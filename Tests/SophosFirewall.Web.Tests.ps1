@@ -2272,6 +2272,62 @@ Describe 'Settings Singletons' {
                 $InnerXml -match '<Scanning>Single Anti-Virus \(Maximum Performance\)</Scanning>'
             }
         }
+
+        It 'sends no MultipartFile and no TopImageFile/BottomImageFile element when neither image parameter is passed' {
+            Set-SfosWebFilterSettings -WebCaching 'Enable' @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Set operation="update">' -and
+                $InnerXml -notmatch '<TopImageFile>' -and
+                $InnerXml -notmatch '<BottomImageFile>' -and
+                (-not $MultipartFile -or $MultipartFile.Count -eq 0)
+            }
+        }
+
+        It 'sends TopImageFile as the file base name with the matching MultipartFile field, without losing PharmingProtection' {
+            $imgPath = Join-Path -Path 'TestDrive:\' -ChildPath 'top-image.jpg'
+            Set-Content -Path $imgPath -Value 'placeholder jpg content'
+
+            Set-SfosWebFilterSettings -TopImageFile $imgPath @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<TopImageFile>top-image\.jpg</TopImageFile>' -and
+                $InnerXml -match '<PharmingProtection>Enable</PharmingProtection>' -and
+                $InnerXml -match '<Scanning>Single Anti-Virus \(Maximum Performance\)</Scanning>' -and
+                $MultipartFile.Count -eq 1 -and
+                $MultipartFile['TopImageFile'] -eq $imgPath
+            }
+        }
+
+        It 'sends BottomImageFile as the file base name with the matching MultipartFile field, without losing PharmingProtection' {
+            $imgPath = Join-Path -Path 'TestDrive:\' -ChildPath 'bottom-image.jpg'
+            Set-Content -Path $imgPath -Value 'placeholder jpg content'
+
+            Set-SfosWebFilterSettings -BottomImageFile $imgPath @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<BottomImageFile>bottom-image\.jpg</BottomImageFile>' -and
+                $InnerXml -match '<PharmingProtection>Enable</PharmingProtection>' -and
+                $MultipartFile.Count -eq 1 -and
+                $MultipartFile['BottomImageFile'] -eq $imgPath
+            }
+        }
+
+        It 'throws client-side, without calling the API, when TopImageFile does not exist' {
+            $missingPath = Join-Path -Path 'TestDrive:\' -ChildPath 'does-not-exist.jpg'
+
+            { Set-SfosWebFilterSettings -TopImageFile $missingPath @conn -Confirm:$false } | Should -Throw '*not found*'
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -Times 0 -Exactly
+        }
+
+        It 'throws client-side, without calling the API, when BottomImageFile does not exist' {
+            $missingPath = Join-Path -Path 'TestDrive:\' -ChildPath 'does-not-exist-bottom.jpg'
+
+            { Set-SfosWebFilterSettings -BottomImageFile $missingPath @conn -Confirm:$false } | Should -Throw '*not found*'
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.Web -Times 0 -Exactly
+        }
     }
 
     Context 'Get-SfosWebFilterProtectionSettings' {

@@ -1,4 +1,4 @@
-﻿#requires -Version 5.1
+#requires -Version 5.1
 #requires -Modules SophosFirewall.Core
 
 <#
@@ -9,7 +9,7 @@
     global IPS switch, IPS full signature pack, DoS settings, DoS bypass rules,
     spoof prevention and trusted MAC addresses.
 
-    Total Functions: 34 (29 exported, 5 internal helpers) - see README.md for the full
+    Total Functions: 35 (30 exported, 5 internal helpers) - see README.md for the full
     cmdlet table.
 
     Requires SophosFirewall.Core for transport, session state and status
@@ -4203,8 +4203,9 @@ function Remove-SfosDoSBypassRule {
 # /Response/TrustedMAC/Status[@code] for Add, Update and Remove alike; no data record ever
 # carries a <Status> child, so the default status heuristic is safe unmodified.
 #
-# Uploading a trusted MAC list file is a genuine multipart file upload, which this module's
-# transport does not support; no cmdlet was built for it.
+# Import-SfosTrustedMACList uploads a trusted MAC list file via the Upload_TrustedMAC
+# operation, a genuine multipart file upload; the transport contract is documented with
+# the Core module. Measured status path and error behaviour are recorded with this module.
 
 <#
         .SYNOPSIS
@@ -4947,7 +4948,10 @@ function Export-SfosTrustedMACs {
         firewall using New-SfosTrustedMAC. Rows without a MAC address, or whose MAC address
         starts with '#', are skipped. It needs an open connection from
         Connect-SfosFirewall, or the connection parameters supplied directly, and an
-        account with write permission for trusted MAC entries.
+        account with write permission for trusted MAC entries. Unlike
+        Import-SfosTrustedMACList, this cmdlet parses the file itself on this machine and
+        calls New-SfosTrustedMAC once per row, rather than uploading the file to the
+        firewall.
 
         .PARAMETER FilePath
         Required. Full path to the input file.
@@ -5073,15 +5077,124 @@ function Import-SfosTrustedMACs {
     }
 }
 
-#endregion
+<#
+        .SYNOPSIS
+        Uploads a trusted MAC list file to a Sophos Firewall.
 
-# NOT built: Upload-SfosTrustedMACList (operation root <Upload_TrustedMAC>, field
-# TrustedMACListFile). Its own doc page shows the field's placeholder as
-# "{name of file passed in multipart}" - a genuine multipart file upload, the same
-# transport this project's Core module does not implement (Invoke-SfosApi only builds the
-# single urlencoded 'reqxml=' POST body). Building it would require either extending Core
-# with a second, multipart-capable transport (out of scope for this fragment, and a
-# decision that affects every module, not just this one) or silently sending the CSV
-# content as if it were the file name, which would not work and would misrepresent the
-# operation's contract.
+        .DESCRIPTION
+        Sends one local file to the firewall through the Upload_TrustedMAC API operation, a
+        genuine multipart file upload, and lets the firewall parse and import the entries
+        itself. Unlike Import-SfosTrustedMACs, this cmdlet never reads the file's content on
+        this machine and does not call New-SfosTrustedMAC - the file goes to the firewall
+        unopened, and the firewall does the importing. It needs an open connection from
+        Connect-SfosFirewall, or the connection parameters supplied directly, and an account
+        with write permission for trusted MAC entries.
+
+        .PARAMETER FilePath
+        Required. Path to the local trusted MAC list file to upload. The firewall requires a
+        CSV with the header row 'MAC Address, IP Association, IP Address' and rejects any
+        other header with a 400 error naming it.
+
+        .PARAMETER Firewall
+        Optional. Host name or IP address of the firewall. If omitted, the value from the
+        current connection is used.
+
+        .PARAMETER Port
+        Optional. TCP port of the management API, usually 4444. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER Username
+        Optional. User name for the API login. The account needs write permission for
+        trusted MAC entries. If omitted, the value from the current connection is used.
+
+        .PARAMETER Password
+        Optional. Password for the API login, as a SecureString. If omitted, the value from
+        the current connection is used.
+
+        .PARAMETER SkipCertificateCheck
+        Optional. Accepts the firewall certificate without validating it. Use this only for
+        appliances that still present a self-signed certificate. If omitted, the
+        certificate is validated.
+
+        .PARAMETER Session
+        Optional. A session object from Connect-SfosFirewall, or the name of a session that
+        was registered with Connect-SfosFirewall -Name. Use it to address a specific
+        firewall when you work with more than one at a time. Any connection parameter you
+        pass explicitly still takes precedence. If omitted, the stored default connection
+        is used.
+
+        .INPUTS
+        None. This cmdlet does not accept pipeline input.
+
+        .OUTPUTS
+        None. The cmdlet writes no output and raises an error if the firewall rejects the
+        upload.
+
+        .EXAMPLE
+        Import-SfosTrustedMACList -FilePath 'C:\Lists\TrustedMAC.csv' -WhatIf
+
+        Shows what the call would upload without sending it to the firewall.
+
+        .EXAMPLE
+        Import-SfosTrustedMACList -FilePath 'C:\Lists\TrustedMAC.csv'
+
+        Uploads the file and lets the firewall import its entries.
+
+        .LINK
+        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+        .LINK
+        Get-SfosTrustedMAC
+
+        .LINK
+        Import-SfosTrustedMACs
+#>
+function Import-SfosTrustedMACList {
+    [CmdletBinding(SupportsShouldProcess)]
+    param(
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$FilePath,
+
+        [string]$Firewall,
+        [int]$Port,
+        [string]$Username,
+        [SecureString]$Password,
+        [switch]$SkipCertificateCheck,
+        [object]$Session
+    )
+
+    if (-not (Test-Path -LiteralPath $FilePath -PathType Leaf)) {
+        throw "The file '$FilePath' was not found."
+    }
+
+    $params = Resolve-SfosParameters -BoundParameters $PSBoundParameters
+
+    if (-not $PSCmdlet.ShouldProcess("Trusted MAC list file '$FilePath' on $($params.Firewall)", 'Upload')) {
+        return
+    }
+
+    $fileNameEsc = ConvertTo-SfosXmlEscaped -Text (Split-Path -Path $FilePath -Leaf)
+
+    $inner = "<Set operation=`"add`"><Upload_TrustedMAC><TrustedMACListFile>$fileNameEsc</TrustedMACListFile></Upload_TrustedMAC></Set>"
+
+    $multipartFile = @{ TrustedMACListFile = $FilePath }
+
+    try {
+        $response = Invoke-SfosApi -Firewall $params.Firewall `
+            -Port $params.Port `
+            -Username $params.Username `
+            -Password $params.Password `
+            -InnerXml $inner -MultipartFile $multipartFile `
+            -SkipCertificateCheck:$params.SkipCertificateCheck -ErrorAction Stop
+    }
+    catch {
+        throw "Failed to upload trusted MAC list file '$FilePath': $($_.Exception.Message)"
+    }
+
+    $XmlResponse = [xml]$response.Content
+    Assert-SfosApiReturnSuccess -Xml $XmlResponse -ObjectName 'Upload_TrustedMAC' -Action 'upload' -Target (Split-Path -Path $FilePath -Leaf)
+}
+
+#endregion
 

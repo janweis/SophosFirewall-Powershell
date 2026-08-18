@@ -19,7 +19,7 @@
     shows. Slow HTTP protection guards against clients that hold connections open by sending
     their request headers a byte at a time.
 
-    Total Functions: 20 (16 exported, 4 internal helpers) - see README.md for the full
+    Total Functions: 22 (18 exported, 4 internal helpers) - see README.md for the full
     cmdlet table.
 
     Connect once with Connect-SfosFirewall, then call the cmdlets in this module without
@@ -27,8 +27,8 @@
 
     Two limitations are inherent to the API, not to this module:
 
-    - An authentication template can be read and removed, but not created or changed. Both
-      write operations require a multipart file upload that the XML transport cannot carry.
+    - An authentication template can be created, changed and read, but not removed - the
+      firewall answers every removal with 200 whether or not it did anything.
     - Reading a template that exists returns the raw archive the firewall sends
       (application/octet-stream), not parsed fields.
 
@@ -2895,15 +2895,332 @@ function Get-SfosWebServerAuthenticationTemplate {
 
 <#
 .SYNOPSIS
+    Creates a Web Server authentication template on a Sophos Firewall.
+
+.DESCRIPTION
+    Uploads an HTML login form as a new FormTemplate object (PROTECT > Web Server >
+    Authentication Template). This is a true multipart file upload, not a text-only API
+    call: the request XML only references the file by name, the file itself travels as a
+    separate part of the same request. -TemplateFile is checked for existence before
+    anything is sent.
+
+    Content the firewall stores in a template is not returned unchanged: any byte 0x80 or
+    higher comes back corrupted on a later Get, independent of the upload transport - a
+    defect in FormTemplate's own tar export on the firmware this was measured against.
+    Plain-ASCII HTML round-trips correctly; text with accented characters, curly quotes,
+    or other non-ASCII content does not.
+
+.PARAMETER Name
+    Required. Name for the new template.
+
+.PARAMETER TemplateFile
+    Required. Path to the HTML template file to upload. The firewall stores the file's
+    name (not its directory) as the Template reference.
+
+.PARAMETER AssetFile
+    Optional. Path to one or more asset files, such as a stylesheet, meant to accompany
+    the template - sent exactly as the API documentation describes (its own Asset
+    multipart part per file, referenced from an Assets/Asset list in the request XML).
+    Measured against a live firewall, on this firmware the request succeeds with no error
+    but the asset is silently not stored: it is absent from both the returned archive and
+    the Entities.xml inside it, regardless of the asset file's extension or the order of
+    the multipart parts. -AssetFile is kept because it matches the documented contract and
+    a future firmware may honor it, but do not rely on it doing anything today.
+
+.PARAMETER Firewall
+    Optional. Host name or IP address of the firewall. If omitted, the value from the current
+    connection is used.
+
+.PARAMETER Port
+    Optional. TCP port of the management API, usually 4444. If omitted, the value from the
+    current connection is used.
+
+.PARAMETER Username
+    Optional. User name for the API login. The account needs write permission for Web Server
+    authentication templates. If omitted, the value from the current connection is used.
+
+.PARAMETER Password
+    Optional. Password for the API login, as a SecureString. If omitted, the value from the
+    current connection is used.
+
+.PARAMETER SkipCertificateCheck
+    Optional. Accepts the firewall certificate without validating it. Use this only for
+    appliances that still present a self-signed certificate. If omitted, the certificate is
+    validated.
+
+.PARAMETER Session
+    Optional. A session object from Connect-SfosFirewall, or the name of a session that was
+    registered with Connect-SfosFirewall -Name. Use it to address a specific firewall when you
+    work with more than one at a time. Any connection parameter you pass explicitly still
+    takes precedence. If omitted, the stored default connection is used.
+
+.INPUTS
+    None. This cmdlet does not accept pipeline input.
+
+.OUTPUTS
+    None. The cmdlet writes no output and raises an error if a local file is missing or the
+    firewall rejects the upload, for example if a template of that name already exists.
+
+.EXAMPLE
+    New-SfosWebServerAuthenticationTemplate -Name 'CustomLoginForm' -TemplateFile 'C:\Templates\login.html'
+
+    Uploads a new template built from a local HTML file.
+
+.EXAMPLE
+    New-SfosWebServerAuthenticationTemplate -Name 'CustomLoginForm' -TemplateFile 'C:\Templates\login.html' -AssetFile 'C:\Templates\login.css' -WhatIf
+
+    Shows what the call would create, including the asset file, without sending it to the
+    firewall.
+
+.LINK
+    https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+.LINK
+    Get-SfosWebServerAuthenticationTemplate
+
+.LINK
+    Set-SfosWebServerAuthenticationTemplate
+#>
+function New-SfosWebServerAuthenticationTemplate {
+    [CmdletBinding(SupportsShouldProcess)]
+    param(
+        [Parameter(Mandatory)]
+        [ValidateLength(1, 60)]
+        [ValidatePattern('^[^,]+$')]
+        [string]$Name,
+
+        [Parameter(Mandatory)]
+        [string]$TemplateFile,
+
+        [string[]]$AssetFile,
+
+        [string]$Firewall,
+        [int]$Port,
+        [string]$Username,
+        [SecureString]$Password,
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
+    )
+
+    $params = Resolve-SfosParameters -BoundParameters $PSBoundParameters
+
+    if (-not (Test-Path -LiteralPath $TemplateFile -PathType Leaf)) {
+        throw "Failed to create FormTemplate object '$Name': template file not found: $TemplateFile"
+    }
+    foreach ($asset in $AssetFile) {
+        if (-not (Test-Path -LiteralPath $asset -PathType Leaf)) {
+            throw "Failed to create FormTemplate object '$Name': asset file not found: $asset"
+        }
+    }
+
+    if (-not $PSCmdlet.ShouldProcess("FormTemplate '$Name' on $($params.Firewall)", 'Create')) {
+        return
+    }
+
+    $nameEsc = ConvertTo-SfosXmlEscaped -Text $Name
+    $templateNameEsc = ConvertTo-SfosXmlEscaped -Text (Split-Path -Path $TemplateFile -Leaf)
+
+    $multipartFile = @{ Template = $TemplateFile }
+    $assetsXml = ''
+    if ($AssetFile) {
+        $multipartFile['Asset'] = $AssetFile
+        $assetElements = foreach ($asset in $AssetFile) {
+            '<Asset>{0}</Asset>' -f (ConvertTo-SfosXmlEscaped -Text (Split-Path -Path $asset -Leaf))
+        }
+        $assetsXml = '<Assets>{0}</Assets>' -f ($assetElements -join '')
+    }
+
+    $inner = "<Set operation=`"add`"><FormTemplate><Name>$nameEsc</Name><Template>$templateNameEsc</Template>$assetsXml</FormTemplate></Set>"
+
+    try {
+        $response = Invoke-SfosApi -Firewall $params.Firewall `
+            -Port $params.Port `
+            -Username $params.Username `
+            -Password $params.Password `
+            -InnerXml $inner -MultipartFile $multipartFile `
+            -SkipCertificateCheck:$params.SkipCertificateCheck -ErrorAction Stop
+    }
+    catch {
+        throw "Failed to create FormTemplate object '$Name': $($_.Exception.Message)"
+    }
+
+    $XmlResponse = [xml]$response.Content
+    Assert-SfosApiReturnSuccess -Xml $XmlResponse -ObjectName 'FormTemplate' -Action 'create' -Target $Name
+}
+
+<#
+.SYNOPSIS
+    Updates a Web Server authentication template on a Sophos Firewall.
+
+.DESCRIPTION
+    Replaces the HTML template of an existing FormTemplate object. -TemplateFile and every
+    -AssetFile path is checked for existence before anything is sent.
+
+    The usual read-modify-write rule this suite otherwise applies to every Set-* cmdlet
+    does not work here: a Get on this entity answers with a tar archive, not a field set,
+    so there is nothing to read back and merge. An update is a straight replacement of the
+    uploaded template, not a partial change. Documenting that plainly, rather than
+    pretending to preserve fields this cmdlet cannot see, is the same choice already made
+    for the raw Get output above.
+
+.PARAMETER Name
+    Required. Name of the template to update.
+
+.PARAMETER TemplateFile
+    Required. Path to the HTML template file that replaces the stored one. The firewall
+    stores the file's name (not its directory) as the Template reference.
+
+.PARAMETER AssetFile
+    Optional. Path to one or more asset files, sent exactly as the API documentation
+    describes. Measured against a live firewall, on this firmware the request succeeds
+    with no error but the asset is silently not stored - see New-SfosWebServerAuthenticationTemplate
+    for the same finding in more detail. -AssetFile is kept because it matches the
+    documented contract, but do not rely on it doing anything today.
+
+.PARAMETER Firewall
+    Optional. Host name or IP address of the firewall. If omitted, the value from the current
+    connection is used.
+
+.PARAMETER Port
+    Optional. TCP port of the management API, usually 4444. If omitted, the value from the
+    current connection is used.
+
+.PARAMETER Username
+    Optional. User name for the API login. The account needs write permission for Web Server
+    authentication templates. If omitted, the value from the current connection is used.
+
+.PARAMETER Password
+    Optional. Password for the API login, as a SecureString. If omitted, the value from the
+    current connection is used.
+
+.PARAMETER SkipCertificateCheck
+    Optional. Accepts the firewall certificate without validating it. Use this only for
+    appliances that still present a self-signed certificate. If omitted, the certificate is
+    validated.
+
+.PARAMETER Session
+    Optional. A session object from Connect-SfosFirewall, or the name of a session that was
+    registered with Connect-SfosFirewall -Name. Use it to address a specific firewall when you
+    work with more than one at a time. Any connection parameter you pass explicitly still
+    takes precedence. If omitted, the stored default connection is used.
+
+.INPUTS
+    System.Management.Automation.PSCustomObject. Accepts the template name by property name.
+
+.OUTPUTS
+    None. The cmdlet writes no output and raises an error if the named template does not
+    exist, if a local file is missing, or if the firewall rejects the upload.
+
+.EXAMPLE
+    Set-SfosWebServerAuthenticationTemplate -Name 'CustomLoginForm' -TemplateFile 'C:\Templates\login-v2.html' -WhatIf
+
+    Shows what the call would replace without sending it to the firewall.
+
+.EXAMPLE
+    Set-SfosWebServerAuthenticationTemplate -Name 'CustomLoginForm' -TemplateFile 'C:\Templates\login-v2.html'
+
+    Replaces the stored template with the given HTML file. The cmdlet asks for
+    confirmation before it writes.
+
+.LINK
+    https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+.LINK
+    Get-SfosWebServerAuthenticationTemplate
+
+.LINK
+    New-SfosWebServerAuthenticationTemplate
+#>
+function Set-SfosWebServerAuthenticationTemplate {
+    [CmdletBinding(SupportsShouldProcess)]
+    param(
+        [Parameter(Mandatory, ValueFromPipeline, ValueFromPipelineByPropertyName)]
+        [ValidateLength(1, 60)]
+        [ValidatePattern('^[^,]+$')]
+        [string]$Name,
+
+        [Parameter(Mandatory)]
+        [string]$TemplateFile,
+
+        [string[]]$AssetFile,
+
+        [string]$Firewall,
+        [int]$Port,
+        [string]$Username,
+        [SecureString]$Password,
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
+    )
+
+    begin {
+        $params = Resolve-SfosParameters -BoundParameters $PSBoundParameters
+    }
+
+    process {
+        if (-not (Test-SfosWebServerAuthenticationTemplatePresent -Name $Name -ConnectionParameters $params)) {
+            throw "The FormTemplate object '$Name' was not found."
+        }
+
+        if (-not (Test-Path -LiteralPath $TemplateFile -PathType Leaf)) {
+            throw "Failed to update FormTemplate object '$Name': template file not found: $TemplateFile"
+        }
+        foreach ($asset in $AssetFile) {
+            if (-not (Test-Path -LiteralPath $asset -PathType Leaf)) {
+                throw "Failed to update FormTemplate object '$Name': asset file not found: $asset"
+            }
+        }
+
+        if (-not $PSCmdlet.ShouldProcess("FormTemplate '$Name' on $($params.Firewall)", 'Update')) {
+            return
+        }
+
+        $nameEsc = ConvertTo-SfosXmlEscaped -Text $Name
+        $templateNameEsc = ConvertTo-SfosXmlEscaped -Text (Split-Path -Path $TemplateFile -Leaf)
+
+        $multipartFile = @{ Template = $TemplateFile }
+        $assetsXml = ''
+        if ($AssetFile) {
+            $multipartFile['Asset'] = $AssetFile
+            $assetElements = foreach ($asset in $AssetFile) {
+                '<Asset>{0}</Asset>' -f (ConvertTo-SfosXmlEscaped -Text (Split-Path -Path $asset -Leaf))
+            }
+            $assetsXml = '<Assets>{0}</Assets>' -f ($assetElements -join '')
+        }
+
+        $inner = "<Set operation=`"update`"><FormTemplate><Name>$nameEsc</Name><Template>$templateNameEsc</Template>$assetsXml</FormTemplate></Set>"
+
+        try {
+            $response = Invoke-SfosApi -Firewall $params.Firewall `
+                -Port $params.Port `
+                -Username $params.Username `
+                -Password $params.Password `
+                -InnerXml $inner -MultipartFile $multipartFile `
+                -SkipCertificateCheck:$params.SkipCertificateCheck -ErrorAction Stop
+        }
+        catch {
+            throw "Failed to update FormTemplate object '$Name': $($_.Exception.Message)"
+        }
+
+        $XmlResponse = [xml]$response.Content
+        Assert-SfosApiReturnSuccess -Xml $XmlResponse -ObjectName 'FormTemplate' -Action 'update' -Target $Name
+    }
+}
+
+<#
+.SYNOPSIS
     Removes a Web Server authentication template from a Sophos Firewall.
 
 .DESCRIPTION
-    Removes a FormTemplate object. The firewall answers a Remove of a template name that
-    never existed with a plain 200 success, as if the removal had done something - this
-    cmdlet does not trust that response. It checks for the object's existence before sending
-    the Remove, so a nonexistent name fails with a clear error instead of a false success,
-    and checks again afterwards, throwing if the object is still present despite the
-    firewall reporting success.
+    Removes a FormTemplate object. The firewall answers every removal with a plain 200,
+    whether or not it performed one - a name that never existed is reported as removed, and
+    on the tested firmware an existing template is reported as removed and is still there
+    afterwards. This cmdlet does not trust that response. It checks for the object's
+    existence before sending the Remove, so a nonexistent name fails with a clear error
+    instead of a false success, and reads the object back afterwards, throwing if it is
+    still present. Where the firewall refuses to remove a template, the web admin console
+    is the remaining way to do it.
 
 .PARAMETER Name
     Required. Name of the template to remove.

@@ -61,6 +61,24 @@ $response = Invoke-SfosApi -Firewall '192.0.2.10' -Port 4444 -Username $cred.Use
 Assert-SfosApiReturnSuccess -Xml $xml -ObjectName 'Zone' -Action 'read' -Target 'Zone'
 ```
 
+### Uploading a file alongside the request
+
+A handful of operations (FormTemplate, Certificate, CertificateAuthority, CRL, and
+similar) take a file upload together with the request XML. Pass it as `-MultipartFile`, a
+hashtable of multipart field name to one file path or an array of paths:
+
+```powershell
+$inner = '<Set operation="add"><FormTemplate><Name>Portal1</Name><Template>portal.html</Template></FormTemplate></Set>'
+$response = Invoke-SfosApi -Firewall '192.0.2.10' -Username $cred.UserName -Password $securePw -InnerXml $inner -MultipartFile @{ Template = 'C:\templates\portal.html' } -SkipCertificateCheck
+[xml]$xml = $response.Content
+Assert-SfosApiReturnSuccess -Xml $xml -ObjectName 'FormTemplate' -Action 'create' -Target 'Portal1'
+```
+
+The field name must match the XML element that references the upload (`Template` above),
+and that element's text must be the file's base name, matching the uploaded file. Calls
+that do not pass `-MultipartFile` are unaffected - the request is sent exactly as before
+this parameter existed.
+
 ## Cmdlets
 
 | Cmdlet | Purpose |

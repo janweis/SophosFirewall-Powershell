@@ -152,7 +152,7 @@ Set-SfosWebFilterSettings -WebCaching 'Enable'
 | `Get-SfosMalwareProtection` | Reads the malware protection settings. |
 | `Set-SfosMalwareProtection` | Updates the malware protection settings. |
 | `Get-SfosWebFilterSettings` | Reads the web filter settings. |
-| `Set-SfosWebFilterSettings` | Updates the web filter settings. |
+| `Set-SfosWebFilterSettings` | Updates the web filter settings; `-TopImageFile`/`-BottomImageFile` upload the block/warn page images. |
 | `Get-SfosWebFilterProtectionSettings` | Reads the web filter protection settings. |
 | `Set-SfosWebFilterProtectionSettings` | Updates the web filter protection settings. |
 | `Get-SfosWebFilterAdvancedSettings` | Reads the web filter advanced settings. |
@@ -195,6 +195,12 @@ and `WebFilterSettings` instead.
 `WebFilterNotificationSettings` (override flags and the denied message image) is a separate
 entity from `DefaultWebFilterNotificationSettings` (around 70 notification message texts) -
 do not confuse the two cmdlet pairs.
+
+`Set-SfosWebFilterSettings -TopImageFile`/`-BottomImageFile` upload a jpg/jpeg image for the
+block/warn page through the multipart transport in `SophosFirewall.Core`. Both fields are
+write-only: `Get-SfosWebFilterSettings` never returns them, so an upload cannot be read back
+or verified through the API, and whether omitting them on a later update clears a
+previously uploaded image is unmeasured.
 
 ## License
 

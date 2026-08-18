@@ -578,19 +578,32 @@ Describe 'New-*/Set-* XML generation' {
     }
 
     Context 'New-SfosSiteToSiteClient - unconfirmed transport, XML shape only' {
-        It 'converts -FilePassword and -ProxySecurePassword (SecureString) to plain XML elements' {
+        It 'converts -FilePassword and -ProxySecurePassword (SecureString) to plain XML elements, and sends the file base name with the matching MultipartFile field' {
+            $cfgPath = Join-Path -Path 'TestDrive:\' -ChildPath 'zzwvs2sclient.apc'
+            Set-Content -Path $cfgPath -Value 'placeholder configuration content'
             $filePw = ConvertTo-SecureString 'FileSecret1' -AsPlainText -Force
             $proxyPw = ConvertTo-SecureString 'ProxySecret1' -AsPlainText -Force
-            New-SfosSiteToSiteClient -Name 'ZZWVS2SClient' -ServerConfigurationFile 'base64placeholder' `
+            New-SfosSiteToSiteClient -Name 'ZZWVS2SClient' -ServerConfigurationFile $cfgPath `
                 -FilePassword $filePw -ProxyAuthentication Enable -ProxyUsername 'proxyuser' `
                 -ProxySecurePassword $proxyPw @conn -Confirm:$false
 
             Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -Times 1 -Exactly -ParameterFilter {
                 $InnerXml -match '<Set operation="add">' -and
+                $InnerXml -match '<ServerConfigurationFile>zzwvs2sclient\.apc</ServerConfigurationFile>' -and
                 $InnerXml -match '<FilePassword>FileSecret1</FilePassword>' -and
                 $InnerXml -match '<Username>proxyuser</Username>' -and
-                $InnerXml -match '<Password>ProxySecret1</Password>'
+                $InnerXml -match '<Password>ProxySecret1</Password>' -and
+                $MultipartFile.Count -eq 1 -and
+                $MultipartFile['ServerConfigurationFile'] -eq $cfgPath
             }
+        }
+
+        It 'throws client-side, without calling the API, when the ServerConfigurationFile path does not exist' {
+            $missingPath = Join-Path -Path 'TestDrive:\' -ChildPath 'does-not-exist.apc'
+            { New-SfosSiteToSiteClient -Name 'ZZWVS2SClientMissing' -ServerConfigurationFile $missingPath @conn -Confirm:$false } |
+                Should -Throw '*not found*'
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -Times 0 -Exactly
         }
 
         It 'throws client-side when -HttpProxyServer Enable is requested without -ProxyServer/-ProxyPort' {
@@ -1125,8 +1138,10 @@ Describe 'Measured special-case behaviours' {
             (Get-Command New-SfosSiteToSiteClient).Parameters['FilePassword'].ParameterType.Name | Should -Be 'SecureString'
             (Get-Command New-SfosSiteToSiteClient).Parameters['ProxySecurePassword'].ParameterType.Name | Should -Be 'SecureString'
             $sec = ConvertTo-SecureString 'x' -AsPlainText -Force
+            $cfgPath = Join-Path -Path 'TestDrive:\' -ChildPath 'zzwi.apc'
+            Set-Content -Path $cfgPath -Value 'placeholder'
             {
-                New-SfosSiteToSiteClient -Name 'ZZWI' -ServerConfigurationFile 'x' -FilePassword $sec `
+                New-SfosSiteToSiteClient -Name 'ZZWI' -ServerConfigurationFile $cfgPath -FilePassword $sec `
                     -ProxyAuthentication Enable -ProxyUsername 'u' -ProxySecurePassword $sec @conn -WhatIf
             } | Should -Not -Throw
         }
@@ -1279,7 +1294,9 @@ Describe 'ShouldProcess - -WhatIf prevents every write cmdlet from sending a wri
         Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -Times 0 -Exactly -ParameterFilter $writeFilter
     }
     It 'New-SfosSiteToSiteClient sends no write request under -WhatIf' {
-        New-SfosSiteToSiteClient -Name 'ZZWIS2SClient' -ServerConfigurationFile 'x' @conn -WhatIf
+        $cfgPath = Join-Path -Path 'TestDrive:\' -ChildPath 'zzwis2sclient.apc'
+        Set-Content -Path $cfgPath -Value 'placeholder'
+        New-SfosSiteToSiteClient -Name 'ZZWIS2SClient' -ServerConfigurationFile $cfgPath @conn -WhatIf
         Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -Times 0 -Exactly -ParameterFilter $writeFilter
     }
     It 'New-SfosSiteToSiteServer sends no write request under -WhatIf' {
@@ -1565,14 +1582,17 @@ Describe 'Additional coverage - functions without a prior XML-generation or erro
         }
     }
 
-    Context 'New-SfosSiteToSiteClient - measured field-less 500 (transport cannot carry the required file upload)' {
-        It 'throws on the field-less 500 the firewall answers for every variant tried' {
+    Context 'New-SfosSiteToSiteClient - measured 501 on a syntactically invalid probe file' {
+        It 'throws on the 501 the firewall answers once the upload reaches its file parser' {
             Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -MockWith {
-                [PSCustomObject]@{ Content = '<Response><SiteToSiteClient><Status code="500">Operation could not be performed on Entity.</Status></SiteToSiteClient></Response>' }
+                [PSCustomObject]@{ Content = '<Response><SiteToSiteClient><Status code="501">Configuration parameters validation failed.</Status></SiteToSiteClient></Response>' }
             }
 
-            { New-SfosSiteToSiteClient -Name 'ZZFieldlessS2SClient' -ServerConfigurationFile 'placeholder' @conn -Confirm:$false } |
-                Should -Throw '*500*'
+            $cfgPath = Join-Path -Path 'TestDrive:\' -ChildPath 'zzfieldlesss2sclient.apc'
+            Set-Content -Path $cfgPath -Value 'placeholder'
+
+            { New-SfosSiteToSiteClient -Name 'ZZFieldlessS2SClient' -ServerConfigurationFile $cfgPath @conn -Confirm:$false } |
+                Should -Throw '*501*'
         }
     }
 
@@ -1588,7 +1608,7 @@ Describe 'Additional coverage - functions without a prior XML-generation or erro
             }
         }
 
-        It 'preserves HttpProxyServer, ProxyServer/ProxyPort and Status when only Description changes' {
+        It 'preserves HttpProxyServer, ProxyServer/ProxyPort and Status when only Description changes, sending no MultipartFile' {
             Set-SfosSiteToSiteClient -Name 'ZZRmwS2SClient' -Description 'updated' @conn -Confirm:$false
 
             Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -Times 1 -Exactly -ParameterFilter {
@@ -1597,7 +1617,37 @@ Describe 'Additional coverage - functions without a prior XML-generation or erro
                 $InnerXml -match '<HttpProxyServer>Enable</HttpProxyServer>' -and
                 $InnerXml -match '<ProxyServer>proxy\.example</ProxyServer>' -and
                 $InnerXml -match '<ProxyPort>8080</ProxyPort>' -and
-                $InnerXml -match '<Status>On</Status>'
+                $InnerXml -match '<Status>On</Status>' -and
+                $InnerXml -notmatch '<ServerConfigurationFile>' -and
+                (-not $MultipartFile -or $MultipartFile.Count -eq 0)
+            }
+        }
+
+        It 'sends the file base name and the matching MultipartFile field when -ServerConfigurationFile is passed, without losing the other preserved fields' {
+            $cfgPath = Join-Path -Path 'TestDrive:\' -ChildPath 'zzrmws2sclient.apc'
+            Set-Content -Path $cfgPath -Value 'replacement configuration content'
+
+            Set-SfosSiteToSiteClient -Name 'ZZRmwS2SClient' -ServerConfigurationFile $cfgPath @conn -Confirm:$false
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Set operation="update">' -and
+                $InnerXml -match '<ServerConfigurationFile>zzrmws2sclient\.apc</ServerConfigurationFile>' -and
+                $InnerXml -match '<Description>original</Description>' -and
+                $InnerXml -match '<HttpProxyServer>Enable</HttpProxyServer>' -and
+                $InnerXml -match '<ProxyServer>proxy\.example</ProxyServer>' -and
+                $MultipartFile.Count -eq 1 -and
+                $MultipartFile['ServerConfigurationFile'] -eq $cfgPath
+            }
+        }
+
+        It 'throws client-side, without calling the API, when the ServerConfigurationFile path does not exist' {
+            $missingPath = Join-Path -Path 'TestDrive:\' -ChildPath 'does-not-exist.apc'
+
+            { Set-SfosSiteToSiteClient -Name 'ZZRmwS2SClient' -ServerConfigurationFile $missingPath @conn -Confirm:$false } |
+                Should -Throw '*not found*'
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.VPN -Times 0 -Exactly -ParameterFilter {
+                $InnerXml -match '<Set operation="update">'
             }
         }
     }

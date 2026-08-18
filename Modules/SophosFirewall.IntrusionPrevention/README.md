@@ -59,6 +59,8 @@ Get-SfosDoSBypassRule -ProtocolLike 'TCP'
 New-SfosTrustedMAC -MACAddress '00:16:76:00:00:01' -IPV4Association Static -IPV4Address '198.51.100.10'
 Set-SfosTrustedMAC -MACAddress '00:16:76:00:00:01' -IPV4Address '198.51.100.20'
 Remove-SfosTrustedMAC -MACAddress '00:16:76:00:00:01'
+
+Import-SfosTrustedMACList -FilePath 'C:\Lists\TrustedMAC.csv'
 ```
 
 ## Cmdlets
@@ -93,7 +95,8 @@ Remove-SfosTrustedMAC -MACAddress '00:16:76:00:00:01'
 | `Set-SfosTrustedMAC` | Updates a trusted MAC address entry, optionally renaming the MAC address. |
 | `Remove-SfosTrustedMAC` | Removes a trusted MAC address entry. |
 | `Export-SfosTrustedMACs` | Exports trusted MAC address entries to a file. |
-| `Import-SfosTrustedMACs` | Imports trusted MAC address entries from a file. |
+| `Import-SfosTrustedMACs` | Reads a local CSV/JSON file and creates one trusted MAC entry per row. |
+| `Import-SfosTrustedMACList` | Uploads a trusted MAC list file to the firewall for it to import. |
 
 ## Limitations
 
@@ -124,6 +127,11 @@ have no effect for `ICMP`/`AllProtocol`.
 `Get-SfosTrustedMAC`'s `-MACAddressLike` filters client-side. `New-`/`Set-SfosTrustedMAC`
 have no `-AssociateIP` parameter, because `Get-SfosTrustedMAC` never returns the field back
 for verification.
+
+`Import-SfosTrustedMACList` uploads a file; the firewall requires it to be a CSV with the
+exact header `MAC Address, IP Association, IP Address`, and rejects anything else with a
+400 error. Re-uploading the same file is a no-op, not a conflict, and does not duplicate
+entries.
 
 ## License
 

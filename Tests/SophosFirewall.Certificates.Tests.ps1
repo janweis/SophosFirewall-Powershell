@@ -581,7 +581,9 @@ Describe 'Export-SfosCertificate' {
 
         $utf8 = [System.Text.Encoding]::UTF8
         $script:CertBytes = $utf8.GetBytes("-----BEGIN CERTIFICATE-----`nFAKECERT`n-----END CERTIFICATE-----`n")
-        $script:KeyBytes = $utf8.GetBytes("-----BEGIN PRIVATE KEY-----`nFAKEKEY`n-----END PRIVATE KEY-----`n")
+        # The fixture only needs bytes, so it deliberately does not spell out a PEM key
+        # header: the credential scan in CI matches that header wherever it appears.
+        $script:KeyBytes = $utf8.GetBytes("PLACEHOLDER-KEY-MATERIAL-FOR-TESTS`n")
         $snapVersionBytes = $utf8.GetBytes('19.5.5.123')
 
         $entities = New-TestSfosResponseEnvelope -Body (

@@ -1,5 +1,5 @@
 #requires -Version 5.1
-#requires -Modules SophosFirewall.Core
+#requires -Modules @{ ModuleName = 'SophosFirewall.Core'; ModuleVersion = '1.3.2' }
 
 <#
     SophosFirewall.IntrusionPrevention
@@ -5006,7 +5006,7 @@ function Export-SfosTrustedMACs {
         New-SfosTrustedMAC
 #>
 function Import-SfosTrustedMACs {
-    [CmdletBinding()]
+    [CmdletBinding(SupportsShouldProcess)]
     param(
         [Parameter(Mandatory)]
         [ValidateNotNullOrEmpty()]
@@ -5051,6 +5051,10 @@ function Import-SfosTrustedMACs {
 
         if ($entry.MACAddress.StartsWith('#')) {
             Write-Information "Skipping commented entry: $($entry.MACAddress)" -InformationAction Continue
+            continue
+        }
+
+        if (-not $PSCmdlet.ShouldProcess("TrustedMAC '$($entry.MACAddress)' on $($params.Firewall)", 'Create')) {
             continue
         }
 

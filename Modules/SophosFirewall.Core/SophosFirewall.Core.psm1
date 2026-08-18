@@ -1,4 +1,4 @@
-﻿#requires -Version 5.1
+#requires -Version 5.1
 <#
     SophosFirewall.Core
     ====================
@@ -1037,6 +1037,10 @@ function Resolve-SfosParameters {
     Get-SfosSession
 #>
 function Connect-SfosFirewall {
+    # PSUseShouldProcessForStateChangingFunctions is suppressed on purpose. Connecting only
+    # stores session data in this process and reads from the firewall to verify it; nothing
+    # on the appliance changes, so there is nothing for ShouldProcess to confirm.
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '')]
     [CmdletBinding()]
     [OutputType([PSCustomObject])]
     param(
@@ -1143,6 +1147,10 @@ function Connect-SfosFirewall {
     Get-SfosSession
 #>
 function Disconnect-SfosFirewall {
+    # PSUseShouldProcessForStateChangingFunctions is suppressed on purpose. Disconnecting drops
+    # session data held in this process; the firewall is never contacted, so there is nothing
+    # for ShouldProcess to confirm.
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '')]
     # PSReviewUnusedParameter: -All only selects the 'All' parameter set; $PSCmdlet.ParameterSetName
     # drives the body, so the switch's value itself is never read once it has done that job.
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'All')]

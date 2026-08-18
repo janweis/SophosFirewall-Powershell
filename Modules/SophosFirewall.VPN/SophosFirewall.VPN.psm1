@@ -1,5 +1,5 @@
-﻿#requires -Version 5.1
-#requires -Modules @{ ModuleName = 'SophosFirewall.Core'; ModuleVersion = '1.1.0' }
+#requires -Version 5.1
+#requires -Modules @{ ModuleName = 'SophosFirewall.Core'; ModuleVersion = '1.3.2' }
 
 <#
         .SYNOPSIS
@@ -21,6 +21,8 @@
         Connect once with Connect-SfosFirewall, then call the functions without connection
         parameters.
 
+        Total Functions: 51 - see README.md for the full cmdlet table.
+
         .EXAMPLE
         Connect-SfosFirewall -Firewall "192.168.1.1" -Credential (Get-Credential) -SkipCertificateCheck
         Get-SfosVPNProfile | Format-Table Name, KeyingMethod
@@ -32,8 +34,6 @@
         Remove-SfosVPNProfile -Name "Branch-IKEv2" -Confirm:$false
 #>
 
-#requires -Version 5.1
-#requires -Modules SophosFirewall.Core
 
 # SophosFirewall.VPN - IPsec core (VPNIPSecConnection, VPNProfile, VPNFailoverGroup,
 # SophosConnectClient).
@@ -3036,8 +3036,6 @@ function Get-SfosSophosConnectClient {
 
 #endregion
 
-#requires -Version 5.1
-#requires -Modules SophosFirewall.Core
 
 # SophosFirewall.VPN - SSLVPN (SSLTunnelAccessSettings, SSLVPNPolicy, SSLBookmark,
 # SSLBookmarkGroup, SiteToSiteClient, SiteToSiteServer).
@@ -7326,8 +7324,6 @@ function Remove-SfosSiteToSiteServer {
 
 #endregion
 
-#requires -Version 5.1
-#requires -Modules SophosFirewall.Core
 
 # SophosFirewall.VPN - L2TP and PPTP legacy tunnel protocols
 # Entities: L2TPConfiguration (doc folder L2TPConfiguration, singleton), L2TPConnection (doc

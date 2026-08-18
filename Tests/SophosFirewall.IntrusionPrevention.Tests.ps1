@@ -1270,6 +1270,20 @@ Describe 'Import-SfosTrustedMACs' {
 
         { Import-SfosTrustedMACs -FilePath $path @conn } | Should -Throw '*was not found*'
     }
+
+    It 'does not call the API with -WhatIf' {
+        Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.IntrusionPrevention -MockWith {
+            [PSCustomObject]@{ Content = '<Response><TrustedMAC><Status code="200">Configuration applied successfully.</Status></TrustedMAC></Response>' }
+        }
+
+        $path = Join-Path -Path 'TestDrive:\' -ChildPath 'whatif-trustedmacs.csv'
+        @([PSCustomObject]@{ MACAddress = '00:16:76:AB:CD:03'; IPV4Association = 'Static'; IPV4Address = '10.99.60.11'; IPV6Association = ''; IPV6Address = '' }) |
+            Export-Csv -Path $path -NoTypeInformation -Encoding UTF8
+
+        Import-SfosTrustedMACs -FilePath $path @conn -WhatIf
+
+        Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.IntrusionPrevention -Times 0 -Exactly
+    }
 }
 
 Describe 'Import-SfosTrustedMACList' {

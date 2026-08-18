@@ -1,5 +1,5 @@
-﻿#requires -Version 5.1
-#requires -Modules @{ ModuleName = 'SophosFirewall.Core'; ModuleVersion = '1.1.0' }
+#requires -Version 5.1
+#requires -Modules @{ ModuleName = 'SophosFirewall.Core'; ModuleVersion = '1.3.1' }
 <#
         .SYNOPSIS
         Manages network configuration on Sophos Firewall: interfaces, VLANs, zones, gateways,
@@ -21,6 +21,9 @@
         Several of these are singletons: the DNS resolver settings, the ARP configuration, the
         gateway configuration and the cellular WAN have no name and no create or delete
         operation, only a read and an update.
+
+        Total Functions: 117 (100 exported, 17 internal helpers) - see README.md for the full
+        cmdlet table.
 
         All functions support pipeline input, filtering, and connection context management.
         Use Connect-SfosFirewall once, then call functions without connection parameters.

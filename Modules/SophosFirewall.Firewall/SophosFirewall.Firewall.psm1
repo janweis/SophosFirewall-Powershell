@@ -1,5 +1,5 @@
-﻿#requires -Version 5.1
-#requires -Modules @{ ModuleName = 'SophosFirewall.Core'; ModuleVersion = '1.1.0' }
+#requires -Version 5.1
+#requires -Modules @{ ModuleName = 'SophosFirewall.Core'; ModuleVersion = '1.3.1' }
 <#
         .SYNOPSIS
         Manages firewall rules, rule groups, NAT rules and SSL/TLS inspection on a Sophos Firewall.
@@ -21,6 +21,9 @@
         supported; PolicyType User and HTTPBased are documented but not implemented. A rule
         placed at Position Bottom is stored as After the last existing rule, so a later read
         shows After, not Bottom.
+
+        Total Functions: 27 (21 exported, 6 internal helpers) - see README.md for the full
+        cmdlet table.
 
         .EXAMPLE
         Connect-SfosFirewall -Firewall "192.168.1.1" -Credential (Get-Credential) -SkipCertificateCheck

@@ -11,7 +11,7 @@
     login security, password complexity, login disclaimer, factory reset), and the
     Local Service ACL rule list (management access control by zone/source host).
 
-    Total Functions: 29 - see README.md for the full cmdlet table.
+    Total Functions: 32 - see README.md for the full cmdlet table.
 
     Requires SophosFirewall.Core (>= 1.3.0) for transport, session state and status
     evaluation. All XML building and entity parsing happens here; all HTTP(S) happens

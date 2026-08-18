@@ -629,6 +629,39 @@ Describe 'IPHost - Extended Coverage' {
         It 'Import-SfosIPHosts should throw if the file does not exist' {
             { Import-SfosIPHosts -FilePath (Join-Path $TestDrive 'missing.csv') @conn } | Should -Throw '*was not found*'
         }
+
+        It 'Should not call the API with -WhatIf' {
+            $csvPath = Join-Path $TestDrive 'whatif-iphosts.csv'
+            @([PSCustomObject]@{ Name = 'WhatIfHost'; IPFamily = 'IPv4'; Description = ''; HostType = 'IP'; IPAddress = '198.51.100.10'; Subnet = ''; StartIPAddress = ''; EndIPAddress = ''; ListOfIPAddresses = ''; HostGroupList = '' }) |
+                Export-Csv -Path $csvPath -NoTypeInformation
+
+            Import-SfosIPHosts -FilePath $csvPath @conn -WhatIf
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.HostsAndServices -Times 0 -Exactly
+        }
+
+        It 'Regression: a row with a missing required field must not be created, even though the fixed loop still processes the row after it' {
+            # Historic defect: the HostType switch validated required fields with a plain
+            # 'continue', which in PowerShell only exits the enclosing switch, not the
+            # foreach - so the invalid row fell through into New-SfosIPHost anyway and was
+            # created alongside the valid one (two writes instead of one). The switch now
+            # uses a labeled 'continue importIPHosts' for exactly this reason.
+            $csvPath = Join-Path $TestDrive 'mixed-iphosts.csv'
+            @(
+                [PSCustomObject]@{ Name = 'GoodHost'; IPFamily = 'IPv4'; Description = ''; HostType = 'IP'; IPAddress = '198.51.100.20'; Subnet = ''; StartIPAddress = ''; EndIPAddress = ''; ListOfIPAddresses = ''; HostGroupList = '' }
+                [PSCustomObject]@{ Name = 'BadHost'; IPFamily = 'IPv4'; Description = ''; HostType = 'IP'; IPAddress = ''; Subnet = ''; StartIPAddress = ''; EndIPAddress = ''; ListOfIPAddresses = ''; HostGroupList = '' }
+            ) | Export-Csv -Path $csvPath -NoTypeInformation
+
+            Import-SfosIPHosts -FilePath $csvPath @conn
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.HostsAndServices -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Set operation="add">' -and $InnerXml -match '<Name>GoodHost</Name>'
+            }
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.HostsAndServices -Times 0 -Exactly -ParameterFilter {
+                $InnerXml -match '<Name>BadHost</Name>'
+            }
+        }
     }
 }
 
@@ -1812,6 +1845,50 @@ Describe 'Service - Extended Coverage' {
         It 'Import-SfosServices should throw if the file does not exist' {
             { Import-SfosServices -FilePath (Join-Path $TestDrive 'missing.csv') @conn } | Should -Throw '*was not found*'
         }
+
+        It 'Should not call the API with -WhatIf' {
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.HostsAndServices -MockWith {
+                [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><Services><Status code="200">Configuration applied successfully.</Status></Services></Response>' }
+            }
+
+            $csvPath = Join-Path $TestDrive 'whatif-services.csv'
+            @([PSCustomObject]@{ Name = 'WhatIfSvc'; Description = ''; Type = 'TCPorUDP'; Protocol = 'TCP'; SrcPort = '1:65535'; DstPort = '8080'; ProtocolName = ''; ICMPType = ''; ICMPCode = ''; ICMPv6Type = ''; ICMPv6Code = '' }) |
+                Export-Csv -Path $csvPath -NoTypeInformation
+
+            Import-SfosServices -FilePath $csvPath @conn -WhatIf
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.HostsAndServices -Times 0 -Exactly
+        }
+
+        It 'Regression: a row without the required value for its Type must not be created, and the following valid row still is' {
+            # Same 'continue' defect class as Import-SfosIPHosts: the switch that dispatches
+            # on Type now uses a labeled 'continue importServices' after ShouldProcess, so a
+            # row that cannot be created (here: ICMP, which has no reliable text-to-code
+            # mapping and always fails) does not prevent - or duplicate - the write for the
+            # next, valid row.
+            Mock -CommandName Invoke-SfosApi -ModuleName SophosFirewall.HostsAndServices -MockWith {
+                [PSCustomObject]@{ Content = '<Response><Login><status>Authentication Successful</status></Login><Services><Status code="200">Configuration applied successfully.</Status></Services></Response>' }
+            }
+
+            $csvPath = Join-Path $TestDrive 'mixed-services.csv'
+            @(
+                [PSCustomObject]@{ Name = 'BadPing'; Description = ''; Type = 'ICMP'; Protocol = ''; SrcPort = ''; DstPort = ''; ProtocolName = ''; ICMPType = 'Echo'; ICMPCode = 'Any Code'; ICMPv6Type = ''; ICMPv6Code = '' }
+                [PSCustomObject]@{ Name = 'GoodSvc'; Description = ''; Type = 'TCPorUDP'; Protocol = 'TCP'; SrcPort = '1:65535'; DstPort = '9090'; ProtocolName = ''; ICMPType = ''; ICMPCode = ''; ICMPv6Type = ''; ICMPv6Code = '' }
+            ) | Export-Csv -Path $csvPath -NoTypeInformation
+
+            $result = Import-SfosServices -FilePath $csvPath @conn
+
+            $result.Failed | Should -Be 1
+            $result.FailedItems[0].Name | Should -Be 'BadPing'
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.HostsAndServices -Times 1 -Exactly -ParameterFilter {
+                $InnerXml -match '<Set operation=''add''>' -and $InnerXml -match '<Name>GoodSvc</Name>'
+            }
+
+            Should -Invoke -CommandName Invoke-SfosApi -ModuleName SophosFirewall.HostsAndServices -Times 0 -Exactly -ParameterFilter {
+                $InnerXml -match '<Name>BadPing</Name>'
+            }
+        }
     }
 }
 
@@ -2014,6 +2091,32 @@ Describe 'ServiceGroup - Extended Coverage' {
                 $InnerXml -match '<Set operation="add">' -and $InnerXml -match '<Service>HTTP</Service>'
             }
         }
+    }
+}
+
+Describe 'Import cmdlets - WhatIf contract' {
+    # Import-SfosIPHosts, Import-SfosServices and Import-SfosTrustedMACs (IntrusionPrevention
+    # module) are covered end-to-end above, including the missing-field regression. The
+    # remaining Import-* cmdlets in this module gained SupportsShouldProcess the same way;
+    # this only guards against the parameter silently disappearing again.
+    It 'Import-SfosIPHostGroups should have a WhatIf parameter' {
+        (Get-Command Import-SfosIPHostGroups).Parameters.Keys | Should -Contain 'WhatIf'
+    }
+
+    It 'Import-SfosFQDNHosts should have a WhatIf parameter' {
+        (Get-Command Import-SfosFQDNHosts).Parameters.Keys | Should -Contain 'WhatIf'
+    }
+
+    It 'Import-SfosFQDNHostGroups should have a WhatIf parameter' {
+        (Get-Command Import-SfosFQDNHostGroups).Parameters.Keys | Should -Contain 'WhatIf'
+    }
+
+    It 'Import-SfosMACHosts should have a WhatIf parameter' {
+        (Get-Command Import-SfosMACHosts).Parameters.Keys | Should -Contain 'WhatIf'
+    }
+
+    It 'Import-SfosServiceGroups should have a WhatIf parameter' {
+        (Get-Command Import-SfosServiceGroups).Parameters.Keys | Should -Contain 'WhatIf'
     }
 }
 

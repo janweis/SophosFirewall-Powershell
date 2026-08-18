@@ -1,5 +1,5 @@
-﻿#requires -Version 5.1
-#requires -Modules @{ ModuleName = 'SophosFirewall.Core'; ModuleVersion = '1.1.0' }
+#requires -Version 5.1
+#requires -Modules @{ ModuleName = 'SophosFirewall.Core'; ModuleVersion = '1.3.2' }
 <#
         .SYNOPSIS
         Manages IP hosts, FQDN hosts, MAC hosts, host groups, services, and service groups on Sophos Firewall.
@@ -10,6 +10,9 @@
         country groups, services, and service groups. Each object type has Get/New/Set/Remove
         cmdlets, and every group or list-based type also has Export/Import and, where it has
         members, Add-/Remove-Member cmdlets.
+
+        Total Functions: 53 (53 exported, 0 internal helpers) - see README.md for the full
+        cmdlet table.
 
         Connect once with Connect-SfosFirewall, then call the cmdlets in this module without
         repeating the connection parameters.
@@ -1256,7 +1259,7 @@ function Export-SfosIPHosts {
         Export-SfosIPHosts
 #>
 function Import-SfosIPHosts {
-    [CmdletBinding()]
+    [CmdletBinding(SupportsShouldProcess)]
     param(
         [parameter(Mandatory)]
         [ValidateNotNullOrEmpty()]
@@ -1288,7 +1291,7 @@ function Import-SfosIPHosts {
         throw "Failed to import IP hosts from '$FilePath': $($_.Exception.Message)"
     }
 
-    foreach ($ipHost in $ipHosts) {
+    :importIPHosts foreach ($ipHost in $ipHosts) {
 
         if (-not $ipHost.Name) {
             Write-Information "Skipping entry without Name." -InformationAction Continue
@@ -1309,31 +1312,35 @@ function Import-SfosIPHosts {
             'IP' {
                 if (-not $ipHost.IPAddress) {
                     Write-Information "Skipping IP host without IPAddress: $($ipHost.Name)" -InformationAction Continue
-                    continue
+                    continue importIPHosts
                 }
             }
             'Network' {
                 if (-not $ipHost.IPAddress -or -not $ipHost.Subnet) {
                     Write-Information "Skipping Network host without IPAddress or Subnet: $($ipHost.Name)" -InformationAction Continue
-                    continue
+                    continue importIPHosts
                 }
             }
             'IPRange' {
                 if (-not $ipHost.StartIPAddress -or -not $ipHost.EndIPAddress) {
                     Write-Information "Skipping IPRange host without StartIPAddress or EndIPAddress: $($ipHost.Name)" -InformationAction Continue
-                    continue
+                    continue importIPHosts
                 }
             }
             'IPList' {
                 if (-not $ipHost.ListOfIPAddresses) {
                     Write-Information "Skipping IPList host without ListOfIPAddresses: $($ipHost.Name)" -InformationAction Continue
-                    continue
+                    continue importIPHosts
                 }
             }
             default {
                 Write-Information "Skipping entry with invalid HostType '$($ipHost.HostType)': $($ipHost.Name)" -InformationAction Continue
-                continue
+                continue importIPHosts
             }
+        }
+
+        if (-not $PSCmdlet.ShouldProcess("IPHost '$($ipHost.Name)' on $($params.Firewall)", 'Create')) {
+            continue
         }
 
         try {
@@ -2703,7 +2710,7 @@ function Export-SfosIPHostGroups {
         Export-SfosIPHostGroups
 #>
 function Import-SfosIPHostGroups {
-    [CmdletBinding()]
+    [CmdletBinding(SupportsShouldProcess)]
     param(
         [Parameter(Mandatory)]
         [ValidateNotNullOrEmpty()]
@@ -2755,6 +2762,10 @@ function Import-SfosIPHostGroups {
 
     # Create IP host groups on the Sophos Firewall
     foreach ($group in $ipHostGroups) {
+        if (-not $PSCmdlet.ShouldProcess("IPHostGroup '$($group.Name)' on $($params.Firewall)", 'Create')) {
+            continue
+        }
+
         try {
             # HostList comes back as a comma-separated string (see Export-SfosIPHostGroups).
             # Split it into an array and drop empty entries.
@@ -3883,7 +3894,7 @@ function Export-SfosFQDNHosts {
         Export-SfosFQDNHosts
 #>
 function Import-SfosFQDNHosts {
-    [CmdletBinding()]
+    [CmdletBinding(SupportsShouldProcess)]
     param(
         [Parameter(Mandatory)]
         [ValidateNotNullOrEmpty()]
@@ -3935,6 +3946,10 @@ function Import-SfosFQDNHosts {
 
     # Create FQDN hosts on the Sophos Firewall
     foreach ($fqdnHost in $fqdnHosts) {
+        if (-not $PSCmdlet.ShouldProcess("FQDNHost '$($fqdnHost.Name)' on $($params.Firewall)", 'Create')) {
+            continue
+        }
+
         try {
             # FQDNHostGroupList comes back as a comma-separated string (see
             # Export-SfosFQDNHosts). Split it into an array and drop empty entries.
@@ -5237,7 +5252,7 @@ function Export-SfosFQDNHostGroups {
         Export-SfosFQDNHostGroups
 #>
 function Import-SfosFQDNHostGroups {
-    [CmdletBinding()]
+    [CmdletBinding(SupportsShouldProcess)]
     param(
         [Parameter(Mandatory)]
         [ValidateNotNullOrEmpty()]
@@ -5289,6 +5304,10 @@ function Import-SfosFQDNHostGroups {
 
     # Create FQDN host groups on the Sophos Firewall
     foreach ($group in $fqdnHostGroups) {
+        if (-not $PSCmdlet.ShouldProcess("FQDNHostGroup '$($group.Name)' on $($params.Firewall)", 'Create')) {
+            continue
+        }
+
         try {
             # Parse member list from JSON string if present
             $members = @()
@@ -6258,7 +6277,7 @@ function Export-SfosMACHosts {
         Export-SfosMACHosts
 #>
 function Import-SfosMACHosts {
-    [CmdletBinding()]
+    [CmdletBinding(SupportsShouldProcess)]
     param(
         [Parameter(Mandatory)]
         [ValidateNotNullOrEmpty()]
@@ -6310,6 +6329,10 @@ function Import-SfosMACHosts {
 
     # Create MAC hosts on the Sophos Firewall
     foreach ($macHost in $macHosts) {
+        if (-not $PSCmdlet.ShouldProcess("MACHost '$($macHost.Name)' on $($params.Firewall)", 'Create')) {
+            continue
+        }
+
         try {
             New-SfosMACHost -Name $macHost.Name `
                 -MACAddress $macHost.MACAddress `
@@ -8167,7 +8190,7 @@ function Export-SfosServices {
         Export-SfosServices
 #>
 function Import-SfosServices {
-    [CmdletBinding()]
+    [CmdletBinding(SupportsShouldProcess)]
     param(
         [Parameter(Mandatory)]
         [ValidateNotNullOrEmpty()]
@@ -8220,10 +8243,13 @@ function Import-SfosServices {
     # Create services on the Sophos Firewall. New-SfosService uses parameter sets, so
     # only the parameters for the object's Type may be passed - mixing in parameters
     # from other sets makes parameter set resolution fail.
-    foreach ($service in $services) {
+    :importServices foreach ($service in $services) {
         try {
             switch ($service.Type) {
                 'TCPorUDP' {
+                    if (-not $PSCmdlet.ShouldProcess("Service '$($service.Name)' on $($params.Firewall)", 'Create')) {
+                        continue importServices
+                    }
                     New-SfosService -Name $service.Name `
                         -Type 'TCPorUDP' `
                         -Protocol $service.Protocol `
@@ -8237,6 +8263,9 @@ function Import-SfosServices {
                         -SkipCertificateCheck:$params.SkipCertificateCheck
                 }
                 'IP' {
+                    if (-not $PSCmdlet.ShouldProcess("Service '$($service.Name)' on $($params.Firewall)", 'Create')) {
+                        continue importServices
+                    }
                     New-SfosService -Name $service.Name `
                         -ProtocolName $service.ProtocolName `
                         -Description $service.Description `
@@ -9558,7 +9587,7 @@ function Export-SfosServiceGroups {
         Export-SfosServiceGroups
 #>
 function Import-SfosServiceGroups {
-    [CmdletBinding()]
+    [CmdletBinding(SupportsShouldProcess)]
     param(
         [Parameter(Mandatory)]
         [ValidateNotNullOrEmpty()]
@@ -9610,6 +9639,10 @@ function Import-SfosServiceGroups {
 
     # Create service groups on the Sophos Firewall
     foreach ($group in $serviceGroups) {
+        if (-not $PSCmdlet.ShouldProcess("ServiceGroup '$($group.Name)' on $($params.Firewall)", 'Create')) {
+            continue
+        }
+
         try {
             # ServiceList comes back as a comma-separated string (see Export-SfosServiceGroups).
             # Split it into an array and drop empty entries.

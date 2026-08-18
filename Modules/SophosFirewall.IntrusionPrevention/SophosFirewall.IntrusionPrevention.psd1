@@ -1,6 +1,6 @@
 ﻿@{
     RootModule           = 'SophosFirewall.IntrusionPrevention.psm1'
-    ModuleVersion        = '1.3.2'
+    ModuleVersion        = '1.3.3'
     GUID                 = '44f6945c-59a9-45a0-9a97-f6352eb5d054'
     Author               = 'Jan Weis'
     Description          = 'PowerShell module for managing intrusion prevention on Sophos XGS / SFOS 22.0 firewalls via API: IPS policies, custom signatures, IPS switch, DoS settings, DoS bypass rules, spoof prevention and trusted MACs.'
@@ -56,7 +56,7 @@
             Tags         = @('Sophos', 'Firewall', 'API', 'XGS', 'SFOS', 'IntrusionPrevention', 'IPS', 'DoS', 'SpoofPrevention', 'TrustedMAC')
             LicenseUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/blob/main/Modules/SophosFirewall.IntrusionPrevention/LICENSE.txt'
             ProjectUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/tree/main/Modules/SophosFirewall.IntrusionPrevention'
-            ReleaseNotes = 'Added Import-SfosTrustedMACList, a genuine multipart file upload for the Upload_TrustedMAC operation, alongside the existing CSV/JSON-based Import-SfosTrustedMACs. Requires SophosFirewall.Core 1.3.2 or later.'
+            ReleaseNotes = 'Import-SfosTrustedMACs now supports -WhatIf/-Confirm and skips the individual New-SfosTrustedMAC calls it would have made. Requires SophosFirewall.Core 1.3.2 or later.'
         }
     }
 }

@@ -17,6 +17,9 @@
     Connect once with Connect-SfosFirewall, then call the cmdlets in this module without
     repeating the connection parameters.
 
+    Total Functions: 24 (20 exported, 4 internal helpers) - see README.md for the full
+    cmdlet table.
+
 .EXAMPLE
     Connect-SfosFirewall -Firewall '192.0.2.1' -Credential (Get-Credential) -SkipCertificateCheck
     Get-SfosSchedule

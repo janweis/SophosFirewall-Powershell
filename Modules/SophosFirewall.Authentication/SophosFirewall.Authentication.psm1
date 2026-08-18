@@ -1,5 +1,5 @@
-﻿#requires -Version 5.1
-#requires -Modules @{ ModuleName = 'SophosFirewall.Core'; ModuleVersion = '1.1.0' }
+#requires -Version 5.1
+#requires -Modules @{ ModuleName = 'SophosFirewall.Core'; ModuleVersion = '1.3.1' }
 <#
         .SYNOPSIS
         Manages authentication servers, users, groups, one-time passwords, captive portal and SSO on Sophos Firewall.
@@ -16,6 +16,9 @@
         - Firewall, admin, VPN, SSL VPN and web authentication
         - Captive portal appearance and the default captive portal
         - Azure AD SSO, STAS and live user sessions
+
+        Total Functions: 98 (97 exported, 1 internal helper) - see README.md for the full
+        cmdlet table.
 
         All functions support pipeline input, filtering, and connection context management.
         Use Connect-SfosFirewall once, then call functions without connection parameters.

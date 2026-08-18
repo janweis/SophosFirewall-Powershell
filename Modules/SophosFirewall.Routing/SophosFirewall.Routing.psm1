@@ -1,5 +1,5 @@
-﻿#requires -Version 5.1
-#requires -Modules @{ ModuleName = 'SophosFirewall.Core'; ModuleVersion = '1.1.0' }
+#requires -Version 5.1
+#requires -Modules @{ ModuleName = 'SophosFirewall.Core'; ModuleVersion = '1.3.1' }
 
 <#
         .SYNOPSIS
@@ -18,6 +18,9 @@
         gateway decides whether packets still reach their destination, and a change to the
         management path can also cut off the API session used to correct it. Every Set-*
         cmdlet reads the current object first and writes it back complete.
+
+        Total Functions: 32 (31 exported, 1 internal helper) - see README.md for the full
+        cmdlet table.
 
         .EXAMPLE
         Connect-SfosFirewall -Firewall '192.168.1.1' -Credential (Get-Credential) -SkipCertificateCheck
@@ -42,8 +45,6 @@
         https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
 #>
 
-#requires -Version 5.1
-#requires -Modules SophosFirewall.Core
 
 # Group: Gateways and health checks.
 # Entities: GatewayHost (API documentation folder GatewayObject), HealthCheckProfile
@@ -1741,8 +1742,6 @@ function Set-SfosHealthCheckProfileStatus {
 
 #endregion
 
-#requires -Version 5.1
-#requires -Modules SophosFirewall.Core
 <#
     Group: SD-WAN routing.
     Entities: SDWANProfile, SDWANPolicyRoute, SDWANPolicyRouteStatus. SDWANPolicyRouteStatus

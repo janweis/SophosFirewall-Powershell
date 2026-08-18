@@ -25,6 +25,7 @@ on:
           - SophosFirewall.Administration
           - SophosFirewall.Profiles
           - SophosFirewall.WebServer
+          - SophosFirewall.Certificates
       dryRun:
         description: 'Dry run (do not actually publish)'
         required: true
@@ -76,7 +77,8 @@ jobs:
               'SophosFirewall.SystemServices',
               'SophosFirewall.Administration',
               'SophosFirewall.Profiles',
-              'SophosFirewall.WebServer'
+              'SophosFirewall.WebServer',
+              'SophosFirewall.Certificates'
             )
           } else {
             $order = @($selected)

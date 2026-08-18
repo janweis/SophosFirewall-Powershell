@@ -1,6 +1,6 @@
-﻿@{
+@{
     RootModule           = 'SophosFirewall.VPN.psm1'
-    ModuleVersion        = '1.3.2'
+    ModuleVersion        = '1.3.5'
     GUID                 = '2d774502-71be-403a-987f-12fad7d243b9'
     Author               = 'Jan Weis'
     Description          = 'PowerShell module for managing VPN on Sophos XGS / SFOS 22.0 firewalls via API: IPsec connections, SSL VPN, L2TP, PPTP, VPN profiles and failover groups.'
@@ -10,7 +10,7 @@
     RequiredModules      = @(
         @{
             ModuleName    = 'SophosFirewall.Core'
-            ModuleVersion = '1.3.2'
+            ModuleVersion = '1.3.5'
         }
     )
 

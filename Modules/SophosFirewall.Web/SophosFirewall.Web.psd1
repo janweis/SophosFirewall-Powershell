@@ -1,6 +1,6 @@
-﻿@{
+@{
     RootModule           = 'SophosFirewall.Web.psm1'
-    ModuleVersion        = '1.3.2'
+    ModuleVersion        = '1.3.5'
     GUID                 = '77a63a21-54db-4f49-a7c7-632f520bd61b'
     Author               = 'Jan Weis'
     Description          = 'PowerShell module for managing the web protection area of Sophos XGS / SFOS 22.0 firewalls via API.'
@@ -10,7 +10,7 @@
     RequiredModules      = @(
         @{
             ModuleName    = 'SophosFirewall.Core'
-            ModuleVersion = '1.3.2'
+            ModuleVersion = '1.3.5'
         }
     )
 

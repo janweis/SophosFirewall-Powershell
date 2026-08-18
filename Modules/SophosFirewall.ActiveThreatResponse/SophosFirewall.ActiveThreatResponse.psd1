@@ -1,6 +1,6 @@
-﻿@{
+@{
     RootModule           = 'SophosFirewall.ActiveThreatResponse.psm1'
-    ModuleVersion        = '1.3.1'
+    ModuleVersion        = '1.3.5'
     GUID                 = '818bf495-5c4e-4bd4-a8e2-fef4b97d2372'
     Author               = 'Jan Weis'
     Description          = 'PowerShell module for managing Active Threat Response on Sophos XGS / SFOS 22.0 firewalls via API: ATP (Sophos X-Ops threat feeds) settings and third-party threat feeds.'
@@ -10,7 +10,7 @@
     RequiredModules      = @(
         @{
             ModuleName    = 'SophosFirewall.Core'
-            ModuleVersion = '1.3.1'
+            ModuleVersion = '1.3.5'
         }
     )
 

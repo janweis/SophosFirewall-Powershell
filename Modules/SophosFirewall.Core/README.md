@@ -79,6 +79,26 @@ and that element's text must be the file's base name, matching the uploaded file
 that do not pass `-MultipartFile` are unaffected - the request is sent exactly as before
 this parameter existed.
 
+### Reading a file response
+
+Certificate, CertificateAuthority, CRL and FormTemplate answer a Get with a tar archive
+instead of XML - one embedded file per matching object, plus an Entities.xml holding the
+same metadata a normal Get response would carry:
+
+```powershell
+$response = Invoke-SfosApi -Session 'fw1' -InnerXml '<Get><CertificateAuthority></CertificateAuthority></Get>'
+$archive = ConvertFrom-SfosArchive -Bytes $response.Content
+$archive.Entities.Response.CertificateAuthority | Select-Object Name, Type
+$archive.Files | Select-Object Name
+```
+
+The firewall can produce a malformed tar header for an object whose stored name contains
+non-ASCII characters, which breaks the archive's internal structure from that point on.
+`ConvertFrom-SfosArchive` does not throw for that: it returns every file it read
+successfully, sets `.Truncated`, and names the last entry that read cleanly in
+`.TruncatedAfter`. `.Entities` is unaffected either way, because it is recovered
+independently of the tar structure.
+
 ## Cmdlets
 
 | Cmdlet | Purpose |
@@ -91,6 +111,7 @@ this parameter existed.
 | `Assert-SfosApiReturnSuccess` | Checks an API response and throws if the request failed. |
 | `Resolve-SfosParameters` | Merges explicit connection parameters with the active session; used internally by the domain modules. |
 | `ConvertTo-SfosXmlEscaped` | Escapes text for safe use inside the request XML. |
+| `ConvertFrom-SfosArchive` | Reads the tar archive returned by Certificate, CertificateAuthority, CRL and FormTemplate instead of XML. |
 
 ## Status codes
 

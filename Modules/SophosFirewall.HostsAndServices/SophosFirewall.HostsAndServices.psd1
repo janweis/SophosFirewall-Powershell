@@ -1,6 +1,6 @@
-﻿@{
+@{
     RootModule           = 'SophosFirewall.HostsAndServices.psm1'
-    ModuleVersion        = '1.3.3'
+    ModuleVersion        = '1.3.5'
     GUID                 = '1c2a45f5-8215-4035-a691-2be3ef0e8191'
     Author               = 'Jan Weis'
     Description          = 'Manages IP hosts, FQDN hosts, MAC hosts, host groups, services and service groups on a Sophos XGS / SFOS 22.0 firewall via the management API.'
@@ -10,7 +10,7 @@
     RequiredModules      = @(
         @{
             ModuleName    = 'SophosFirewall.Core'
-            ModuleVersion = '1.3.2'
+            ModuleVersion = '1.3.5'
         }
     )
 

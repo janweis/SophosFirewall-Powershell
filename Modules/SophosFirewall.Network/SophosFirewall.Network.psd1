@@ -1,6 +1,6 @@
-﻿@{
+@{
     RootModule           = 'SophosFirewall.Network.psm1'
-    ModuleVersion        = '1.3.1'
+    ModuleVersion        = '1.3.5'
     GUID                 = 'c0ed538a-3f1f-4dbb-9f42-672fb8f40f4c'
     Author               = 'Jan Weis'
     Description          = 'PowerShell module for managing the network configuration of Sophos XGS / SFOS 22.0 firewalls via API: interfaces, VLANs, zones, gateways, DNS, DHCP, ARP and tunnels.'
@@ -10,7 +10,7 @@
     RequiredModules      = @(
         @{
             ModuleName    = 'SophosFirewall.Core'
-            ModuleVersion = '1.3.1'
+            ModuleVersion = '1.3.5'
         }
     )
 

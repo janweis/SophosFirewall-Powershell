@@ -1,5 +1,5 @@
 #requires -Version 5.1
-#requires -Modules @{ ModuleName = 'SophosFirewall.Core'; ModuleVersion = '1.3.2' }
+#requires -Modules @{ ModuleName = 'SophosFirewall.Core'; ModuleVersion = '1.3.5' }
 <#
         .SYNOPSIS
         Manages web protection objects on Sophos Firewall: URL groups, web categories, file types,

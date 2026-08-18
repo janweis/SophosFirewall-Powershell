@@ -1,6 +1,6 @@
-﻿@{
+@{
     RootModule           = 'SophosFirewall.Routing.psm1'
-    ModuleVersion        = '1.3.1'
+    ModuleVersion        = '1.3.5'
     GUID                 = '6baa7e3d-24b6-46b1-b49c-9f0f71e04bc4'
     Author               = 'Jan Weis'
     Description          = 'PowerShell module for managing routing on Sophos XGS / SFOS 22.0 firewalls via API: gateways, health checks, SD-WAN profiles and routes, unicast and multicast routing.'
@@ -10,7 +10,7 @@
     RequiredModules      = @(
         @{
             ModuleName    = 'SophosFirewall.Core'
-            ModuleVersion = '1.3.1'
+            ModuleVersion = '1.3.5'
         }
     )
 

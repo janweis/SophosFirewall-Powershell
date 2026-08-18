@@ -1,6 +1,6 @@
-﻿@{
+@{
     RootModule           = 'SophosFirewall.Profiles.psm1'
-    ModuleVersion        = '1.3.1'
+    ModuleVersion        = '1.3.5'
     GUID                 = 'cadd6557-33e8-43e1-8169-516eac60dfdb'
     Author               = 'Jan Weis'
     Description          = 'PowerShell module for managing System > Profiles on Sophos XGS / SFOS 22.0 firewalls via API: schedules, access time policies, data transfer policies, decryption profiles and administrator role profiles.'
@@ -11,7 +11,7 @@
     RequiredModules      = @(
         @{
             ModuleName    = 'SophosFirewall.Core'
-            ModuleVersion = '1.3.1'
+            ModuleVersion = '1.3.5'
         }
     )
 

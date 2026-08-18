@@ -15,7 +15,7 @@ changes the rights of every administrator it is currently assigned to.
 
 ## Requirements
 
-- `SophosFirewall.Core` 1.3.1 or later (installed automatically as a dependency)
+- `SophosFirewall.Core` 1.3.5 or later (installed automatically as a dependency)
 - PowerShell 5.1 or 7.x
 - HTTPS access to the firewall's management API
 - A firewall account with administrative permission

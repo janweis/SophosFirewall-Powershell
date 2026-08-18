@@ -1,7 +1,7 @@
 # Sophos Firewall PowerShell Module Suite
 
 A PowerShell module collection for managing Sophos XGS/SFOS firewalls through their XML
-management API. Fifteen modules ship 566 cmdlets, covering fifteen of the API's areas.
+management API. Sixteen modules ship 577 cmdlets, covering sixteen of the API's areas.
 
 ## Quick Start
 
@@ -58,8 +58,9 @@ Cmdlets called without `-Session` use the ambient default session set by
 | [SophosFirewall.Administration](Modules/SophosFirewall.Administration/README.md) | 32 | Notification, SNMP, appliance access, admin/web-admin settings, time, messages, Netflow, local service ACL |
 | [SophosFirewall.Profiles](Modules/SophosFirewall.Profiles/README.md) | 20 | Schedules, access time policies, data transfer policies, decryption profiles, administration profiles |
 | [SophosFirewall.WebServer](Modules/SophosFirewall.WebServer/README.md) | 18 | Web server publishing (WAF), protection policies, authentication policies and templates, slow HTTP protection |
+| [SophosFirewall.Certificates](Modules/SophosFirewall.Certificates/README.md) | 11 | Certificates, certificate authorities, revocation lists |
 
-566 cmdlets in total. Every module follows the same connection model and shares the
+577 cmdlets in total. Every module follows the same connection model and shares the
 `SophosFirewall.Core` transport layer.
 
 Several cmdlets change settings that the current management session itself depends on -

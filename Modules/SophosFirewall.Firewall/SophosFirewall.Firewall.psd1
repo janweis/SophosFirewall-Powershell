@@ -1,6 +1,6 @@
-﻿@{
+@{
     RootModule           = 'SophosFirewall.Firewall.psm1'
-    ModuleVersion        = '1.3.1'
+    ModuleVersion        = '1.3.5'
     GUID                 = 'fe5a57d4-bdc0-4fce-958d-72bd4c9a77e9'
     Author               = 'Jan Weis'
     Description          = 'PowerShell module for managing firewall rules, rule groups, NAT rules and SSL/TLS inspection on Sophos XGS / SFOS 22.0 firewalls via API.'
@@ -10,7 +10,7 @@
     RequiredModules      = @(
         @{
             ModuleName    = 'SophosFirewall.Core'
-            ModuleVersion = '1.3.1'
+            ModuleVersion = '1.3.5'
         }
     )
 

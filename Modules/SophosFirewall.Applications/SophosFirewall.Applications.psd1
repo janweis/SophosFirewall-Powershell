@@ -1,6 +1,6 @@
-﻿@{
+@{
     RootModule           = 'SophosFirewall.Applications.psm1'
-    ModuleVersion        = '1.3.1'
+    ModuleVersion        = '1.3.5'
     GUID                 = 'ebbadd35-0d7a-45a6-a2ad-15f0609e65c3'
     Author               = 'Jan Weis'
     Description          = 'PowerShell module for managing application control on Sophos XGS / SFOS 22.0 firewalls via API: application filter policies and rules, application objects, application categories with QoS assignment, application classification.'
@@ -10,7 +10,7 @@
     RequiredModules      = @(
         @{
             ModuleName    = 'SophosFirewall.Core'
-            ModuleVersion = '1.3.1'
+            ModuleVersion = '1.3.5'
         }
     )
 

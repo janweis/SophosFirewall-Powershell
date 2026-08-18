@@ -13,7 +13,7 @@ It is for administrators who publish internal web applications through the firew
 
 ## Requirements
 
-- `SophosFirewall.Core` 1.3.2 or later (installed automatically as a dependency)
+- `SophosFirewall.Core` 1.3.5 or later (installed automatically as a dependency)
 - PowerShell 5.1 or 7.x
 - HTTPS access to the firewall's management API
 - A firewall account with administrative permission
@@ -74,7 +74,7 @@ a bare `Get-SfosAuthenticationPolicy` would not say which kind of authentication
 **Authentication templates can be created and changed, but not removed.** `New-` and
 `Set-SfosWebServerAuthenticationTemplate` upload the HTML template file (and, optionally, one
 or more asset files such as a stylesheet) through the multipart transport added to
-`SophosFirewall.Core` 1.3.2 - the file name given to `-TemplateFile`/`-AssetFile` is what the
+`SophosFirewall.Core` 1.3.5 - the file name given to `-TemplateFile`/`-AssetFile` is what the
 firewall stores as the reference, so the file itself and its XML reference always agree.
 `Set-*` cannot do the usual read-modify-write: a `Get` on this entity never returns parsed
 fields (see below), so there is nothing to merge into. It checks the object exists, then

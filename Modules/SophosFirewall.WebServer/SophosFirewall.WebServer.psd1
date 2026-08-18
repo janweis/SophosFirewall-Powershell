@@ -1,6 +1,6 @@
 @{
     RootModule           = 'SophosFirewall.WebServer.psm1'
-    ModuleVersion        = '1.3.2'
+    ModuleVersion        = '1.3.5'
     GUID                 = '47b5f07d-b08f-426d-bafc-ae25f1cd10ea'
     Author               = 'Jan Weis'
     Description          = 'PowerShell module for managing Web Server Protection (WAF) on Sophos XGS / SFOS 22.0 firewalls via API: web servers, protection policies, authentication policies and templates, slow HTTP protection settings.'
@@ -11,7 +11,7 @@
     RequiredModules      = @(
         @{
             ModuleName    = 'SophosFirewall.Core'
-            ModuleVersion = '1.3.2'
+            ModuleVersion = '1.3.5'
         }
     )
 

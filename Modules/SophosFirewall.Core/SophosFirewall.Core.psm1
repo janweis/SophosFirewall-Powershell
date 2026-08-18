@@ -8,7 +8,7 @@
     of firewall entities such as hosts, services or rules; that lives in the domain modules
     that depend on this one.
 
-    Total Functions: 11 (8 exported, 3 internal helpers) - see README.md for the full
+    Total Functions: 12 (9 exported, 3 internal helpers) - see README.md for the full
     cmdlet table.
 
     API reference:
@@ -1300,6 +1300,241 @@ function Get-SfosSession {
 
 #endregion
 
+#region Archive Response Parsing
+
+<#
+.SYNOPSIS
+    Reads a tar archive returned by the Sophos Firewall API as a file response.
+
+.DESCRIPTION
+    Certificate, CertificateAuthority, CRL and FormTemplate answer a Get with
+    application/octet-stream instead of XML: a tar archive holding an Entities.xml (the same
+    Response envelope a normal Get returns, describing every matching object) plus one file
+    per object. Domain modules pass the raw response bytes to this cmdlet instead of parsing
+    the archive themselves.
+
+    The firewall double-UTF8-encodes any non-ASCII byte inside a tar header's name field
+    (observed on object names containing non-ASCII characters). That shifts every field
+    after the name by the extra byte count, so the header's own checksum no longer matches
+    and the block chain cannot be walked past that entry - every file after it is
+    unreachable through the tar structure, even though its bytes are still present in the
+    response. This cmdlet does not throw when that happens: it returns every file entry read
+    successfully before the break, sets -Truncated, names the last entry that read cleanly,
+    and warns with that name so the caller knows which object's own file could not be read.
+
+    Entities.xml is read independently of the block chain, by scanning the raw response for
+    its Response...Response envelope rather than walking the tar structure to find it. That
+    keeps the metadata for every matching object available even when one object's file
+    entry desynchronises everything stored after it in the archive - the corruption is
+    confined to individual file headers and does not touch the XML text itself.
+
+.PARAMETER Bytes
+    Required. The raw response body, exactly as received - never routed through a string or
+    a character encoding, so binary file content stays byte-exact.
+
+.PARAMETER ExtractTo
+    Optional. Directory to write the contained files to, preserving their relative path from
+    the archive root. Created if it does not exist. Without this parameter, files are only
+    returned in memory via the Bytes property of each entry in .Files.
+
+.INPUTS
+    None. This cmdlet does not accept pipeline input.
+
+.OUTPUTS
+    System.Management.Automation.PSCustomObject with the properties:
+    Entities (the parsed Entities.xml as an [xml] document, or $null if none was found),
+    Files (an array of objects with Name and Bytes, plus Path when -ExtractTo was used;
+    empty array if the archive holds no readable file), Truncated (whether the tar block
+    chain broke before the end of the archive), and TruncatedAfter (the name of the last
+    file entry read cleanly before the break, or $null if nothing broke or the very first
+    entry was already unreadable).
+
+.EXAMPLE
+    $inner = Get-Content .\get-certificateauthority.xml -Raw
+    $response = Invoke-SfosApi -Session 'fw1' -InnerXml $inner
+    $archive = ConvertFrom-SfosArchive -Bytes $response.Content
+
+    Reads every CertificateAuthority object's metadata from $archive.Entities, even if one
+    object's certificate file could not be extracted.
+
+.EXAMPLE
+    $archive = ConvertFrom-SfosArchive -Bytes $response.Content -ExtractTo 'C:\Sfos\Export'
+
+    Also writes every file the archive contains to disk and records the written path on
+    each entry in .Files.
+
+.LINK
+    https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+#>
+function ConvertFrom-SfosArchive {
+    [CmdletBinding()]
+    [OutputType([PSCustomObject])]
+    param(
+        [Parameter(Mandatory)]
+        [byte[]]$Bytes,
+
+        [string]$ExtractTo
+    )
+
+    $latin1 = [System.Text.Encoding]::GetEncoding(28591)
+    $ascii = [System.Text.Encoding]::ASCII
+
+    # Entities.xml is located by scanning the raw bytes for its own envelope rather than by
+    # walking the tar block chain, because that chain can desynchronise before reaching it -
+    # Entities.xml is always the last entry - while the bytes themselves are still present
+    # right where the archive placed them. Latin-1 maps every byte to exactly one character
+    # and back, so this search never alters or loses a byte; it only locates the range to
+    # decode as UTF-8 afterwards.
+    $entities = $null
+    if ($Bytes.Length -gt 0) {
+        $fullText = $latin1.GetString($Bytes)
+        $startIndex = $fullText.IndexOf('<?xml')
+        if ($startIndex -lt 0) {
+            $startIndex = $fullText.IndexOf('<Response')
+        }
+        if ($startIndex -ge 0) {
+            $endMarker = '</Response>'
+            $endIndex = $fullText.LastIndexOf($endMarker)
+            if ($endIndex -ge $startIndex) {
+                $endIndex = $endIndex + $endMarker.Length
+                $entitiesBytes = $Bytes[$startIndex..($endIndex - 1)]
+                $entitiesText = [System.Text.Encoding]::UTF8.GetString($entitiesBytes)
+                try {
+                    $entities = [xml]$entitiesText
+                }
+                catch {
+                    Write-Warning "ConvertFrom-SfosArchive found an Entities.xml block but could not parse it as XML: $($_.Exception.Message)"
+                }
+            }
+        }
+    }
+
+    # The tar block chain is walked separately, purely to recover the individual files. A
+    # 512-byte block that is entirely zero marks a clean end of archive, not a break.
+    $files = [System.Collections.Generic.List[object]]::new()
+    $truncated = $false
+    $truncatedAfter = $null
+    $lastGoodName = $null
+    $position = 0
+
+    while (($position + 512) -le $Bytes.Length) {
+        $header = $Bytes[$position..($position + 511)]
+
+        $isZeroBlock = $true
+        for ($i = 0; $i -lt 512; $i++) {
+            if ($header[$i] -ne 0) {
+                $isZeroBlock = $false
+                break
+            }
+        }
+        if ($isZeroBlock) {
+            break
+        }
+
+        $name = $ascii.GetString($header[0..99]).TrimEnd([char]0)
+        $typeFlag = [char]$header[156]
+
+        $sizeText = $ascii.GetString($header[124..135]).Trim([char]0, ' ')
+        $size = -1
+        if ($sizeText) {
+            try { $size = [Convert]::ToInt64($sizeText, 8) } catch { $size = -1 }
+        }
+        else {
+            $size = 0
+        }
+
+        $checksumText = $ascii.GetString($header[148..155]).Trim([char]0, ' ')
+        $expectedChecksum = -1
+        if ($checksumText) {
+            try { $expectedChecksum = [Convert]::ToInt64($checksumText, 8) } catch { $expectedChecksum = -1 }
+        }
+
+        # The recorded checksum treats its own 8-byte field as ASCII spaces while summing
+        # every other byte of the header - this is what a double-encoded name field throws
+        # out of alignment, which is exactly the corruption this cmdlet is built to detect.
+        $actualChecksum = 0
+        for ($i = 0; $i -lt 512; $i++) {
+            if ($i -ge 148 -and $i -lt 156) {
+                $actualChecksum += 32
+            }
+            else {
+                $actualChecksum += $header[$i]
+            }
+        }
+
+        $headerValid = ($size -ge 0) -and ($expectedChecksum -ge 0) -and ($actualChecksum -eq $expectedChecksum)
+
+        if ($headerValid) {
+            $dataStart = $position + 512
+            if (($dataStart + $size) -gt $Bytes.Length) {
+                $headerValid = $false
+            }
+        }
+
+        if (-not $headerValid) {
+            $truncated = $true
+            $truncatedAfter = $lastGoodName
+            if ($truncatedAfter) {
+                Write-Warning "ConvertFrom-SfosArchive: the archive's internal structure could not be read past the entry after '$truncatedAfter' - the firewall produced a malformed tar header there (commonly caused by non-ASCII characters in an object's stored name). Returning every file read successfully before that point; Entities.xml metadata is unaffected."
+            }
+            else {
+                Write-Warning 'ConvertFrom-SfosArchive: the archive starts with a malformed tar header and no file could be read from it. Entities.xml metadata is unaffected.'
+            }
+            break
+        }
+
+        $dataStart = $position + 512
+        if ($typeFlag -eq '0' -or $typeFlag -eq [char]0) {
+            if ($size -eq 0) {
+                $content = [byte[]]@()
+            }
+            else {
+                $content = $Bytes[$dataStart..($dataStart + $size - 1)]
+            }
+            $files.Add([PSCustomObject]@{ Name = $name; Bytes = $content })
+        }
+
+        $lastGoodName = $name
+        $dataBlocks = [Math]::Ceiling($size / 512.0)
+        $position = $dataStart + ([int64]$dataBlocks * 512)
+    }
+
+    if ($ExtractTo) {
+        if (-not (Test-Path -LiteralPath $ExtractTo)) {
+            New-Item -ItemType Directory -Path $ExtractTo -Force | Out-Null
+        }
+        $extractRoot = (Resolve-Path -LiteralPath $ExtractTo).ProviderPath
+
+        foreach ($file in $files) {
+            $relative = $file.Name -replace '^\./', ''
+            $targetPath = [System.IO.Path]::GetFullPath((Join-Path -Path $extractRoot -ChildPath $relative))
+
+            # Refuse to write outside -ExtractTo: a stored name containing '..' would
+            # otherwise be able to place a file anywhere the process can write.
+            if (-not $targetPath.StartsWith($extractRoot, [StringComparison]::OrdinalIgnoreCase)) {
+                Write-Warning "ConvertFrom-SfosArchive: skipped extracting '$($file.Name)' because it resolves outside -ExtractTo."
+                continue
+            }
+
+            $targetDir = Split-Path -Path $targetPath -Parent
+            if ($targetDir -and -not (Test-Path -LiteralPath $targetDir)) {
+                New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
+            }
+            [System.IO.File]::WriteAllBytes($targetPath, $file.Bytes)
+            $file | Add-Member -MemberType NoteProperty -Name 'Path' -Value $targetPath -Force
+        }
+    }
+
+    return [PSCustomObject]@{
+        Entities       = $entities
+        Files          = $files.ToArray()
+        Truncated      = $truncated
+        TruncatedAfter = $truncatedAfter
+    }
+}
+
+#endregion
+
 #region Module Exports
 
 Export-ModuleMember -Function @(
@@ -1310,7 +1545,8 @@ Export-ModuleMember -Function @(
     'Get-SfosApiStatus',
     'Assert-SfosApiReturnSuccess',
     'Resolve-SfosParameters',
-    'ConvertTo-SfosXmlEscaped'
+    'ConvertTo-SfosXmlEscaped',
+    'ConvertFrom-SfosArchive'
 )
 
 #endregion

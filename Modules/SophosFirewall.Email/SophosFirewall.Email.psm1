@@ -558,6 +558,10 @@ function New-SfosAntiSpamRule {
     read, write back, read again - produces byte-identical XML. On an appliance running MTA
     mode, expect the same 545 gate documented on New-SfosAntiSpamRule.
 
+    This object belongs to legacy mail scanning. Writing to it can be refused with status 545 while the
+    appliance runs MTA mode - the refusal is decided per object, not per shape.
+    Get-SfosSMTPDeploymentMode says which mode is active.
+
 .PARAMETER Name
     Required. Name of the target rule.
 
@@ -757,6 +761,10 @@ function Set-SfosAntiSpamRule {
     with nothing to remove. Without this guard that false success would pass through
     silently.
 
+    This object belongs to legacy mail scanning. Writing to it can be refused with status 545 while the
+    appliance runs MTA mode - the refusal is decided per object, not per shape.
+    Get-SfosSMTPDeploymentMode says which mode is active.
+
 .PARAMETER Name
     Required. Name of the rule to remove.
 
@@ -881,6 +889,9 @@ function Remove-SfosAntiSpamRule {
     The cmdlet only reads; nothing on the firewall is changed. It needs an open connection
     from Connect-SfosFirewall, or the connection parameters supplied directly.
 
+    This object is shared by both shapes of the email area: the same storage answers in
+    MTA mode and in legacy mail scanning, so it behaves the same either way.
+
 .PARAMETER Firewall
     Optional. Host name or IP address of the firewall. If omitted, the value from the current
     connection is used.
@@ -993,6 +1004,9 @@ function Get-SfosAntiSpamTrustedDomain {
 
     It needs an open connection from Connect-SfosFirewall, or the connection parameters
     supplied directly, and an account with write permission for the Email area.
+
+    This object is shared by both shapes of the email area: the same storage answers in
+    MTA mode and in legacy mail scanning, so it behaves the same either way.
 
 .PARAMETER DomainName
     Required. The domain name to trust, for example 'example.com'.
@@ -1108,6 +1122,9 @@ function New-SfosAntiSpamTrustedDomain {
     shape the Add operation and Get both use - a flat
     <Remove><AntiSpamTrustedDomain><DomainName>...</DomainName></...></Remove> was measured
     to fail with status 533 "API request failed", not the "not found" error one might expect.
+
+    This object is shared by both shapes of the email area: the same storage answers in
+    MTA mode and in legacy mail scanning, so it behaves the same either way.
 
 .PARAMETER DomainName
     Required. The domain name to remove.
@@ -1275,6 +1292,9 @@ function ConvertTo-SfosAntiSpamEmailArchiverEntityXml {
     The cmdlet only reads; nothing on the firewall is changed. It needs an open connection
     from Connect-SfosFirewall, or the connection parameters supplied directly.
 
+    This object belongs to legacy mail scanning. Reading it works whichever mode the appliance runs;
+    Get-SfosSMTPDeploymentMode says which one that is.
+
 .PARAMETER NameLike
     Optional. Returns only archivers whose name contains the given text anywhere. Not sent
     as a server-side filter - untested for this entity - and applied client-side only. If
@@ -1407,6 +1427,10 @@ function Get-SfosAntiSpamEmailArchiver {
     It needs an open connection from Connect-SfosFirewall, or the connection parameters
     supplied directly, and an account with write permission for the Email area.
 
+    This object belongs to legacy mail scanning. Writing to it can be refused with status 545 while the
+    appliance runs MTA mode - the refusal is decided per object, not per shape.
+    Get-SfosSMTPDeploymentMode says which mode is active.
+
 .PARAMETER Name
     Required. Name of the archiver, 1 to 50 characters.
 
@@ -1533,6 +1557,10 @@ function New-SfosAntiSpamEmailArchiver {
     this cmdlet reads the current object first and keeps whatever the caller does not
     explicitly pass. See New-SfosAntiSpamEmailArchiver for the -Recipient defect measured on
     this appliance.
+
+    This object belongs to legacy mail scanning. Writing to it can be refused with status 545 while the
+    appliance runs MTA mode - the refusal is decided per object, not per shape.
+    Get-SfosSMTPDeploymentMode says which mode is active.
 
 .PARAMETER Name
     Required. Name of the target archiver.
@@ -1666,6 +1694,10 @@ function Set-SfosAntiSpamEmailArchiver {
     still answers 200 ("Configuration applied successfully") - a false success. Without the
     read-first check here, a typo in -Name would silently do nothing and report success.
 
+    This object belongs to legacy mail scanning. Writing to it can be refused with status 545 while the
+    appliance runs MTA mode - the refusal is decided per object, not per shape.
+    Get-SfosSMTPDeploymentMode says which mode is active.
+
 .PARAMETER Name
     Required. Name of the archiver to remove.
 
@@ -1798,6 +1830,9 @@ function Remove-SfosAntiSpamEmailArchiver {
 
     The cmdlet only reads; nothing on the firewall is changed. It needs an open connection
     from Connect-SfosFirewall, or the connection parameters supplied directly.
+
+    This object belongs to legacy mail scanning. Reading it works whichever mode the appliance runs;
+    Get-SfosSMTPDeploymentMode says which one that is.
 
 .PARAMETER Firewall
     Optional. Host name or IP address of the firewall. If omitted, the value from the current
@@ -1960,6 +1995,10 @@ function Get-SfosAntiSpamQuarantineDigestSettings {
     /Response/SpamDigestUsers/Status, both direct children of /Response, neither nested
     under /Response/AntiSpamQuarantineDigestSettings. This cmdlet checks both explicitly so
     a failure in one block is never masked by success in the other.
+
+    This object belongs to legacy mail scanning. Writing to it can be refused with status 545 while the
+    appliance runs MTA mode - the refusal is decided per object, not per shape.
+    Get-SfosSMTPDeploymentMode says which mode is active.
 
 .PARAMETER SpamQuarantineDigest
     Optional. Enable or Disable. If omitted, the existing value is kept.
@@ -2677,6 +2716,10 @@ function New-SfosSMTPMalwareScanningPolicy {
     supplied directly, and an account with write permission for the Email area. Never
     target the built-in 'default-smtp-av' rule with this cmdlet.
 
+    This object belongs to legacy mail scanning. Writing to it can be refused with status 545 while the
+    appliance runs MTA mode - the refusal is decided per object, not per shape.
+    Get-SfosSMTPDeploymentMode says which mode is active.
+
 .PARAMETER Name
     Required. Name of the existing rule to update.
 
@@ -2892,6 +2935,10 @@ function Set-SfosSMTPMalwareScanningPolicy {
     It needs an open connection from Connect-SfosFirewall, or the connection parameters
     supplied directly, and an account with write permission for the Email area. Never
     target the built-in 'default-smtp-av' rule with this cmdlet.
+
+    This object belongs to legacy mail scanning. Writing to it can be refused with status 545 while the
+    appliance runs MTA mode - the refusal is decided per object, not per shape.
+    Get-SfosSMTPDeploymentMode says which mode is active.
 
 .PARAMETER Name
     Required. Name of the rule to remove.
@@ -3180,6 +3227,9 @@ function ConvertTo-SfosPOPIMAPScanningPolicyEntityXml {
     connection from Connect-SfosFirewall, or the connection parameters supplied
     directly.
 
+    This object is shared by both shapes of the email area: the same storage answers in
+    MTA mode and in legacy mail scanning, so it behaves the same either way.
+
 .PARAMETER NameLike
     Optional. Returns only rules whose name contains the given text anywhere. Sent to the
     firewall as a server-side pre-filter (Name/like) and re-applied client-side. If
@@ -3334,6 +3384,9 @@ function Get-SfosPOPIMAPScanningPolicy {
 
     It needs an open connection from Connect-SfosFirewall, or the connection parameters
     supplied directly, and an account with write permission for the Email area.
+
+    This object is shared by both shapes of the email area: the same storage answers in
+    MTA mode and in legacy mail scanning, so it behaves the same either way.
 
 .PARAMETER Name
     Required. Name of the rule. Maximum 255 characters.
@@ -3531,6 +3584,9 @@ function New-SfosPOPIMAPScanningPolicy {
 
     It needs an open connection from Connect-SfosFirewall, or the connection parameters
     supplied directly, and an account with write permission for the Email area.
+
+    This object is shared by both shapes of the email area: the same storage answers in
+    MTA mode and in legacy mail scanning, so it behaves the same either way.
 
 .PARAMETER Name
     Required. Name of the existing rule to update.
@@ -3748,6 +3804,9 @@ function Set-SfosPOPIMAPScanningPolicy {
     It needs an open connection from Connect-SfosFirewall, or the connection parameters
     supplied directly, and an account with write permission for the Email area.
 
+    This object is shared by both shapes of the email area: the same storage answers in
+    MTA mode and in legacy mail scanning, so it behaves the same either way.
+
 .PARAMETER Name
     Required. Name of the rule to remove.
 
@@ -3876,6 +3935,9 @@ function Remove-SfosPOPIMAPScanningPolicy {
     connection from Connect-SfosFirewall, or the connection parameters supplied
     directly.
 
+    This object is shared by both shapes of the email area: the same storage answers in
+    MTA mode and in legacy mail scanning, so it behaves the same either way.
+
 .PARAMETER Firewall
     Optional. Host name or IP address of the firewall. If omitted, the value from the
     current connection is used.
@@ -3981,6 +4043,9 @@ function Get-SfosMailMalwareProtection {
 
     It needs an open connection from Connect-SfosFirewall, or the connection parameters
     supplied directly, and an account with write permission for the Email area.
+
+    This object is shared by both shapes of the email area: the same storage answers in
+    MTA mode and in legacy mail scanning, so it behaves the same either way.
 
 .PARAMETER PrimaryAntiVirusEngine
     Optional. Sophos or Avira. If omitted, the current value is kept.
@@ -4109,6 +4174,9 @@ function Set-SfosMailMalwareProtection {
     The cmdlet only reads; nothing on the firewall is changed. It needs an open
     connection from Connect-SfosFirewall, or the connection parameters supplied
     directly.
+
+    This object is shared by both shapes of the email area: the same storage answers in
+    MTA mode and in legacy mail scanning, so it behaves the same either way.
 
 .PARAMETER Firewall
     Optional. Host name or IP address of the firewall. If omitted, the value from the
@@ -4248,6 +4316,9 @@ function Get-SfosEmailConfiguration {
     supplied directly, and an account with write permission for the Email area. This
     root is shared between the legacy Email area and the MTA-based Email(MTA) area, so
     a write here affects whichever mode is active.
+
+    This object is shared by both shapes of the email area: the same storage answers in
+    MTA mode and in legacy mail scanning, so it behaves the same either way.
 
 .PARAMETER EmailSignature
     Optional. Signature text appended to outgoing mail, replacing the current value. If
@@ -4755,6 +4826,10 @@ function Get-SfosMTAAddressGroup {
     It needs an open connection from Connect-SfosFirewall, or the connection parameters
     supplied directly, and an account with write permission for the Email area.
 
+    This object belongs to MTA mode. Writing to it can be refused with status 545 while the
+    appliance runs legacy mail scanning - the refusal is decided per object, not per shape.
+    Get-SfosSMTPDeploymentMode says which mode is active.
+
 .PARAMETER Name
     Required. Name of the group. Maximum 50 characters.
 
@@ -4914,6 +4989,10 @@ function New-SfosMTAAddressGroup {
     supplied directly, and an account with write permission for the Email area. Never
     target the built-in 'Premium RBL Services' or 'Standard RBL Services' groups with
     this cmdlet.
+
+    This object belongs to MTA mode. Writing to it can be refused with status 545 while the
+    appliance runs legacy mail scanning - the refusal is decided per object, not per shape.
+    Get-SfosSMTPDeploymentMode says which mode is active.
 
 .PARAMETER Name
     Required. Name of the existing group to update.
@@ -5084,6 +5163,10 @@ function Set-SfosMTAAddressGroup {
     supplied directly, and an account with write permission for the Email area. Never
     target the built-in 'Premium RBL Services' or 'Standard RBL Services' groups with
     this cmdlet.
+
+    This object belongs to MTA mode. Writing to it can be refused with status 545 while the
+    appliance runs legacy mail scanning - the refusal is decided per object, not per shape.
+    Get-SfosSMTPDeploymentMode says which mode is active.
 
 .PARAMETER Name
     Required. Name of the group to remove.
@@ -5410,6 +5493,10 @@ function Get-SfosMTADataControlList {
     It needs an open connection from Connect-SfosFirewall, or the connection parameters
     supplied directly, and an account with write permission for the Email area.
 
+    This object belongs to MTA mode. Writing to it can be refused with status 545 while the
+    appliance runs legacy mail scanning - the refusal is decided per object, not per shape.
+    Get-SfosSMTPDeploymentMode says which mode is active.
+
 .PARAMETER Name
     Required. Name of the list. Maximum 255 characters.
 
@@ -5534,6 +5621,10 @@ function New-SfosMTADataControlList {
     supplied directly, and an account with write permission for the Email area. Never
     target the three predefined lists ('Postal addresses', 'Financial information',
     'Confidential information') with this cmdlet.
+
+    This object belongs to MTA mode. Writing to it can be refused with status 545 while the
+    appliance runs legacy mail scanning - the refusal is decided per object, not per shape.
+    Get-SfosSMTPDeploymentMode says which mode is active.
 
 .PARAMETER Name
     Required. Name of the existing list to update.
@@ -5671,6 +5762,10 @@ function Set-SfosMTADataControlList {
     supplied directly, and an account with write permission for the Email area. Never
     target the three predefined lists ('Postal addresses', 'Financial information',
     'Confidential information') with this cmdlet.
+
+    This object belongs to MTA mode. Writing to it can be refused with status 545 while the
+    appliance runs legacy mail scanning - the refusal is decided per object, not per shape.
+    Get-SfosSMTPDeploymentMode says which mode is active.
 
 .PARAMETER Name
     Required. Name of the list to remove.
@@ -5919,6 +6014,9 @@ function ConvertTo-SfosMailExceptionPolicyEntityXml {
     connection from Connect-SfosFirewall, or the connection parameters supplied
     directly.
 
+    This object belongs to MTA mode. Reading it works whichever mode the appliance runs;
+    Get-SfosSMTPDeploymentMode says which one that is.
+
 .PARAMETER NameLike
     Optional. Returns only policies whose name contains the given text anywhere. Sent
     to the firewall as a server-side pre-filter (Name/like, following the pattern
@@ -6098,6 +6196,10 @@ function Get-SfosMailExceptionPolicy {
 
     It needs an open connection from Connect-SfosFirewall, or the connection parameters
     supplied directly, and an account with write permission for the Email area.
+
+    This object belongs to MTA mode. Writing to it can be refused with status 545 while the
+    appliance runs legacy mail scanning - the refusal is decided per object, not per shape.
+    Get-SfosSMTPDeploymentMode says which mode is active.
 
 .PARAMETER Name
     Required. Name of the policy. Maximum 100 characters.
@@ -6375,6 +6477,10 @@ function New-SfosMailExceptionPolicy {
 
     It needs an open connection from Connect-SfosFirewall, or the connection parameters
     supplied directly, and an account with write permission for the Email area.
+
+    This object belongs to MTA mode. Writing to it can be refused with status 545 while the
+    appliance runs legacy mail scanning - the refusal is decided per object, not per shape.
+    Get-SfosSMTPDeploymentMode says which mode is active.
 
 .PARAMETER Name
     Required. Name of the existing policy to update.
@@ -6656,6 +6762,10 @@ function Set-SfosMailExceptionPolicy {
     It needs an open connection from Connect-SfosFirewall, or the connection parameters
     supplied directly, and an account with write permission for the Email area.
 
+    This object belongs to MTA mode. Writing to it can be refused with status 545 while the
+    appliance runs legacy mail scanning - the refusal is decided per object, not per shape.
+    Get-SfosSMTPDeploymentMode says which mode is active.
+
 .PARAMETER Name
     Required. Name of the policy to remove.
 
@@ -6797,6 +6907,9 @@ function Remove-SfosMailExceptionPolicy {
     objects, not one object seen through two roots - see Set-SfosMTASPXConfiguration for the
     write test that established this.
 
+    This object belongs to MTA mode. Reading it works whichever mode the appliance runs;
+    Get-SfosSMTPDeploymentMode says which one that is.
+
 .PARAMETER Firewall
     Optional. Host name or IP address of the firewall. If omitted, the value from the current
     connection is used.
@@ -6933,6 +7046,10 @@ function Get-SfosMTASPXConfiguration {
     day here and reading SPXConfiguration back afterwards left SPXConfiguration at its old
     value. The two are independent objects that merely start out equal; a write to one is
     confirmed NOT to reach the other.
+
+    This object belongs to MTA mode. Writing to it can be refused with status 545 while the
+    appliance runs legacy mail scanning - the refusal is decided per object, not per shape.
+    Get-SfosSMTPDeploymentMode says which mode is active.
 
 .PARAMETER DefaultSPXTemplate
     Optional. Name of the SPXTemplate/MTASPXTemplate object used as the global default. If
@@ -7138,6 +7255,9 @@ function Set-SfosMTASPXConfiguration {
     The cmdlet only reads; nothing on the firewall is changed. It needs an open connection from
     Connect-SfosFirewall, or the connection parameters supplied directly.
 
+    This object belongs to MTA mode. Reading it works whichever mode the appliance runs;
+    Get-SfosSMTPDeploymentMode says which one that is.
+
 .PARAMETER NameLike
     Optional. Returns only objects whose name contains the given text anywhere. This is a
     substring match, not a wildcard pattern, sent to the firewall as a server-side pre-filter
@@ -7294,6 +7414,10 @@ function Get-SfosMTASPXTemplate {
     (nothing was created, confirmed by reading it back), so there is no Legacy-side template to
     check for on this root. Nothing suggests the two share storage; the one-direction result is
     reported as what it is.
+
+    This object belongs to MTA mode. Writing to it can be refused with status 545 while the
+    appliance runs legacy mail scanning - the refusal is decided per object, not per shape.
+    Get-SfosSMTPDeploymentMode says which mode is active.
 
 .PARAMETER Name
     Required. Name to uniquely identify the template.
@@ -7498,6 +7622,10 @@ function New-SfosMTASPXTemplate {
 
     It needs an open connection from Connect-SfosFirewall, or the connection parameters
     supplied directly, and an account with write permission for the Email (MTA) area.
+
+    This object belongs to MTA mode. Writing to it can be refused with status 545 while the
+    appliance runs legacy mail scanning - the refusal is decided per object, not per shape.
+    Get-SfosSMTPDeploymentMode says which mode is active.
 
 .PARAMETER Name
     Required. Name of the existing MTASPXTemplates object to update.
@@ -7726,6 +7854,10 @@ function Set-SfosMTASPXTemplate {
     It needs an open connection from Connect-SfosFirewall, or the connection parameters
     supplied directly, and an account with write permission for the Email (MTA) area.
 
+    This object belongs to MTA mode. Writing to it can be refused with status 545 while the
+    appliance runs legacy mail scanning - the refusal is decided per object, not per shape.
+    Get-SfosSMTPDeploymentMode says which mode is active.
+
 .PARAMETER Name
     Required. Name of the object to remove.
 
@@ -7858,6 +7990,9 @@ function Remove-SfosMTASPXTemplate {
     neither is the plaintext; Set-SfosAdvancedSMTPSetting resends this hash to preserve the
     secret when -BATVSecret is not passed.
 
+    This object belongs to MTA mode. Reading it works whichever mode the appliance runs;
+    Get-SfosSMTPDeploymentMode says which one that is.
+
 .PARAMETER Firewall
     Optional. Host name or IP address of the firewall. If omitted, the value from the current
     connection is used.
@@ -7985,6 +8120,10 @@ function Get-SfosAdvancedSMTPSetting {
 
     It needs an open connection from Connect-SfosFirewall, or the connection parameters
     supplied directly, and an account with write permission for the Email (MTA) area.
+
+    This object belongs to MTA mode. Writing to it can be refused with status 545 while the
+    appliance runs legacy mail scanning - the refusal is decided per object, not per shape.
+    Get-SfosSMTPDeploymentMode says which mode is active.
 
 .PARAMETER RejectInvalidHELOorMissingRDNS
     Optional. Rejects hosts that send invalid HELO/EHLO arguments or lack RDNS entries,
@@ -8843,6 +8982,9 @@ function Get-SfosDKIMVerification {
     The cmdlet only reads; nothing on the firewall is changed. It needs an open connection
     from Connect-SfosFirewall, or the connection parameters supplied directly.
 
+    This object belongs to MTA mode. Reading it works whichever mode the appliance runs;
+    Get-SfosSMTPDeploymentMode says which one that is.
+
 .PARAMETER NameLike
     Optional. Returns only objects whose name contains the given text anywhere. This is a
     substring match, not a wildcard pattern, sent to the firewall as a server-side pre-filter
@@ -8988,10 +9130,8 @@ function Get-SfosSMTPPolicy {
     Returns AVASAddressGroup objects (PROTECT > Email > Address group), used by the legacy
     anti-spam engine as RBL, IP address or email address/domain lists.
 
-    This is a legacy entity: the appliance this module was built against runs in MTA mode,
-    where a write to AVASAddressGroup answers 545/MTAModeDisableCheck. The MTA-mode
-    counterpart, MTAAddressGroup, is served by a different cmdlet in this module family;
-    only reading is implemented here.
+    This is a legacy entity. Its MTA-mode counterpart is a separate object with its own
+    storage, served by the MTAAddressGroup cmdlets in this module.
 
     Filtering by -NameLike is sent to the firewall as a server-side pre-filter and
     re-applied client-side; measured against a live appliance to actually narrow the result
@@ -9146,10 +9286,8 @@ function Get-SfosAVASAddressGroup {
     default template, portal host name and port, and the pass-registration/notification
     behaviour of the legacy SPX engine.
 
-    This is a legacy entity: the appliance this module was built against runs in MTA mode,
-    where a write to SPXConfiguration answers 545/MTAModeDisableCheck. The MTA-mode
-    counterpart, MTASPXConfiguration, is served by a different cmdlet in this module family;
-    only reading is implemented here.
+    This is a legacy entity. Its MTA-mode counterpart is a separate object with its own
+    storage, served by the MTASPXConfiguration cmdlets in this module.
 
     The cmdlet only reads; nothing on the firewall is changed. It needs an open connection
     from Connect-SfosFirewall, or the connection parameters supplied directly.
@@ -9270,10 +9408,8 @@ function Get-SfosSPXConfiguration {
     Returns SPXTemplates objects (PROTECT > Email > SPX > Templates), the notification and
     encryption templates used to deliver encrypted PDF messages via the legacy SPX engine.
 
-    This is a legacy entity: the appliance this module was built against runs in MTA mode,
-    where a write to SPXTemplates answers 545/MTAModeDisableCheck. The MTA-mode counterpart,
-    MTASPXTemplates, is served by a different cmdlet in this module family; only reading is
-    implemented here.
+    This is a legacy entity. Its MTA-mode counterpart is a separate object with its own
+    storage, served by the MTASPXTemplates cmdlets in this module.
 
     Filtering by -NameLike is sent to the firewall as a server-side pre-filter and
     re-applied client-side; measured against a live appliance to actually narrow the result.
@@ -9430,11 +9566,8 @@ function Get-SfosSPXTemplate {
     data-protection signature lists (postal addresses, financial information, and similar
     catalog categories).
 
-    This is a legacy entity: the appliance this module was built against runs in MTA mode,
-    where a write to DataControlList answers 545/MTAModeDisableCheck, and the entity holds
-    no records there as a result. The MTA-mode counterpart, MTADataControlList, is fully
-    writable and is served by a different cmdlet in this module family; only reading is
-    implemented here.
+    This is a legacy entity. Its MTA-mode counterpart is a separate object with its own
+    storage, served by the MTADataControlList cmdlets in this module.
 
     Filtering by -NameLike is sent to the firewall as a server-side pre-filter by analogy
     with the other Name-keyed entities in this module (measured to work there), then
@@ -9728,6 +9861,10 @@ function ConvertTo-SfosSMTPPolicyEntityXml {
     It needs an open connection from Connect-SfosFirewall, or the connection parameters
     supplied directly, and an account with write permission for the Email area.
 
+    This object belongs to MTA mode. Writing to it can be refused with status 545 while the
+    appliance runs legacy mail scanning - the refusal is decided per object, not per shape.
+    Get-SfosSMTPDeploymentMode says which mode is active.
+
 .PARAMETER Name
     Required. Name of the policy profile. Maximum 50 characters.
 
@@ -9923,6 +10060,10 @@ function New-SfosSMTPPolicy {
 
     It needs an open connection from Connect-SfosFirewall, or the connection parameters
     supplied directly, and an account with write permission for the Email area.
+
+    This object belongs to MTA mode. Writing to it can be refused with status 545 while the
+    appliance runs legacy mail scanning - the refusal is decided per object, not per shape.
+    Get-SfosSMTPDeploymentMode says which mode is active.
 
 .PARAMETER Name
     Required. Name of the existing policy profile to update.
@@ -10124,6 +10265,10 @@ function Set-SfosSMTPPolicy {
 
     It needs an open connection from Connect-SfosFirewall, or the connection parameters
     supplied directly, and an account with write permission for the Email area.
+
+    This object belongs to MTA mode. Writing to it can be refused with status 545 while the
+    appliance runs legacy mail scanning - the refusal is decided per object, not per shape.
+    Get-SfosSMTPDeploymentMode says which mode is active.
 
 .PARAMETER Name
     Required. Name of the policy profile to remove.
@@ -10517,6 +10662,10 @@ function New-SfosAVASAddressGroup {
     target the built-in 'Premium RBL Services' or 'Standard RBL Services' groups with
     this cmdlet.
 
+    This object belongs to legacy mail scanning. Writing to it can be refused with status 545 while the
+    appliance runs MTA mode - the refusal is decided per object, not per shape.
+    Get-SfosSMTPDeploymentMode says which mode is active.
+
 .PARAMETER Name
     Required. Name of the existing group to update.
 
@@ -10689,6 +10838,10 @@ function Set-SfosAVASAddressGroup {
     supplied directly, and an account with write permission for the Email area. Never
     target the built-in 'Premium RBL Services' or 'Standard RBL Services' groups with
     this cmdlet.
+
+    This object belongs to legacy mail scanning. Writing to it can be refused with status 545 while the
+    appliance runs MTA mode - the refusal is decided per object, not per shape.
+    Get-SfosSMTPDeploymentMode says which mode is active.
 
 .PARAMETER Name
     Required. Name of the group to remove.
@@ -10996,6 +11149,10 @@ function New-SfosDataControlList {
     It needs an open connection from Connect-SfosFirewall, or the connection parameters
     supplied directly, and an account with write permission for the Email area.
 
+    This object belongs to legacy mail scanning. Writing to it can be refused with status 545 while the
+    appliance runs MTA mode - the refusal is decided per object, not per shape.
+    Get-SfosSMTPDeploymentMode says which mode is active.
+
 .PARAMETER Name
     Required. Name of the existing list to update.
 
@@ -11130,6 +11287,10 @@ function Set-SfosDataControlList {
 
     It needs an open connection from Connect-SfosFirewall, or the connection parameters
     supplied directly, and an account with write permission for the Email area.
+
+    This object belongs to legacy mail scanning. Writing to it can be refused with status 545 while the
+    appliance runs MTA mode - the refusal is decided per object, not per shape.
+    Get-SfosSMTPDeploymentMode says which mode is active.
 
 .PARAMETER Name
     Required. Name of the list to remove.
@@ -11269,6 +11430,10 @@ function Remove-SfosDataControlList {
 
     It needs an open connection from Connect-SfosFirewall, or the connection parameters
     supplied directly, and an account with write permission for the Email area.
+
+    This object belongs to legacy mail scanning. Writing to it can be refused with status 545 while the
+    appliance runs MTA mode - the refusal is decided per object, not per shape.
+    Get-SfosSMTPDeploymentMode says which mode is active.
 
 .PARAMETER DefaultSPXTemplate
     Optional. Name of the SPXTemplates/MTASPXTemplates object used as the global default.
@@ -11475,6 +11640,10 @@ function Set-SfosSPXConfiguration {
     It needs an open connection from Connect-SfosFirewall, or the connection parameters
     supplied directly, and an account with write permission for the Email area.
 
+    This object belongs to legacy mail scanning. Writing to it can be refused with status 545 while the
+    appliance runs MTA mode - the refusal is decided per object, not per shape.
+    Get-SfosSMTPDeploymentMode says which mode is active.
+
 .PARAMETER Name
     Required. Name to uniquely identify the template.
 
@@ -11659,6 +11828,10 @@ function New-SfosSPXTemplate {
     It needs an open connection from Connect-SfosFirewall, or the connection parameters
     supplied directly, and an account with write permission for the Email area. Never
     target the built-in 'Default Template' object with this cmdlet.
+
+    This object belongs to legacy mail scanning. Writing to it can be refused with status 545 while the
+    appliance runs MTA mode - the refusal is decided per object, not per shape.
+    Get-SfosSMTPDeploymentMode says which mode is active.
 
 .PARAMETER Name
     Required. Name of the existing SPXTemplates object to update.
@@ -11868,6 +12041,10 @@ function Set-SfosSPXTemplate {
 
     It needs an open connection from Connect-SfosFirewall, or the connection parameters
     supplied directly, and an account with write permission for the Email area.
+
+    This object belongs to legacy mail scanning. Writing to it can be refused with status 545 while the
+    appliance runs MTA mode - the refusal is decided per object, not per shape.
+    Get-SfosSMTPDeploymentMode says which mode is active.
 
 .PARAMETER Name
     Required. Name of the object to remove.

@@ -1,7 +1,7 @@
 # Sophos Firewall PowerShell Module Suite
 
 A PowerShell module collection for managing Sophos XGS/SFOS firewalls through their XML
-management API. Seventeen modules ship 647 cmdlets, covering seventeen of the API's areas.
+management API. Nineteen modules ship 652 cmdlets, covering nineteen of the API's areas.
 
 ## Quick Start
 
@@ -43,7 +43,7 @@ Cmdlets called without `-Session` use the ambient default session set by
 
 | Module | Cmdlets | Purpose |
 |---|---|---|
-| [SophosFirewall.Core](Modules/SophosFirewall.Core/README.md) | 8 | Connection management, API transport, XML escaping |
+| [SophosFirewall.Core](Modules/SophosFirewall.Core/README.md) | 9 | Connection management, API transport, XML escaping |
 | [SophosFirewall.HostsAndServices](Modules/SophosFirewall.HostsAndServices/README.md) | 53 | IP/FQDN/MAC hosts, country groups, services and their groups |
 | [SophosFirewall.Web](Modules/SophosFirewall.Web/README.md) | 54 | URL groups, web categories, file types, filter policies and exceptions, surfing quotas |
 | [SophosFirewall.Firewall](Modules/SophosFirewall.Firewall/README.md) | 21 | Firewall rules and rule groups, NAT rules, SSL/TLS inspection |
@@ -60,8 +60,10 @@ Cmdlets called without `-Session` use the ambient default session set by
 | [SophosFirewall.WebServer](Modules/SophosFirewall.WebServer/README.md) | 18 | Web server publishing (WAF), protection policies, authentication policies and templates, slow HTTP protection |
 | [SophosFirewall.Certificates](Modules/SophosFirewall.Certificates/README.md) | 11 | Certificates, certificate authorities, revocation lists |
 | [SophosFirewall.Email](Modules/SophosFirewall.Email/README.md) | 70 | SMTP and POP/IMAP scanning policies, MTA address groups and exceptions, data control, SPX, anti-spam, mail configuration |
+| [SophosFirewall.Diagnostics](Modules/SophosFirewall.Diagnostics/README.md) | 2 | Remote support access |
+| [SophosFirewall.ZeroDayProtection](Modules/SophosFirewall.ZeroDayProtection/README.md) | 2 | Sandbox analysis datacenter and excluded file types |
 
-647 cmdlets in total. Every module follows the same connection model and shares the
+652 cmdlets in total. Every module follows the same connection model and shares the
 `SophosFirewall.Core` transport layer.
 
 Several cmdlets change settings that the current management session itself depends on -

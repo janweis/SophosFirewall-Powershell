@@ -29,6 +29,7 @@ on:
           - SophosFirewall.Email
           - SophosFirewall.Diagnostics
           - SophosFirewall.ZeroDayProtection
+          - SophosFirewall.SophosCentral
       dryRun:
         description: 'Dry run (do not actually publish)'
         required: true
@@ -84,7 +85,8 @@ jobs:
               'SophosFirewall.Certificates',
               'SophosFirewall.Email',
               'SophosFirewall.Diagnostics',
-              'SophosFirewall.ZeroDayProtection'
+              'SophosFirewall.ZeroDayProtection',
+              'SophosFirewall.SophosCentral'
             )
           } else {
             $order = @($selected)

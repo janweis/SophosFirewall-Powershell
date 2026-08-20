@@ -9,7 +9,7 @@
     Tests cmdlet structure and, above all, the XML actually sent to the firewall.
     Invoke-SfosApi is always mocked; no test touches a real firewall.
 
-    Coverage: module loading/manifest agreement and existence of all 32 exported
+    Coverage: module loading/manifest agreement and existence of all 34 exported
     functions; New-SfosSNMPCommunity XML generation; New-SfosLocalServiceACL XML
     generation; the Name/Location/ContactPerson mandatory-field guard on
     Set-SfosSNMPAgentConfiguration; the partial (single-field) update shape of
@@ -17,8 +17,10 @@
     read-modify-write, the single repeating <Server> wrapper, clearing the list,
     the array-length guard); Set-SfosAdminPassword XML generation and its error
     path; the shared status-parsing error paths (5xx throws, login failure throws,
-    "No. of records Zero." yields @()); and the -Session parameter against a
-    named, non-default session.
+    "No. of records Zero." yields @()); the -Session parameter against a
+    named, non-default session; and Restart-SfosFirewall/Stop-SfosFirewall (web
+    admin console mode 193 with the reboot flag - Connect-SfosWebAdmin/Invoke-SfosWebAdminRequest
+    mocked, connection-drop-as-success, loginstylesheet-as-error).
 
 .NOTES
     Minimum supported PowerShell version: 5.1
@@ -51,11 +53,11 @@ Describe 'Module Loading' {
         Get-Module SophosFirewall.Core | Should -Not -BeNullOrEmpty
     }
 
-    It 'Should export exactly 32 functions' {
-        (Get-Module SophosFirewall.Administration).ExportedFunctions.Count | Should -Be 32
+    It 'Should export exactly 34 functions' {
+        (Get-Module SophosFirewall.Administration).ExportedFunctions.Count | Should -Be 34
     }
 
-    It 'Manifest FunctionsToExport should list exactly 32 functions, matching the loaded module' {
+    It 'Manifest FunctionsToExport should list exactly 34 functions, matching the loaded module' {
         $modulesDir = Join-Path (Split-Path -Parent $PSScriptRoot) 'Modules'
         $manifestPath = Join-Path $modulesDir 'SophosFirewall.Administration\SophosFirewall.Administration.psd1'
 
@@ -68,7 +70,7 @@ Describe 'Module Loading' {
             $env:PSModulePath = $originalModulePath
         }
 
-        $manifest.ExportedFunctions.Count | Should -Be 32
+        $manifest.ExportedFunctions.Count | Should -Be 34
     }
 
     It 'Every documented function exists' {
@@ -80,13 +82,15 @@ Describe 'Module Loading' {
             'New-SfosLocalServiceACL', 'New-SfosSNMPCommunity', 'New-SfosSNMPv3User',
             'Remove-SfosLocalServiceACL', 'Remove-SfosSNMPCommunity',
             'Remove-SfosSNMPv3User', 'Reset-SfosToFactoryDefaults',
+            'Restart-SfosFirewall',
             'Set-SfosAdminPassword',
             'Set-SfosAdminPasswordComplexity', 'Set-SfosApplianceAccess',
             'Set-SfosHostname', 'Set-SfosLocalServiceACL',
             'Set-SfosLoginDisclaimer', 'Set-SfosLoginSecurity', 'Set-SfosMessages',
             'Set-SfosNetFlowConfiguration', 'Set-SfosNotification',
             'Set-SfosSNMPAgentConfiguration', 'Set-SfosSNMPCommunity',
-            'Set-SfosSNMPv3User', 'Set-SfosTime', 'Set-SfosWebAdminSettings'
+            'Set-SfosSNMPv3User', 'Set-SfosTime', 'Set-SfosWebAdminSettings',
+            'Stop-SfosFirewall'
         )
         foreach ($name in $expected) {
             Get-Command $name -Module SophosFirewall.Administration -ErrorAction SilentlyContinue |
@@ -410,6 +414,142 @@ Describe 'Set-SfosAdminPassword' {
 
         { Set-SfosAdminPassword -CurrentPassword $currentPw -NewPassword $newPw @conn -Confirm:$false } |
             Should -Throw '*510*'
+    }
+}
+
+Describe 'Restart-SfosFirewall / Stop-SfosFirewall' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+        $webAdminSession = [PSCustomObject]@{
+            BaseUri              = 'https://fw.example.test:4444'
+            WebSession            = $null
+            Csrf                 = 'token'
+            SkipCertificateCheck = $false
+        }
+    }
+
+    BeforeEach {
+        Mock -CommandName Connect-SfosWebAdmin -ModuleName SophosFirewall.Administration -MockWith {
+            $webAdminSession
+        }
+        Mock -CommandName Invoke-SfosWebAdminRequest -ModuleName SophosFirewall.Administration -MockWith {
+            [PSCustomObject]@{ status = 200 }
+        }
+    }
+
+    It 'both cmdlets exist and are exported' {
+        Get-Command Restart-SfosFirewall -Module SophosFirewall.Administration | Should -Not -BeNullOrEmpty
+        Get-Command Stop-SfosFirewall -Module SophosFirewall.Administration | Should -Not -BeNullOrEmpty
+    }
+
+    It 'both cmdlets carry the connection parameters in the fixed order and types' {
+        $expectedTypes = [ordered]@{
+            Firewall             = [string]
+            Port                 = [int]
+            Username             = [string]
+            Password             = [securestring]
+            SkipCertificateCheck = [switch]
+            Session              = [object]
+        }
+
+        foreach ($function in 'Restart-SfosFirewall', 'Stop-SfosFirewall') {
+            $cmd = Get-Command $function -Module SophosFirewall.Administration
+            $connKeys = @($cmd.Parameters.Keys | Where-Object { $expectedTypes.Contains($_) })
+            $connKeys | Should -Be @($expectedTypes.Keys) -Because "$function should keep the fixed connection parameter order"
+
+            foreach ($name in $expectedTypes.Keys) {
+                $cmd.Parameters[$name].ParameterType | Should -Be $expectedTypes[$name]
+            }
+        }
+    }
+
+    It 'both cmdlets declare ConfirmImpact High' {
+        foreach ($function in 'Restart-SfosFirewall', 'Stop-SfosFirewall') {
+            $cmd = Get-Command $function -Module SophosFirewall.Administration
+            $attr = $cmd.ScriptBlock.Attributes | Where-Object { $_ -is [System.Management.Automation.CmdletBindingAttribute] }
+            $attr.ConfirmImpact | Should -Be ([System.Management.Automation.ConfirmImpact]::High)
+        }
+    }
+
+    It 'Restart-SfosFirewall requests web admin mode 193 with the reboot flag set' {
+        Restart-SfosFirewall @conn -Reason 'Maintenance window' -Confirm:$false
+
+        Should -Invoke -CommandName Invoke-SfosWebAdminRequest -ModuleName SophosFirewall.Administration -Times 1 -Exactly -ParameterFilter {
+            $payload = $Json | ConvertFrom-Json
+            $Mode -eq 193 -and $payload.reason -eq 'Maintenance window' -and $payload.reboot -eq '1'
+        }
+    }
+
+    It 'the two cmdlets differ only in the reboot flag, which is what keeps them apart on one mode' {
+        Restart-SfosFirewall @conn -Reason 'Maintenance window' -Confirm:$false
+        Stop-SfosFirewall @conn -Reason 'Maintenance window' -Confirm:$false
+
+        Should -Invoke -CommandName Invoke-SfosWebAdminRequest -ModuleName SophosFirewall.Administration -Times 1 -Exactly -ParameterFilter {
+            ($Json | ConvertFrom-Json).reboot -eq '1'
+        }
+        Should -Invoke -CommandName Invoke-SfosWebAdminRequest -ModuleName SophosFirewall.Administration -Times 1 -Exactly -ParameterFilter {
+            ($Json | ConvertFrom-Json).reboot -eq '0'
+        }
+    }
+
+    It 'Restart-SfosFirewall refuses to run without a reason, which the web console marks as required' {
+        (Get-Command Restart-SfosFirewall -Module SophosFirewall.Administration).Parameters['Reason'].Attributes |
+            Where-Object { $_ -is [System.Management.Automation.ParameterAttribute] } |
+            ForEach-Object { $_.Mandatory } | Should -Contain $true
+    }
+
+    It 'Stop-SfosFirewall requests web admin mode 193' {
+        Stop-SfosFirewall @conn -Reason 'Maintenance window' -Confirm:$false
+
+        Should -Invoke -CommandName Invoke-SfosWebAdminRequest -ModuleName SophosFirewall.Administration -Times 1 -Exactly -ParameterFilter {
+            $Mode -eq 193
+        }
+    }
+
+    It 'Stop-SfosFirewall sends the reason and the reboot flag, because an empty body is accepted and does nothing' {
+        Stop-SfosFirewall @conn -Reason 'Maintenance window' -Confirm:$false
+
+        Should -Invoke -CommandName Invoke-SfosWebAdminRequest -ModuleName SophosFirewall.Administration -Times 1 -Exactly -ParameterFilter {
+            $payload = $Json | ConvertFrom-Json
+            $payload.reason -eq 'Maintenance window' -and $payload.reboot -eq '0'
+        }
+    }
+
+    It 'Stop-SfosFirewall refuses to run without a reason, which the web console marks as required' {
+        (Get-Command Stop-SfosFirewall -Module SophosFirewall.Administration).Parameters['Reason'].Attributes |
+            Where-Object { $_ -is [System.Management.Automation.ParameterAttribute] } |
+            ForEach-Object { $_.Mandatory } | Should -Contain $true
+    }
+
+    It '-WhatIf suppresses the request entirely, on both cmdlets' {
+        Restart-SfosFirewall @conn -Reason 'Maintenance window' -WhatIf
+        Stop-SfosFirewall @conn -Reason 'Maintenance window' -WhatIf
+
+        Should -Invoke -CommandName Connect-SfosWebAdmin -ModuleName SophosFirewall.Administration -Times 0 -Exactly
+        Should -Invoke -CommandName Invoke-SfosWebAdminRequest -ModuleName SophosFirewall.Administration -Times 0 -Exactly
+    }
+
+    It 'a dropped connection after the request was sent is treated as success, not an error' {
+        Mock -CommandName Invoke-SfosWebAdminRequest -ModuleName SophosFirewall.Administration -MockWith {
+            throw [System.Net.WebException]::new('The underlying connection was closed.')
+        }
+
+        { Restart-SfosFirewall @conn -Reason 'Maintenance window' -Confirm:$false } | Should -Not -Throw
+        { Stop-SfosFirewall @conn -Reason 'Maintenance window' -Confirm:$false } | Should -Not -Throw
+    }
+
+    It 'a response still carrying the login page is reported as an error naming the missing login' {
+        Mock -CommandName Invoke-SfosWebAdminRequest -ModuleName SophosFirewall.Administration -MockWith {
+            throw "Sophos Firewall web console request (mode 417) received the login page instead of data. This happens when the session is no longer valid, or when the required headers 'X-Requested-With: XMLHttpRequest' and 'Referer' are missing from the request."
+        }
+
+        { Restart-SfosFirewall @conn -Reason 'Maintenance window' -Confirm:$false } | Should -Throw '*not logged in*'
     }
 }
 

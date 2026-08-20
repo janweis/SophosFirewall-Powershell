@@ -1,5 +1,5 @@
-﻿#requires -Version 5.1
-#requires -Modules SophosFirewall.Core
+#requires -Version 5.1
+#requires -Modules @{ ModuleName = 'SophosFirewall.Core'; ModuleVersion = '1.4.0' }
 
 <#
     SophosFirewall.Administration
@@ -8,14 +8,16 @@
     XML API: mail server notification settings, SNMP agent configuration, system date/time,
     SNMP communities, SNMPv3 users, customizable end-user messages, appliance service access
     (zones per management service), the admin settings singleton (hostname, web admin ports,
-    login security, password complexity, login disclaimer, factory reset), and the
-    Local Service ACL rule list (management access control by zone/source host).
+    login security, password complexity, login disclaimer, factory reset), the
+    Local Service ACL rule list (management access control by zone/source host), and
+    restart/shutdown of the appliance through the undocumented web admin console.
 
-    Total Functions: 32 - see README.md for the full cmdlet table.
+    Total Functions: 34 - see README.md for the full cmdlet table.
 
-    Requires SophosFirewall.Core (>= 1.3.0) for transport, session state and status
-    evaluation. All XML building and entity parsing happens here; all HTTP(S) happens
-    in Core.
+    Requires SophosFirewall.Core (>= 1.4.0) for transport, session state, status
+    evaluation and the web admin console access used by Restart-SfosFirewall/
+    Stop-SfosFirewall. All XML building and entity parsing happens here; all HTTP(S)
+    happens in Core.
 
     API reference:
     https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
@@ -5672,3 +5674,291 @@ function Set-SfosAdminPassword {
     # API area - see the region header above Get-SfosAdminSettings.
     Assert-SfosApiReturnSuccess -Xml $XmlResponse -ObjectName 'AdminPassword' -Action 'update'
 }
+
+#region PowerControl
+# Restart and shutdown are not XML API operations at all - the operation index of the
+# vendor documentation has no entry for either. Both are reached the same way the web admin
+# console itself reaches them: a POST to the web console controller with a numeric mode,
+# through Connect-SfosWebAdmin/Invoke-SfosWebAdminRequest in SophosFirewall.Core. The mode
+# numbers come from the console's own client-side script, javascript/validation/
+# JavaConstants.js, measured identical on two lab appliances:
+#   Modes.SOFT_REBOOT        = 417
+#   Modes.SHUTDOWN_APPLIANCE = 193
+# The request body is the console's usual mode=<n>&json={...} shape; an empty JSON object
+# is sent because the body shape for these two modes is otherwise undocumented.
+#
+# A connection drop after the request was sent is the expected outcome, not a failure: the
+# appliance is tearing down its own web service while it is supposed to be answering. Only a
+# response that is still the login page (Invoke-SfosWebAdminRequest's own loginstylesheet
+# check) means the request was never accepted, and that is the one failure this region
+# reports as an error; any other exception after the request left this process - a timeout,
+# a reset connection, an aborted read - is swallowed and treated as success, matching what a
+# rebooting or shutting down appliance actually does to an open HTTP connection. A failure to
+# even log in (Connect-SfosWebAdmin itself throwing, before the mode request is sent) is not
+# swallowed and is reported normally.
+#
+# Mode 706 (REBOOT_FIRMWARE) starts the appliance into a different firmware slot and mode 137
+# (CUSTOM_MANAGE_PAGE_COLUMN) writes the logged-in administrator's own console view
+# preferences; neither is implemented here and neither should be called to "complete" this
+# region.
+
+<#
+.SYNOPSIS
+    Restarts a Sophos Firewall appliance.
+
+.DESCRIPTION
+    Triggers a restart of the appliance through the web admin console (mode 193 with the
+    console's own reboot flag), not through the documented XML API - there is no restart
+    operation in that API at all. This call is UNDOCUMENTED and tied to the exact firmware
+    build it was measured against; it can change or break on a firmware update without notice.
+
+    A reason is required, the same field the web console asks for in its confirmation dialog,
+    and it is what ends up in the appliance's own record of the restart. There is a second way
+    to restart - mode 417, SOFT_REBOOT - which works without a reason and was the first path
+    measured here, but it carries no reason field at all, so nothing is recorded about why the
+    appliance went down. This cmdlet follows the console instead.
+
+    The appliance drops its own web console connection while it restarts, so a dropped
+    connection or a timed-out response after the request was sent is treated as success, not
+    as an error - see the comment above this region for why. That also means the cmdlet cannot
+    tell you whether the appliance really went down: confirm the restart yourself, by watching
+    the management port drop and come back, or by looking at the appliance.
+
+    It needs an open connection from Connect-SfosFirewall, or the connection parameters
+    supplied directly, and an account with administrative permission. The cmdlet asks for
+    confirmation before it runs, unless -Confirm:$false is passed.
+
+.PARAMETER Reason
+    Required. Free text recorded with the restart, the same field the web console asks for in
+    its confirmation dialog.
+
+.PARAMETER Firewall
+    Optional. Host name or IP address of the firewall. If omitted, the value from the
+    current connection is used.
+
+.PARAMETER Port
+    Optional. TCP port of the management API, usually 4444. If omitted, the value from the
+    current connection is used.
+
+.PARAMETER Username
+    Optional. User name for the web admin login. The account needs administrative
+    permission. If omitted, the value from the current connection is used.
+
+.PARAMETER Password
+    Optional. Password for the web admin login, as a SecureString. If omitted, the value
+    from the current connection is used.
+
+.PARAMETER SkipCertificateCheck
+    Optional. Accepts the firewall certificate without validating it. Use this only for
+    appliances that still present a self-signed certificate. If omitted, the certificate is
+    validated.
+
+.PARAMETER Session
+    Optional. A session object from Connect-SfosFirewall, or the name of a session that was
+    registered with Connect-SfosFirewall -Name. Use it to address a specific firewall when
+    you work with more than one at a time. Any connection parameter you pass explicitly
+    still takes precedence. If omitted, the stored default connection is used.
+
+.INPUTS
+    None. This cmdlet does not accept pipeline input.
+
+.OUTPUTS
+    None. The cmdlet writes no output and raises an error only when the web console does not
+    accept the request (for example when the session is not logged in).
+
+.EXAMPLE
+    Restart-SfosFirewall -Reason 'Firmware maintenance' -WhatIf
+
+    Shows what the call would do without sending it to the firewall.
+
+.EXAMPLE
+    Restart-SfosFirewall -Reason 'Firmware maintenance' -Confirm:$false
+
+    Restarts the appliance without asking for confirmation, for use in scripts.
+
+.LINK
+    https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+.LINK
+    Stop-SfosFirewall
+#>
+function Restart-SfosFirewall {
+    [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
+    param(
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$Reason,
+
+        [string]$Firewall,
+        [int]$Port,
+        [string]$Username,
+        [SecureString]$Password,
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
+    )
+
+    $params = Resolve-SfosParameters -BoundParameters $PSBoundParameters
+
+    if (-not $PSCmdlet.ShouldProcess($params.Firewall, 'Restart the appliance (web console mode 193 with reboot flag 1)')) {
+        return
+    }
+
+    $webAdmin = Connect-SfosWebAdmin -Firewall $params.Firewall `
+        -Port $params.Port `
+        -Username $params.Username `
+        -Password $params.Password `
+        -SkipCertificateCheck:$params.SkipCertificateCheck -ErrorAction Stop
+
+    # The web console drives both its own menu entries through mode 193 and tells restart from
+    # shutdown with the reboot flag - 1 restarts, 0 shuts down - while its dialog marks the
+    # reason as a required field. Mode 417 (SOFT_REBOOT) also restarts the appliance and was the
+    # first measured path here, but it has no reason field at all, so a restart triggered that
+    # way leaves nothing behind in the appliance's own record of who did what and why. This
+    # cmdlet therefore follows the console.
+    $payload = @{ reason = $Reason; reboot = '1' } | ConvertTo-Json -Compress
+
+    try {
+        $null = Invoke-SfosWebAdminRequest -WebAdminSession $webAdmin -Mode 193 -Json $payload -ErrorAction Stop
+    }
+    catch {
+        if ($_.Exception.Message -match 'login page instead of data') {
+            throw "Restart request for $($params.Firewall) was not accepted: the web console reported it is not logged in. $($_.Exception.Message)"
+        }
+        # Any other failure here is the connection dropping while the appliance restarts -
+        # the expected outcome, not an error. See the comment above this region.
+    }
+}
+
+<#
+.SYNOPSIS
+    Shuts down a Sophos Firewall appliance.
+
+.DESCRIPTION
+    Triggers a shutdown of the appliance through the web admin console (mode 193), not
+    through the documented XML API - there is no shutdown operation in that API at all. This
+    call is UNDOCUMENTED and tied to the exact firmware build it was measured against; it can
+    change or break on a firmware update without notice.
+
+    There is no cmdlet to power the appliance back on: once it shuts down it stays off until
+    someone switches it on physically, or through the hypervisor/virtualization console for a
+    virtual appliance. Confirm that out-of-band access before running this cmdlet against
+    anything other than a lab appliance you can walk up to or reach through its
+    virtualization platform.
+
+    The appliance drops its own web console connection while it shuts down, so a dropped
+    connection or a timed-out response after the request was sent is treated as success, not
+    as an error - see the comment above this region for why.
+
+    It needs an open connection from Connect-SfosFirewall, or the connection parameters
+    supplied directly, and an account with administrative permission. The cmdlet asks for
+    confirmation before it runs, unless -Confirm:$false is passed.
+
+    A reason is required, and not merely as a formality: sending the request without one is
+    answered without any error and does nothing at all - the appliance simply stays up. That
+    was measured against a live appliance. The web console's own dialog marks the field as
+    required for the same reason.
+
+.PARAMETER Reason
+    Required. Free text recorded with the shutdown, the same field the web console asks for
+    in its confirmation dialog. The request is not carried out without it.
+
+.PARAMETER Firewall
+    Optional. Host name or IP address of the firewall. If omitted, the value from the
+    current connection is used.
+
+.PARAMETER Port
+    Optional. TCP port of the management API, usually 4444. If omitted, the value from the
+    current connection is used.
+
+.PARAMETER Username
+    Optional. User name for the web admin login. The account needs administrative
+    permission. If omitted, the value from the current connection is used.
+
+.PARAMETER Password
+    Optional. Password for the web admin login, as a SecureString. If omitted, the value
+    from the current connection is used.
+
+.PARAMETER SkipCertificateCheck
+    Optional. Accepts the firewall certificate without validating it. Use this only for
+    appliances that still present a self-signed certificate. If omitted, the certificate is
+    validated.
+
+.PARAMETER Session
+    Optional. A session object from Connect-SfosFirewall, or the name of a session that was
+    registered with Connect-SfosFirewall -Name. Use it to address a specific firewall when
+    you work with more than one at a time. Any connection parameter you pass explicitly
+    still takes precedence. If omitted, the stored default connection is used.
+
+.INPUTS
+    None. This cmdlet does not accept pipeline input.
+
+.OUTPUTS
+    None. The cmdlet writes no output and raises an error only when the web console does not
+    accept the request (for example when the session is not logged in).
+
+.EXAMPLE
+    Stop-SfosFirewall -Reason 'Rack maintenance' -WhatIf
+
+    Shows what the call would do without sending it to the firewall.
+
+.EXAMPLE
+    Stop-SfosFirewall -Reason 'Rack maintenance' -Confirm:$false
+
+    Shuts the appliance down without asking for confirmation, for use in scripts. There is no
+    cmdlet to turn it back on.
+
+.LINK
+    https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+.LINK
+    Restart-SfosFirewall
+#>
+function Stop-SfosFirewall {
+    [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
+    param(
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$Reason,
+
+        [string]$Firewall,
+        [int]$Port,
+        [string]$Username,
+        [SecureString]$Password,
+        [switch]$SkipCertificateCheck,
+
+        [object]$Session
+    )
+
+    $params = Resolve-SfosParameters -BoundParameters $PSBoundParameters
+
+    if (-not $PSCmdlet.ShouldProcess($params.Firewall, 'Shut down the appliance (web console mode 193, stays off until switched on again)')) {
+        return
+    }
+
+    $webAdmin = Connect-SfosWebAdmin -Firewall $params.Firewall `
+        -Port $params.Port `
+        -Username $params.Username `
+        -Password $params.Password `
+        -SkipCertificateCheck:$params.SkipCertificateCheck -ErrorAction Stop
+
+    # Mode 193 serves both the reboot and the shutdown entry of the web console's own menu; the
+    # console tells them apart with a reboot flag, 1 for reboot and 0 for shutdown, and its popup
+    # carries a reason field marked as required. Sending mode 193 with an empty body answers
+    # without an error and does nothing at all - measured against a live appliance, which stayed
+    # up. Both fields are therefore always sent.
+    $payload = @{ reason = $Reason; reboot = '0' } | ConvertTo-Json -Compress
+
+    try {
+        $null = Invoke-SfosWebAdminRequest -WebAdminSession $webAdmin -Mode 193 -Json $payload -ErrorAction Stop
+    }
+    catch {
+        if ($_.Exception.Message -match 'login page instead of data') {
+            throw "Shutdown request for $($params.Firewall) was not accepted: the web console reported it is not logged in. $($_.Exception.Message)"
+        }
+        # Any other failure here is the connection dropping while the appliance shuts down -
+        # the expected outcome, not an error. See the comment above this region.
+    }
+}
+
+#endregion

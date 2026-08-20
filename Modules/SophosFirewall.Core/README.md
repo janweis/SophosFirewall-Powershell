@@ -112,6 +112,8 @@ independently of the tar structure.
 | `Resolve-SfosParameters` | Merges explicit connection parameters with the active session; used internally by the domain modules. |
 | `ConvertTo-SfosXmlEscaped` | Escapes text for safe use inside the request XML. |
 | `ConvertFrom-SfosArchive` | Reads the tar archive returned by Certificate, CertificateAuthority, CRL and FormTemplate instead of XML. |
+| `Connect-SfosWebAdmin` | Logs into the web admin interface (Web Admin Console - not the XML API, not the appliance's CLI console) and returns a session context. Undocumented and firmware-bound - see its own help before using it. |
+| `Invoke-SfosWebAdminRequest` | Sends one request to the web admin interface's controller. Undocumented and firmware-bound - see its own help before using it. |
 
 ## Status codes
 

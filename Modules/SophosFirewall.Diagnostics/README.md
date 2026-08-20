@@ -1,8 +1,18 @@
 # SophosFirewall.Diagnostics
 
 `SophosFirewall.Diagnostics` manages the MONITOR & ANALYZE > Diagnostics area of a Sophos
-Firewall: remote support access. It is for administrators who need to open a temporary
-channel for Sophos support to reach the appliance.
+Firewall: remote support access, and read-only access to the log records shown by the web
+admin console's log viewer. It is for administrators who need to open a temporary channel for
+Sophos support to reach the appliance, or who need to read log records without a syslog
+receiver in place.
+
+## Log viewer access is not the XML API
+
+`Get-SfosLog` and `Get-SfosLogCategory` do not use the Sophos Firewall XML API - there is no
+equivalent read in it. They log into the web admin console itself (the same login an
+administrator uses, via `SophosFirewall.Core`'s `Connect-SfosWebAdmin`/`Invoke-SfosWebAdminRequest`)
+and read the same records the console's own Log Viewer page shows. See this module's own findings file for the measured access path. The account used still needs permission to view the
+log viewer in the web console.
 
 ## Security note
 
@@ -17,7 +27,7 @@ out unattended.
 
 ## Requirements
 
-- `SophosFirewall.Core` 1.3.5 or later (installed automatically as a dependency)
+- `SophosFirewall.Core` 1.4.0 or later (installed automatically as a dependency)
 - PowerShell 5.1 or 7.x
 - HTTPS access to the firewall's management API
 - A firewall account with administrative permission
@@ -39,6 +49,13 @@ Set-SfosSupportAccess -ConfigOption Enable -GrantAccessFor '1 day' -Confirm:$fal
 Get-SfosSupportAccess
 
 Set-SfosSupportAccess -ConfigOption Disable -Confirm:$false
+
+Get-SfosLogCategory
+Get-SfosLog -Category firewall -MaxRecords 50
+Get-SfosLog -SourceIP '192.0.2.10' -Status 'Deny' -MaxRecords 50
+
+Get-SfosLog -Category firewall -MaxRecords 10          # default table, this module's own column set
+Get-SfosLog -Category firewall -MaxRecords 10 -List    # same columns, one field per line
 ```
 
 ## Cmdlets
@@ -47,6 +64,47 @@ Set-SfosSupportAccess -ConfigOption Disable -Confirm:$false
 |---|---|
 | `Get-SfosSupportAccess` | Reads the current support access state and, while it is on, its remaining duration. |
 | `Set-SfosSupportAccess` | Switches support access on or off and sets its duration. |
+| `Get-SfosLog` | Reads log records from the web console's log viewer, with a category pre-filter, built-in field filters matched on the raw record text before decoding, a client-side `-Since` cutoff, and a `-Follow` mode that streams newly arriving records. |
+| `Get-SfosLogCategory` | Lists the log viewer's own categories and the condition each one matches. |
+
+## Log type or category - they are not the same thing
+
+`-LogType` matches one field of the record, exactly as the appliance wrote it: `Firewall`,
+`Event`, `Content Filtering`, `Anti-Virus`, `IDP`, `ATP`, `SD-WAN`, `Sandbox`, `HeartBeat`,
+`SSL`, `WAF`, `Anti-Spam`.
+
+`-Category` is the web console's own grouping, and a category is a condition over *several*
+fields. The appliance supplies those conditions itself, and `Get-SfosLogCategory` prints them:
+
+| Category | Condition the appliance declares |
+|---|---|
+| `admin` | `log_type=Event` AND `log_subtype=Admin` |
+| `system` | `log_type=Event` AND `log_subtype=System` NOT (IPSec OR SSL VPN OR L2TP ...) |
+| `vpn` | `log_type=Event` AND `log_component` in (IPSec, SSL VPN, L2TP, PPTP, RED) |
+| `webfilter` | `log_type=Content Filtering` AND `log_component` in (HTTP, HTTPS) |
+
+So the two do not line up one to one, in both directions:
+
+- **One log type, several categories.** `admin`, `system`, `authentication` and `vpn` are all
+  `log_type=Event`. `-LogType Event` returns all four at once - on the appliance this was
+  measured against, 476 Admin records and 24 System records in the same 500-record window.
+- **One category, several log types.** `applicationfilter` matches both `Content Filtering`
+  and `Firewall` records.
+
+| You want | Use |
+|---|---|
+| a raw type you already know | `-LogType` - filters before decoding, measurably faster (2.0 s against 3.6 s for 100 firewall records) |
+| exactly the slice the web console shows | `-Category` - reproduces its condition |
+| one part of a shared log type | `-LogType Event -LogSubtype Admin` - both are pre-filters, so only the survivors get decoded |
+
+They combine: every filter parameter is AND-ed with the others, several values of one
+parameter are OR-ed.
+
+One caveat measured on a live appliance: `-LogType Firewall` and `-Category firewall` returned
+identical sets there, because the only firewall components present were ones the category
+condition includes anyway. That is a property of that appliance's traffic, not a guarantee - a
+firewall record with a component outside the category's list shows up under `-LogType Firewall`
+and not under `-Category firewall`.
 
 ## Behaviour worth knowing
 
@@ -68,6 +126,89 @@ does not restore a previous duration - the firewall applies its own default of o
 **The access ID shown in the web admin console is not available through the API.** Once
 support access is switched on, the appliance generates an access ID that Sophos support uses
 to connect; neither `Get-SfosSupportAccess` nor any other operation in this area exposes it.
+
+**`Get-SfosLog` fetches, then filters - and `-MaxRecords` counts what comes out, not what goes
+in.** `-Category` and `-Since` are both applied client-side - the console ignores the category
+condition on its own read call. Depth is reached with a single request carrying a large
+`limit`, never by paging with `offset`: measured against a live appliance, `offset`-based
+paging repeats the same page once it reaches roughly 750 records back, silently, with no error
+and no empty result to signal it. So `Get-SfosLog` asks for `-MaxRecords` records first; if
+`-Category`/`-Since` leave too few and the appliance still had at least that many to give, it
+asks again with four times the limit, up to five attempts and a ceiling of 50000 - the
+appliance's own observed limit for a single request (see "Limits" below). If the appliance runs
+out, or the attempt/limit ceiling is reached, before enough matching records were found, the
+cmdlet warns with the number it actually found rather than silently returning fewer than asked
+for. Every call opens its own console session; no CSRF token or cookie is reused across calls -
+except under `-Follow`, where the session is opened once and kept for every poll.
+
+**`-All` reads everything the appliance's log retention holds, in one request.** It requests
+`limit 50000`; if the appliance answers with exactly that many, the log may hold more and the
+cmdlet warns that the result can be truncated. `-Category`/`-Since` still apply, but there is no
+`-MaxRecords` widening loop - one call is the whole point. `-All` cannot be combined with
+`-MaxRecords` or with `-Follow`.
+
+**The built-in field filters (`-LogType`, `-LogComponent`, `-LogSubtype`, `-Status`, `-User`,
+`-SourceIP`, `-DestinationIP`, `-DestinationPort`, `-MessageLike`) match on the raw record text,
+before it is decoded - measurably faster than filtering afterwards with `Where-Object`.**
+Measured against 10 000 records with a filter matching 32% of them: decoding every record then
+filtering took 2 815 ms, the raw-text pre-filter did the same job in 1 111 ms - **2.5x faster**,
+because decoding (2 544 ms of that 2 815 ms) is the expensive part and the pre-filter skips it
+for every record that cannot match. The gain grows with a sharper filter and shrinks toward
+nothing on one that matches almost everything - see this module's own findings file for the full
+measurement. Several values on one parameter are OR-combined; different parameters, `-Category`
+included, are AND-combined. They only do exact or substring matching on one field each; a range
+comparison (a port range, arithmetic across fields) is still a job for `Where-Object` after the
+cmdlet. The match tolerates both spacings the appliance is known to use around the JSON colon
+and falls back to decoding and comparing on the parsed object - with a `-Verbose` message saying
+so - if a filtered field's own key is present in the fetched records but the raw-text match
+still found nothing, so the built-in filters cannot silently return too little if the appliance's
+JSON formatting ever changes.
+
+**`Get-SfosLog`'s default output is a table sized to the record's own log category, not a
+generic dump.** Sixteen of the seventeen category views reproduce the column order and labels
+of the web admin console's own Log Viewer screen, read from the console's own JavaScript
+configuration and cross-checked against the screen itself; `Firewall` is the one exception and
+keeps this module's own nine-column choice - see this module's own findings file. The view used is
+picked deterministically: `-Category` wins when given; otherwise a single-valued `-LogType` is
+matched against the category keys (case- and separator-insensitive: `'SSL/TLS'` matches the
+`ssltls` category); anything else, including `-Category all`, falls back to a generic table
+(`Datetime`, `log_type`, `log_component`, `log_subtype`, `status`, `message`). `-List` shows the
+same fields one per line instead of a table. Neither view removes anything from the object
+itself - every field the record actually carries is still there, so
+`Select-Object -Property *` or `Format-Table -Property *` shows it regardless of which default
+view was picked. `-AsJson` bypasses both views and returns the record exactly as decoded.
+
+**Wide categories wrap in a narrow console window.** `Firewall` (nine columns) and `SSL/TLS
+inspection` (fourteen columns) are the widest views; in a narrow window the table wraps or
+truncates. Use `-List` or `Select-Object` there instead - that is a property of the console's
+own column layout, not a defect in this module.
+
+**`-Follow` is `tail -f` for the log viewer, and it polls because there is no push channel.**
+It shows the current backlog first (bounded by `-MaxRecords` exactly as without `-Follow`), then
+streams only what arrives afterwards, oldest first, at the interval set by
+`-PollIntervalSeconds` (default 30, matching the web console's own polling interval). A record
+is recognised as new by comparing timestamps, with a raw-text comparison for records sharing the
+exact same one-second timestamp as the last one shown, so genuine repeats on the wire are still
+shown once each rather than zero or twice. Each poll asks for the standard window (200 records)
+first; if the oldest record it gets back still looks newer than the last one already shown, the
+gap was not bridged and the same poll asks again with four times the limit, up to three attempts
+before it gives up and warns - lower `-PollIntervalSeconds` if that happens often, so each poll
+has fewer new records to catch up on.
+
+## Limits (measured against a live appliance, SFOS 22.0.1.490)
+
+- Paging with `offset` in 200-record steps only reaches back roughly 750 records; beyond that
+  the appliance answers the same page again and again, with no error and no empty result to
+  signal it. This module therefore never pages with `offset` - every request sends `offset:0`
+  and reaches depth through a larger `limit` instead.
+- A single request's `limit` reaches much further than the 200-record page size documented
+  as the default: `limit 10000` returned 10000 records (about 9 days back), `limit 20000`
+  returned 20000 (about 6 weeks), and `limit 50000` returned **24640** records - a little
+  over half a year, and the appliance's own ceiling for a single request; `limit 100000`
+  returned the same 24640. `Get-SfosLog -All` uses `limit 50000` and takes about 5 seconds on
+  this appliance.
+- The appliance signals "nothing more to give" only by returning fewer records than the
+  `limit` requested. Returning exactly the requested count means there may be more.
 
 ## License
 

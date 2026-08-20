@@ -1,7 +1,7 @@
 # Sophos Firewall PowerShell Module Suite
 
 A PowerShell module collection for managing Sophos XGS/SFOS firewalls through their XML
-management API. Twenty modules ship 654 cmdlets, covering twenty of the API's areas.
+management API. Twenty modules ship 660 cmdlets, covering twenty of the API's areas.
 
 ## Quick Start
 
@@ -43,7 +43,7 @@ Cmdlets called without `-Session` use the ambient default session set by
 
 | Module | Cmdlets | Purpose |
 |---|---|---|
-| [SophosFirewall.Core](Modules/SophosFirewall.Core/README.md) | 9 | Connection management, API transport, XML escaping |
+| [SophosFirewall.Core](Modules/SophosFirewall.Core/README.md) | 11 | Connection management, API transport, XML escaping |
 | [SophosFirewall.HostsAndServices](Modules/SophosFirewall.HostsAndServices/README.md) | 53 | IP/FQDN/MAC hosts, country groups, services and their groups |
 | [SophosFirewall.Web](Modules/SophosFirewall.Web/README.md) | 54 | URL groups, web categories, file types, filter policies and exceptions, surfing quotas |
 | [SophosFirewall.Firewall](Modules/SophosFirewall.Firewall/README.md) | 21 | Firewall rules and rule groups, NAT rules, SSL/TLS inspection |
@@ -55,16 +55,16 @@ Cmdlets called without `-Session` use the ambient default session set by
 | [SophosFirewall.ActiveThreatResponse](Modules/SophosFirewall.ActiveThreatResponse/README.md) | 10 | ATP threat feeds, host/threat exceptions, third-party threat feeds |
 | [SophosFirewall.Applications](Modules/SophosFirewall.Applications/README.md) | 20 | Application filter policies and rules, application objects, categories, classification |
 | [SophosFirewall.SystemServices](Modules/SophosFirewall.SystemServices/README.md) | 21 | QoS policies, syslog servers, the system service daemon manager, High Availability, RED |
-| [SophosFirewall.Administration](Modules/SophosFirewall.Administration/README.md) | 32 | Notification, SNMP, appliance access, admin/web-admin settings, time, messages, Netflow, local service ACL |
+| [SophosFirewall.Administration](Modules/SophosFirewall.Administration/README.md) | 34 | Notification, SNMP, appliance access, admin/web-admin settings, time, messages, Netflow, local service ACL, restart/shutdown |
 | [SophosFirewall.Profiles](Modules/SophosFirewall.Profiles/README.md) | 20 | Schedules, access time policies, data transfer policies, decryption profiles, administration profiles |
 | [SophosFirewall.WebServer](Modules/SophosFirewall.WebServer/README.md) | 18 | Web server publishing (WAF), protection policies, authentication policies and templates, slow HTTP protection |
 | [SophosFirewall.Certificates](Modules/SophosFirewall.Certificates/README.md) | 11 | Certificates, certificate authorities, revocation lists |
 | [SophosFirewall.Email](Modules/SophosFirewall.Email/README.md) | 70 | SMTP and POP/IMAP scanning policies, MTA address groups and exceptions, data control, SPX, anti-spam, mail configuration |
-| [SophosFirewall.Diagnostics](Modules/SophosFirewall.Diagnostics/README.md) | 2 | Remote support access |
+| [SophosFirewall.Diagnostics](Modules/SophosFirewall.Diagnostics/README.md) | 4 | Remote support access, web console log viewer access |
 | [SophosFirewall.ZeroDayProtection](Modules/SophosFirewall.ZeroDayProtection/README.md) | 2 | Sandbox analysis datacenter and excluded file types |
 | [SophosFirewall.SophosCentral](Modules/SophosFirewall.SophosCentral/README.md) | 2 | Sophos Central cloud management switches (reporting, management, configuration backup) |
 
-654 cmdlets in total. Every module follows the same connection model and shares the
+660 cmdlets in total. Every module follows the same connection model and shares the
 `SophosFirewall.Core` transport layer.
 
 Several cmdlets change settings that the current management session itself depends on -

@@ -1,0 +1,1060 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Default table/list views for Get-SfosLog. One pair of views (table + list, selected with
+    -List) per log viewer category, plus a Sfos.Log fallback pair for records that carry no
+    matching type name. For sixteen of the seventeen categories, the column set and order
+    reproduce the web admin console's own Log Viewer screen, read from the appliance's
+    LogViewerConf.js (LogViewer.moduleJSON: the ordered column list and label overrides per
+    category) and resolved through common.js (the Language.* string table); every column and
+    order was cross-checked against the console screenshots supplied by the operator. The
+    Firewall category is the one exception and keeps this module's own nine-column choice from
+    before that comparison - see this module's own findings file. The console's "Live PCAP" entry is an
+    action button, not a data field (wire name packetcapturefilter), and is omitted everywhere.
+    Wide categories (Firewall, SSL/TLS inspection) wrap in a narrow console; use -List or
+    Select-Object there. See this module's own findings file and Get-SfosLog's own help.
+-->
+<Configuration>
+  <ViewDefinitions>
+    <View>
+      <Name>Sfos.Log.Firewall</Name>
+      <ViewSelectedBy>
+        <TypeName>Sfos.Log.Firewall</TypeName>
+      </ViewSelectedBy>
+      <TableControl>
+        <TableHeaders>
+          <TableColumnHeader><Label>Datetime</Label><Width>19</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Component</Label><Width>16</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Subtype</Label><Width>14</Width></TableColumnHeader>
+          <TableColumnHeader><Label>In</Label><Width>8</Width></TableColumnHeader>
+          <TableColumnHeader><Label>src_ip</Label><Width>15</Width></TableColumnHeader>
+          <TableColumnHeader><Label>SPort</Label><Width>6</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Out</Label><Width>8</Width></TableColumnHeader>
+          <TableColumnHeader><Label>dst_ip</Label><Width>15</Width></TableColumnHeader>
+          <TableColumnHeader><Label>DPort</Label><Width>6</Width></TableColumnHeader>
+        </TableHeaders>
+        <TableRowEntries>
+          <TableRowEntry>
+            <TableColumnItems>
+              <TableColumnItem><PropertyName>Datetime</PropertyName><FormatString>{0:yyyy-MM-dd HH:mm:ss}</FormatString></TableColumnItem>
+              <TableColumnItem><PropertyName>log_component</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>log_subtype</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>in_interface</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>src_ip</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>src_port</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>out_interface</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>dst_ip</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>dst_port</PropertyName></TableColumnItem>
+            </TableColumnItems>
+          </TableRowEntry>
+        </TableRowEntries>
+      </TableControl>
+    </View>
+    <View>
+      <Name>Sfos.Log.Firewall.List</Name>
+      <ViewSelectedBy>
+        <TypeName>Sfos.Log.Firewall.List</TypeName>
+      </ViewSelectedBy>
+      <ListControl>
+        <ListEntries>
+          <ListEntry>
+            <ListItems>
+              <ListItem><PropertyName>Datetime</PropertyName><FormatString>{0:yyyy-MM-dd HH:mm:ss}</FormatString></ListItem>
+              <ListItem><PropertyName>log_component</PropertyName></ListItem>
+              <ListItem><PropertyName>log_subtype</PropertyName></ListItem>
+              <ListItem><PropertyName>in_interface</PropertyName></ListItem>
+              <ListItem><PropertyName>src_ip</PropertyName></ListItem>
+              <ListItem><PropertyName>src_port</PropertyName></ListItem>
+              <ListItem><PropertyName>out_interface</PropertyName></ListItem>
+              <ListItem><PropertyName>dst_ip</PropertyName></ListItem>
+              <ListItem><PropertyName>dst_port</PropertyName></ListItem>
+            </ListItems>
+          </ListEntry>
+        </ListEntries>
+      </ListControl>
+    </View>
+    <View>
+      <Name>Sfos.Log.Webfilter</Name>
+      <ViewSelectedBy>
+        <TypeName>Sfos.Log.Webfilter</TypeName>
+      </ViewSelectedBy>
+      <TableControl>
+        <TableHeaders>
+          <TableColumnHeader><Label>Datetime</Label><Width>19</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Log subtype</Label><Width>14</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Username</Label><Width>14</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Src IP</Label><Width>15</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Dst IP</Label><Width>15</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Category</Label><Width>14</Width></TableColumnHeader>
+          <TableColumnHeader><Label>URL</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Bytes sent</Label><Width>10</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Referrer</Label><Width>20</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Message ID</Label><Width>12</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Policy ID</Label><Width>10</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Transaction ID</Label></TableColumnHeader>
+        </TableHeaders>
+        <TableRowEntries>
+          <TableRowEntry>
+            <TableColumnItems>
+              <TableColumnItem><PropertyName>Datetime</PropertyName><FormatString>{0:yyyy-MM-dd HH:mm:ss}</FormatString></TableColumnItem>
+              <TableColumnItem><PropertyName>log_subtype</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>user</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>src_ip</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>dst_ip</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>category</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>url</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>bytes_sent</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>referer</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>messageid</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>fw_rule_id</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>transaction_id</PropertyName></TableColumnItem>
+            </TableColumnItems>
+          </TableRowEntry>
+        </TableRowEntries>
+      </TableControl>
+    </View>
+    <View>
+      <Name>Sfos.Log.Webfilter.List</Name>
+      <ViewSelectedBy>
+        <TypeName>Sfos.Log.Webfilter.List</TypeName>
+      </ViewSelectedBy>
+      <ListControl>
+        <ListEntries>
+          <ListEntry>
+            <ListItems>
+              <ListItem><PropertyName>Datetime</PropertyName><FormatString>{0:yyyy-MM-dd HH:mm:ss}</FormatString></ListItem>
+              <ListItem><PropertyName>log_subtype</PropertyName></ListItem>
+              <ListItem><PropertyName>user</PropertyName></ListItem>
+              <ListItem><PropertyName>src_ip</PropertyName></ListItem>
+              <ListItem><PropertyName>dst_ip</PropertyName></ListItem>
+              <ListItem><PropertyName>category</PropertyName></ListItem>
+              <ListItem><PropertyName>url</PropertyName></ListItem>
+              <ListItem><PropertyName>bytes_sent</PropertyName></ListItem>
+              <ListItem><PropertyName>referer</PropertyName></ListItem>
+              <ListItem><PropertyName>messageid</PropertyName></ListItem>
+              <ListItem><PropertyName>fw_rule_id</PropertyName></ListItem>
+              <ListItem><PropertyName>transaction_id</PropertyName></ListItem>
+            </ListItems>
+          </ListEntry>
+        </ListEntries>
+      </ListControl>
+    </View>
+    <View>
+      <Name>Sfos.Log.Admin</Name>
+      <ViewSelectedBy>
+        <TypeName>Sfos.Log.Admin</TypeName>
+      </ViewSelectedBy>
+      <TableControl>
+        <TableHeaders>
+          <TableColumnHeader><Label>Datetime</Label><Width>19</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Log comp</Label><Width>16</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Status</Label><Width>10</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Username</Label><Width>14</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Src IP</Label><Width>15</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Message</Label><Width>40</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Message ID</Label></TableColumnHeader>
+        </TableHeaders>
+        <TableRowEntries>
+          <TableRowEntry>
+            <TableColumnItems>
+              <TableColumnItem><PropertyName>Datetime</PropertyName><FormatString>{0:yyyy-MM-dd HH:mm:ss}</FormatString></TableColumnItem>
+              <TableColumnItem><PropertyName>log_component</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>status</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>user</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>src_ip</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>message</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>messageid</PropertyName></TableColumnItem>
+            </TableColumnItems>
+          </TableRowEntry>
+        </TableRowEntries>
+      </TableControl>
+    </View>
+    <View>
+      <Name>Sfos.Log.Admin.List</Name>
+      <ViewSelectedBy>
+        <TypeName>Sfos.Log.Admin.List</TypeName>
+      </ViewSelectedBy>
+      <ListControl>
+        <ListEntries>
+          <ListEntry>
+            <ListItems>
+              <ListItem><PropertyName>Datetime</PropertyName><FormatString>{0:yyyy-MM-dd HH:mm:ss}</FormatString></ListItem>
+              <ListItem><PropertyName>log_component</PropertyName></ListItem>
+              <ListItem><PropertyName>status</PropertyName></ListItem>
+              <ListItem><PropertyName>user</PropertyName></ListItem>
+              <ListItem><PropertyName>src_ip</PropertyName></ListItem>
+              <ListItem><PropertyName>message</PropertyName></ListItem>
+              <ListItem><PropertyName>messageid</PropertyName></ListItem>
+            </ListItems>
+          </ListEntry>
+        </ListEntries>
+      </ListControl>
+    </View>
+    <View>
+      <Name>Sfos.Log.Ips</Name>
+      <ViewSelectedBy>
+        <TypeName>Sfos.Log.Ips</TypeName>
+      </ViewSelectedBy>
+      <TableControl>
+        <TableHeaders>
+          <TableColumnHeader><Label>Datetime</Label><Width>19</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Log comp</Label><Width>16</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Log subtype</Label><Width>14</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Username</Label><Width>14</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Src IP</Label><Width>15</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Dst IP</Label><Width>15</Width></TableColumnHeader>
+          <TableColumnHeader><Label>SigID</Label><Width>10</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Signature name</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Category</Label><Width>14</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Platform</Label><Width>10</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Victim</Label><Width>10</Width></TableColumnHeader>
+          <TableColumnHeader><Label>FW rule</Label><Width>10</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Message ID</Label><Width>12</Width></TableColumnHeader>
+        </TableHeaders>
+        <TableRowEntries>
+          <TableRowEntry>
+            <TableColumnItems>
+              <TableColumnItem><PropertyName>Datetime</PropertyName><FormatString>{0:yyyy-MM-dd HH:mm:ss}</FormatString></TableColumnItem>
+              <TableColumnItem><PropertyName>log_component</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>log_subtype</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>user</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>src_ip</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>dst_ip</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>sig_id</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>message</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>category</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>OS</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>victim</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>fw_rule_id</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>messageid</PropertyName></TableColumnItem>
+            </TableColumnItems>
+          </TableRowEntry>
+        </TableRowEntries>
+      </TableControl>
+    </View>
+    <View>
+      <Name>Sfos.Log.Ips.List</Name>
+      <ViewSelectedBy>
+        <TypeName>Sfos.Log.Ips.List</TypeName>
+      </ViewSelectedBy>
+      <ListControl>
+        <ListEntries>
+          <ListEntry>
+            <ListItems>
+              <ListItem><PropertyName>Datetime</PropertyName><FormatString>{0:yyyy-MM-dd HH:mm:ss}</FormatString></ListItem>
+              <ListItem><PropertyName>log_component</PropertyName></ListItem>
+              <ListItem><PropertyName>log_subtype</PropertyName></ListItem>
+              <ListItem><PropertyName>user</PropertyName></ListItem>
+              <ListItem><PropertyName>src_ip</PropertyName></ListItem>
+              <ListItem><PropertyName>dst_ip</PropertyName></ListItem>
+              <ListItem><PropertyName>sig_id</PropertyName></ListItem>
+              <ListItem><PropertyName>message</PropertyName></ListItem>
+              <ListItem><PropertyName>category</PropertyName></ListItem>
+              <ListItem><PropertyName>OS</PropertyName></ListItem>
+              <ListItem><PropertyName>victim</PropertyName></ListItem>
+              <ListItem><PropertyName>fw_rule_id</PropertyName></ListItem>
+              <ListItem><PropertyName>messageid</PropertyName></ListItem>
+            </ListItems>
+          </ListEntry>
+        </ListEntries>
+      </ListControl>
+    </View>
+    <View>
+      <Name>Sfos.Log.Vpn</Name>
+      <ViewSelectedBy>
+        <TypeName>Sfos.Log.Vpn</TypeName>
+      </ViewSelectedBy>
+      <TableControl>
+        <TableHeaders>
+          <TableColumnHeader><Label>Datetime</Label><Width>19</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Log comp</Label><Width>16</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Status</Label><Width>10</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Username</Label><Width>14</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Connection name</Label><Width>18</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Message</Label><Width>40</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Message ID</Label></TableColumnHeader>
+        </TableHeaders>
+        <TableRowEntries>
+          <TableRowEntry>
+            <TableColumnItems>
+              <TableColumnItem><PropertyName>Datetime</PropertyName><FormatString>{0:yyyy-MM-dd HH:mm:ss}</FormatString></TableColumnItem>
+              <TableColumnItem><PropertyName>log_component</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>status</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>user</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>con_name</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>message</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>messageid</PropertyName></TableColumnItem>
+            </TableColumnItems>
+          </TableRowEntry>
+        </TableRowEntries>
+      </TableControl>
+    </View>
+    <View>
+      <Name>Sfos.Log.Vpn.List</Name>
+      <ViewSelectedBy>
+        <TypeName>Sfos.Log.Vpn.List</TypeName>
+      </ViewSelectedBy>
+      <ListControl>
+        <ListEntries>
+          <ListEntry>
+            <ListItems>
+              <ListItem><PropertyName>Datetime</PropertyName><FormatString>{0:yyyy-MM-dd HH:mm:ss}</FormatString></ListItem>
+              <ListItem><PropertyName>log_component</PropertyName></ListItem>
+              <ListItem><PropertyName>status</PropertyName></ListItem>
+              <ListItem><PropertyName>user</PropertyName></ListItem>
+              <ListItem><PropertyName>con_name</PropertyName></ListItem>
+              <ListItem><PropertyName>message</PropertyName></ListItem>
+              <ListItem><PropertyName>messageid</PropertyName></ListItem>
+            </ListItems>
+          </ListEntry>
+        </ListEntries>
+      </ListControl>
+    </View>
+    <View>
+      <Name>Sfos.Log.System</Name>
+      <ViewSelectedBy>
+        <TypeName>Sfos.Log.System</TypeName>
+      </ViewSelectedBy>
+      <TableControl>
+        <TableHeaders>
+          <TableColumnHeader><Label>Datetime</Label><Width>19</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Log comp</Label><Width>16</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Status</Label><Width>10</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Username</Label><Width>14</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Message</Label><Width>40</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Message ID</Label></TableColumnHeader>
+        </TableHeaders>
+        <TableRowEntries>
+          <TableRowEntry>
+            <TableColumnItems>
+              <TableColumnItem><PropertyName>Datetime</PropertyName><FormatString>{0:yyyy-MM-dd HH:mm:ss}</FormatString></TableColumnItem>
+              <TableColumnItem><PropertyName>log_component</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>status</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>user</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>message</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>messageid</PropertyName></TableColumnItem>
+            </TableColumnItems>
+          </TableRowEntry>
+        </TableRowEntries>
+      </TableControl>
+    </View>
+    <View>
+      <Name>Sfos.Log.System.List</Name>
+      <ViewSelectedBy>
+        <TypeName>Sfos.Log.System.List</TypeName>
+      </ViewSelectedBy>
+      <ListControl>
+        <ListEntries>
+          <ListEntry>
+            <ListItems>
+              <ListItem><PropertyName>Datetime</PropertyName><FormatString>{0:yyyy-MM-dd HH:mm:ss}</FormatString></ListItem>
+              <ListItem><PropertyName>log_component</PropertyName></ListItem>
+              <ListItem><PropertyName>status</PropertyName></ListItem>
+              <ListItem><PropertyName>user</PropertyName></ListItem>
+              <ListItem><PropertyName>message</PropertyName></ListItem>
+              <ListItem><PropertyName>messageid</PropertyName></ListItem>
+            </ListItems>
+          </ListEntry>
+        </ListEntries>
+      </ListControl>
+    </View>
+    <View>
+      <Name>Sfos.Log.Authentication</Name>
+      <ViewSelectedBy>
+        <TypeName>Sfos.Log.Authentication</TypeName>
+      </ViewSelectedBy>
+      <TableControl>
+        <TableHeaders>
+          <TableColumnHeader><Label>Datetime</Label><Width>19</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Log comp</Label><Width>16</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Status</Label><Width>10</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Username</Label><Width>14</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Src IP</Label><Width>15</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Auth client</Label><Width>14</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Auth mechanism</Label><Width>16</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Message</Label><Width>30</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Message ID</Label></TableColumnHeader>
+        </TableHeaders>
+        <TableRowEntries>
+          <TableRowEntry>
+            <TableColumnItems>
+              <TableColumnItem><PropertyName>Datetime</PropertyName><FormatString>{0:yyyy-MM-dd HH:mm:ss}</FormatString></TableColumnItem>
+              <TableColumnItem><PropertyName>log_component</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>status</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>user</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>src_ip</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>client_used</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>auth_mechanism</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>message</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>messageid</PropertyName></TableColumnItem>
+            </TableColumnItems>
+          </TableRowEntry>
+        </TableRowEntries>
+      </TableControl>
+    </View>
+    <View>
+      <Name>Sfos.Log.Authentication.List</Name>
+      <ViewSelectedBy>
+        <TypeName>Sfos.Log.Authentication.List</TypeName>
+      </ViewSelectedBy>
+      <ListControl>
+        <ListEntries>
+          <ListEntry>
+            <ListItems>
+              <ListItem><PropertyName>Datetime</PropertyName><FormatString>{0:yyyy-MM-dd HH:mm:ss}</FormatString></ListItem>
+              <ListItem><PropertyName>log_component</PropertyName></ListItem>
+              <ListItem><PropertyName>status</PropertyName></ListItem>
+              <ListItem><PropertyName>user</PropertyName></ListItem>
+              <ListItem><PropertyName>src_ip</PropertyName></ListItem>
+              <ListItem><PropertyName>client_used</PropertyName></ListItem>
+              <ListItem><PropertyName>auth_mechanism</PropertyName></ListItem>
+              <ListItem><PropertyName>message</PropertyName></ListItem>
+              <ListItem><PropertyName>messageid</PropertyName></ListItem>
+            </ListItems>
+          </ListEntry>
+        </ListEntries>
+      </ListControl>
+    </View>
+    <View>
+      <Name>Sfos.Log.Malware</Name>
+      <ViewSelectedBy>
+        <TypeName>Sfos.Log.Malware</TypeName>
+      </ViewSelectedBy>
+      <TableControl>
+        <TableHeaders>
+          <TableColumnHeader><Label>Datetime</Label><Width>19</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Protocol</Label><Width>10</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Username</Label><Width>14</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Src IP</Label><Width>15</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Dst IP</Label><Width>15</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Detection</Label><Width>18</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Log subtype</Label><Width>14</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Message</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Message ID</Label><Width>12</Width></TableColumnHeader>
+        </TableHeaders>
+        <TableRowEntries>
+          <TableRowEntry>
+            <TableColumnItems>
+              <TableColumnItem><PropertyName>Datetime</PropertyName><FormatString>{0:yyyy-MM-dd HH:mm:ss}</FormatString></TableColumnItem>
+              <TableColumnItem><PropertyName>log_component</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>user</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>src_ip</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>dst_ip</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>virus</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>log_subtype</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>message</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>messageid</PropertyName></TableColumnItem>
+            </TableColumnItems>
+          </TableRowEntry>
+        </TableRowEntries>
+      </TableControl>
+    </View>
+    <View>
+      <Name>Sfos.Log.Malware.List</Name>
+      <ViewSelectedBy>
+        <TypeName>Sfos.Log.Malware.List</TypeName>
+      </ViewSelectedBy>
+      <ListControl>
+        <ListEntries>
+          <ListEntry>
+            <ListItems>
+              <ListItem><PropertyName>Datetime</PropertyName><FormatString>{0:yyyy-MM-dd HH:mm:ss}</FormatString></ListItem>
+              <ListItem><PropertyName>log_component</PropertyName></ListItem>
+              <ListItem><PropertyName>user</PropertyName></ListItem>
+              <ListItem><PropertyName>src_ip</PropertyName></ListItem>
+              <ListItem><PropertyName>dst_ip</PropertyName></ListItem>
+              <ListItem><PropertyName>virus</PropertyName></ListItem>
+              <ListItem><PropertyName>log_subtype</PropertyName></ListItem>
+              <ListItem><PropertyName>message</PropertyName></ListItem>
+              <ListItem><PropertyName>messageid</PropertyName></ListItem>
+            </ListItems>
+          </ListEntry>
+        </ListEntries>
+      </ListControl>
+    </View>
+    <View>
+      <Name>Sfos.Log.Atp</Name>
+      <ViewSelectedBy>
+        <TypeName>Sfos.Log.Atp</TypeName>
+      </ViewSelectedBy>
+      <TableControl>
+        <TableHeaders>
+          <TableColumnHeader><Label>Datetime</Label><Width>19</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Host (source IP)</Label><Width>20</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Username</Label><Width>14</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Dst IP</Label><Width>15</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Threat</Label><Width>16</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Threat URL/IP</Label><Width>22</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Origin</Label><Width>16</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Log subtype</Label><Width>14</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Message ID</Label><Width>12</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Login user</Label><Width>14</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Process user</Label><Width>14</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Executable</Label></TableColumnHeader>
+        </TableHeaders>
+        <TableRowEntries>
+          <TableRowEntry>
+            <TableColumnItems>
+              <TableColumnItem><PropertyName>Datetime</PropertyName><FormatString>{0:yyyy-MM-dd HH:mm:ss}</FormatString></TableColumnItem>
+              <TableColumnItem><PropertyName>src_ip</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>user</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>dst_ip</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>threat</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>url</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>log_component</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>log_subtype</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>messageid</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>host_login_user</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>host_process_user</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>execution_path</PropertyName></TableColumnItem>
+            </TableColumnItems>
+          </TableRowEntry>
+        </TableRowEntries>
+      </TableControl>
+    </View>
+    <View>
+      <Name>Sfos.Log.Atp.List</Name>
+      <ViewSelectedBy>
+        <TypeName>Sfos.Log.Atp.List</TypeName>
+      </ViewSelectedBy>
+      <ListControl>
+        <ListEntries>
+          <ListEntry>
+            <ListItems>
+              <ListItem><PropertyName>Datetime</PropertyName><FormatString>{0:yyyy-MM-dd HH:mm:ss}</FormatString></ListItem>
+              <ListItem><PropertyName>src_ip</PropertyName></ListItem>
+              <ListItem><PropertyName>user</PropertyName></ListItem>
+              <ListItem><PropertyName>dst_ip</PropertyName></ListItem>
+              <ListItem><PropertyName>threat</PropertyName></ListItem>
+              <ListItem><PropertyName>url</PropertyName></ListItem>
+              <ListItem><PropertyName>log_component</PropertyName></ListItem>
+              <ListItem><PropertyName>log_subtype</PropertyName></ListItem>
+              <ListItem><PropertyName>messageid</PropertyName></ListItem>
+              <ListItem><PropertyName>host_login_user</PropertyName></ListItem>
+              <ListItem><PropertyName>host_process_user</PropertyName></ListItem>
+              <ListItem><PropertyName>execution_path</PropertyName></ListItem>
+            </ListItems>
+          </ListEntry>
+        </ListEntries>
+      </ListControl>
+    </View>
+    <View>
+      <Name>Sfos.Log.Sandbox</Name>
+      <ViewSelectedBy>
+        <TypeName>Sfos.Log.Sandbox</TypeName>
+      </ViewSelectedBy>
+      <TableControl>
+        <TableHeaders>
+          <TableColumnHeader><Label>Datetime</Label><Width>19</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Log comp</Label><Width>16</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Username</Label><Width>14</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Source</Label><Width>16</Width></TableColumnHeader>
+          <TableColumnHeader><Label>File name</Label><Width>20</Width></TableColumnHeader>
+          <TableColumnHeader><Label>File type</Label><Width>10</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Checksum</Label><Width>42</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Reason</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Message ID</Label><Width>12</Width></TableColumnHeader>
+        </TableHeaders>
+        <TableRowEntries>
+          <TableRowEntry>
+            <TableColumnItems>
+              <TableColumnItem><PropertyName>Datetime</PropertyName><FormatString>{0:yyyy-MM-dd HH:mm:ss}</FormatString></TableColumnItem>
+              <TableColumnItem><PropertyName>log_component</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>user</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>host</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>file_name</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>file_type</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>sha1sum</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>reason</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>messageid</PropertyName></TableColumnItem>
+            </TableColumnItems>
+          </TableRowEntry>
+        </TableRowEntries>
+      </TableControl>
+    </View>
+    <View>
+      <Name>Sfos.Log.Sandbox.List</Name>
+      <ViewSelectedBy>
+        <TypeName>Sfos.Log.Sandbox.List</TypeName>
+      </ViewSelectedBy>
+      <ListControl>
+        <ListEntries>
+          <ListEntry>
+            <ListItems>
+              <ListItem><PropertyName>Datetime</PropertyName><FormatString>{0:yyyy-MM-dd HH:mm:ss}</FormatString></ListItem>
+              <ListItem><PropertyName>log_component</PropertyName></ListItem>
+              <ListItem><PropertyName>user</PropertyName></ListItem>
+              <ListItem><PropertyName>host</PropertyName></ListItem>
+              <ListItem><PropertyName>file_name</PropertyName></ListItem>
+              <ListItem><PropertyName>file_type</PropertyName></ListItem>
+              <ListItem><PropertyName>sha1sum</PropertyName></ListItem>
+              <ListItem><PropertyName>reason</PropertyName></ListItem>
+              <ListItem><PropertyName>messageid</PropertyName></ListItem>
+            </ListItems>
+          </ListEntry>
+        </ListEntries>
+      </ListControl>
+    </View>
+    <View>
+      <Name>Sfos.Log.Heartbeat</Name>
+      <ViewSelectedBy>
+        <TypeName>Sfos.Log.Heartbeat</TypeName>
+      </ViewSelectedBy>
+      <TableControl>
+        <TableHeaders>
+          <TableColumnHeader><Label>Datetime</Label><Width>19</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Endpoint name</Label><Width>18</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Endpoint IP</Label><Width>15</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Endpt health</Label><Width>14</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Message ID</Label></TableColumnHeader>
+        </TableHeaders>
+        <TableRowEntries>
+          <TableRowEntry>
+            <TableColumnItems>
+              <TableColumnItem><PropertyName>Datetime</PropertyName><FormatString>{0:yyyy-MM-dd HH:mm:ss}</FormatString></TableColumnItem>
+              <TableColumnItem><PropertyName>name</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>endpoint_ip</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>status</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>messageid</PropertyName></TableColumnItem>
+            </TableColumnItems>
+          </TableRowEntry>
+        </TableRowEntries>
+      </TableControl>
+    </View>
+    <View>
+      <Name>Sfos.Log.Heartbeat.List</Name>
+      <ViewSelectedBy>
+        <TypeName>Sfos.Log.Heartbeat.List</TypeName>
+      </ViewSelectedBy>
+      <ListControl>
+        <ListEntries>
+          <ListEntry>
+            <ListItems>
+              <ListItem><PropertyName>Datetime</PropertyName><FormatString>{0:yyyy-MM-dd HH:mm:ss}</FormatString></ListItem>
+              <ListItem><PropertyName>name</PropertyName></ListItem>
+              <ListItem><PropertyName>endpoint_ip</PropertyName></ListItem>
+              <ListItem><PropertyName>status</PropertyName></ListItem>
+              <ListItem><PropertyName>messageid</PropertyName></ListItem>
+            </ListItems>
+          </ListEntry>
+        </ListEntries>
+      </ListControl>
+    </View>
+    <View>
+      <Name>Sfos.Log.Ssltls</Name>
+      <ViewSelectedBy>
+        <TypeName>Sfos.Log.Ssltls</TypeName>
+      </ViewSelectedBy>
+      <TableControl>
+        <TableHeaders>
+          <TableColumnHeader><Label>Datetime</Label><Width>19</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Action</Label><Width>10</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Message ID</Label><Width>12</Width></TableColumnHeader>
+          <TableColumnHeader><Label>SSL/TLS rule</Label><Width>14</Width></TableColumnHeader>
+          <TableColumnHeader><Label>SD-WAN profile</Label><Width>18</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Src IP</Label><Width>15</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Dst IP</Label><Width>15</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Category</Label><Width>14</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Username</Label><Width>14</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Server name</Label><Width>20</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Application</Label><Width>16</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Cipher suite</Label><Width>20</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Reason</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Manage</Label><Width>10</Width></TableColumnHeader>
+        </TableHeaders>
+        <TableRowEntries>
+          <TableRowEntry>
+            <TableColumnItems>
+              <TableColumnItem><PropertyName>Datetime</PropertyName><FormatString>{0:yyyy-MM-dd HH:mm:ss}</FormatString></TableColumnItem>
+              <TableColumnItem><PropertyName>log_subtype</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>messageid</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>rule_id</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>profile_name</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>src_ip</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>dst_ip</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>category</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>user</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>sni</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>app_name</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>cipher_suite</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>reason</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>tls_manage</PropertyName></TableColumnItem>
+            </TableColumnItems>
+          </TableRowEntry>
+        </TableRowEntries>
+      </TableControl>
+    </View>
+    <View>
+      <Name>Sfos.Log.Ssltls.List</Name>
+      <ViewSelectedBy>
+        <TypeName>Sfos.Log.Ssltls.List</TypeName>
+      </ViewSelectedBy>
+      <ListControl>
+        <ListEntries>
+          <ListEntry>
+            <ListItems>
+              <ListItem><PropertyName>Datetime</PropertyName><FormatString>{0:yyyy-MM-dd HH:mm:ss}</FormatString></ListItem>
+              <ListItem><PropertyName>log_subtype</PropertyName></ListItem>
+              <ListItem><PropertyName>messageid</PropertyName></ListItem>
+              <ListItem><PropertyName>rule_id</PropertyName></ListItem>
+              <ListItem><PropertyName>profile_name</PropertyName></ListItem>
+              <ListItem><PropertyName>src_ip</PropertyName></ListItem>
+              <ListItem><PropertyName>dst_ip</PropertyName></ListItem>
+              <ListItem><PropertyName>category</PropertyName></ListItem>
+              <ListItem><PropertyName>user</PropertyName></ListItem>
+              <ListItem><PropertyName>sni</PropertyName></ListItem>
+              <ListItem><PropertyName>app_name</PropertyName></ListItem>
+              <ListItem><PropertyName>cipher_suite</PropertyName></ListItem>
+              <ListItem><PropertyName>reason</PropertyName></ListItem>
+              <ListItem><PropertyName>tls_manage</PropertyName></ListItem>
+            </ListItems>
+          </ListEntry>
+        </ListEntries>
+      </ListControl>
+    </View>
+    <View>
+      <Name>Sfos.Log.Waf</Name>
+      <ViewSelectedBy>
+        <TypeName>Sfos.Log.Waf</TypeName>
+      </ViewSelectedBy>
+      <TableControl>
+        <TableHeaders>
+          <TableColumnHeader><Label>Datetime</Label><Width>19</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Server</Label><Width>16</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Source IP/name</Label><Width>18</Width></TableColumnHeader>
+          <TableColumnHeader><Label>URL</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Reason</Label><Width>16</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Message</Label><Width>30</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Status code</Label><Width>12</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Bytes recv</Label><Width>10</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Bytes sent</Label><Width>10</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Message ID</Label><Width>12</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Policy ID</Label><Width>10</Width></TableColumnHeader>
+        </TableHeaders>
+        <TableRowEntries>
+          <TableRowEntry>
+            <TableColumnItems>
+              <TableColumnItem><PropertyName>Datetime</PropertyName><FormatString>{0:yyyy-MM-dd HH:mm:ss}</FormatString></TableColumnItem>
+              <TableColumnItem><PropertyName>server</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>src_ip</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>url</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>reason</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>extra</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>response_code</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>bytes_received</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>bytes_sent</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>messageid</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>fw_rule_id</PropertyName></TableColumnItem>
+            </TableColumnItems>
+          </TableRowEntry>
+        </TableRowEntries>
+      </TableControl>
+    </View>
+    <View>
+      <Name>Sfos.Log.Waf.List</Name>
+      <ViewSelectedBy>
+        <TypeName>Sfos.Log.Waf.List</TypeName>
+      </ViewSelectedBy>
+      <ListControl>
+        <ListEntries>
+          <ListEntry>
+            <ListItems>
+              <ListItem><PropertyName>Datetime</PropertyName><FormatString>{0:yyyy-MM-dd HH:mm:ss}</FormatString></ListItem>
+              <ListItem><PropertyName>server</PropertyName></ListItem>
+              <ListItem><PropertyName>src_ip</PropertyName></ListItem>
+              <ListItem><PropertyName>url</PropertyName></ListItem>
+              <ListItem><PropertyName>reason</PropertyName></ListItem>
+              <ListItem><PropertyName>extra</PropertyName></ListItem>
+              <ListItem><PropertyName>response_code</PropertyName></ListItem>
+              <ListItem><PropertyName>bytes_received</PropertyName></ListItem>
+              <ListItem><PropertyName>bytes_sent</PropertyName></ListItem>
+              <ListItem><PropertyName>messageid</PropertyName></ListItem>
+              <ListItem><PropertyName>fw_rule_id</PropertyName></ListItem>
+            </ListItems>
+          </ListEntry>
+        </ListEntries>
+      </ListControl>
+    </View>
+    <View>
+      <Name>Sfos.Log.Email</Name>
+      <ViewSelectedBy>
+        <TypeName>Sfos.Log.Email</TypeName>
+      </ViewSelectedBy>
+      <TableControl>
+        <TableHeaders>
+          <TableColumnHeader><Label>Datetime</Label><Width>19</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Log comp</Label><Width>16</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Email action</Label><Width>14</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Username</Label><Width>14</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Src IP</Label><Width>15</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Dst IP</Label><Width>15</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Email sender</Label><Width>18</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Email receiver</Label><Width>18</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Email subject</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Message</Label><Width>30</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Message ID</Label><Width>12</Width></TableColumnHeader>
+        </TableHeaders>
+        <TableRowEntries>
+          <TableRowEntry>
+            <TableColumnItems>
+              <TableColumnItem><PropertyName>Datetime</PropertyName><FormatString>{0:yyyy-MM-dd HH:mm:ss}</FormatString></TableColumnItem>
+              <TableColumnItem><PropertyName>log_component</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>action</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>user</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>src_ip</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>dst_ip</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>sender</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>recipient</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>subject</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>message</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>messageid</PropertyName></TableColumnItem>
+            </TableColumnItems>
+          </TableRowEntry>
+        </TableRowEntries>
+      </TableControl>
+    </View>
+    <View>
+      <Name>Sfos.Log.Email.List</Name>
+      <ViewSelectedBy>
+        <TypeName>Sfos.Log.Email.List</TypeName>
+      </ViewSelectedBy>
+      <ListControl>
+        <ListEntries>
+          <ListEntry>
+            <ListItems>
+              <ListItem><PropertyName>Datetime</PropertyName><FormatString>{0:yyyy-MM-dd HH:mm:ss}</FormatString></ListItem>
+              <ListItem><PropertyName>log_component</PropertyName></ListItem>
+              <ListItem><PropertyName>action</PropertyName></ListItem>
+              <ListItem><PropertyName>user</PropertyName></ListItem>
+              <ListItem><PropertyName>src_ip</PropertyName></ListItem>
+              <ListItem><PropertyName>dst_ip</PropertyName></ListItem>
+              <ListItem><PropertyName>sender</PropertyName></ListItem>
+              <ListItem><PropertyName>recipient</PropertyName></ListItem>
+              <ListItem><PropertyName>subject</PropertyName></ListItem>
+              <ListItem><PropertyName>message</PropertyName></ListItem>
+              <ListItem><PropertyName>messageid</PropertyName></ListItem>
+            </ListItems>
+          </ListEntry>
+        </ListEntries>
+      </ListControl>
+    </View>
+    <View>
+      <Name>Sfos.Log.Sdwan</Name>
+      <ViewSelectedBy>
+        <TypeName>Sfos.Log.Sdwan</TypeName>
+      </ViewSelectedBy>
+      <TableControl>
+        <TableHeaders>
+          <TableColumnHeader><Label>Datetime</Label><Width>19</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Message ID</Label><Width>12</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Log comp</Label><Width>16</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Log subtype</Label><Width>14</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Status</Label><Width>10</Width></TableColumnHeader>
+          <TableColumnHeader><Label>SD-WAN profile</Label><Width>18</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Gateway</Label><Width>10</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Message</Label></TableColumnHeader>
+        </TableHeaders>
+        <TableRowEntries>
+          <TableRowEntry>
+            <TableColumnItems>
+              <TableColumnItem><PropertyName>Datetime</PropertyName><FormatString>{0:yyyy-MM-dd HH:mm:ss}</FormatString></TableColumnItem>
+              <TableColumnItem><PropertyName>messageid</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>log_component</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>log_subtype</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>status</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>profile_name</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>gw_name</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>message</PropertyName></TableColumnItem>
+            </TableColumnItems>
+          </TableRowEntry>
+        </TableRowEntries>
+      </TableControl>
+    </View>
+    <View>
+      <Name>Sfos.Log.Sdwan.List</Name>
+      <ViewSelectedBy>
+        <TypeName>Sfos.Log.Sdwan.List</TypeName>
+      </ViewSelectedBy>
+      <ListControl>
+        <ListEntries>
+          <ListEntry>
+            <ListItems>
+              <ListItem><PropertyName>Datetime</PropertyName><FormatString>{0:yyyy-MM-dd HH:mm:ss}</FormatString></ListItem>
+              <ListItem><PropertyName>messageid</PropertyName></ListItem>
+              <ListItem><PropertyName>log_component</PropertyName></ListItem>
+              <ListItem><PropertyName>log_subtype</PropertyName></ListItem>
+              <ListItem><PropertyName>status</PropertyName></ListItem>
+              <ListItem><PropertyName>profile_name</PropertyName></ListItem>
+              <ListItem><PropertyName>gw_name</PropertyName></ListItem>
+              <ListItem><PropertyName>message</PropertyName></ListItem>
+            </ListItems>
+          </ListEntry>
+        </ListEntries>
+      </ListControl>
+    </View>
+    <View>
+      <Name>Sfos.Log.Applicationfilter</Name>
+      <ViewSelectedBy>
+        <TypeName>Sfos.Log.Applicationfilter</TypeName>
+      </ViewSelectedBy>
+      <TableControl>
+        <TableHeaders>
+          <TableColumnHeader><Label>Datetime</Label><Width>19</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Log subtype</Label><Width>14</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Username</Label><Width>14</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Src IP</Label><Width>15</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Dst IP</Label><Width>15</Width></TableColumnHeader>
+          <TableColumnHeader><Label>App category</Label><Width>16</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Application</Label><Width>16</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Message ID</Label><Width>12</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Policy ID</Label></TableColumnHeader>
+        </TableHeaders>
+        <TableRowEntries>
+          <TableRowEntry>
+            <TableColumnItems>
+              <TableColumnItem><PropertyName>Datetime</PropertyName><FormatString>{0:yyyy-MM-dd HH:mm:ss}</FormatString></TableColumnItem>
+              <TableColumnItem><PropertyName>log_subtype</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>user</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>src_ip</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>dst_ip</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>category</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>app_name</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>messageid</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>fw_rule_id</PropertyName></TableColumnItem>
+            </TableColumnItems>
+          </TableRowEntry>
+        </TableRowEntries>
+      </TableControl>
+    </View>
+    <View>
+      <Name>Sfos.Log.Applicationfilter.List</Name>
+      <ViewSelectedBy>
+        <TypeName>Sfos.Log.Applicationfilter.List</TypeName>
+      </ViewSelectedBy>
+      <ListControl>
+        <ListEntries>
+          <ListEntry>
+            <ListItems>
+              <ListItem><PropertyName>Datetime</PropertyName><FormatString>{0:yyyy-MM-dd HH:mm:ss}</FormatString></ListItem>
+              <ListItem><PropertyName>log_subtype</PropertyName></ListItem>
+              <ListItem><PropertyName>user</PropertyName></ListItem>
+              <ListItem><PropertyName>src_ip</PropertyName></ListItem>
+              <ListItem><PropertyName>dst_ip</PropertyName></ListItem>
+              <ListItem><PropertyName>category</PropertyName></ListItem>
+              <ListItem><PropertyName>app_name</PropertyName></ListItem>
+              <ListItem><PropertyName>messageid</PropertyName></ListItem>
+              <ListItem><PropertyName>fw_rule_id</PropertyName></ListItem>
+            </ListItems>
+          </ListEntry>
+        </ListEntries>
+      </ListControl>
+    </View>
+    <View>
+      <Name>Sfos.Log.Webcontentpolicy</Name>
+      <ViewSelectedBy>
+        <TypeName>Sfos.Log.Webcontentpolicy</TypeName>
+      </ViewSelectedBy>
+      <TableControl>
+        <TableHeaders>
+          <TableColumnHeader><Label>Datetime</Label><Width>19</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Transaction ID</Label><Width>14</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Content filter</Label><Width>16</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Username</Label><Width>14</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Site category</Label><Width>16</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Website</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Direction</Label><Width>10</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Content action</Label><Width>14</Width></TableColumnHeader>
+          <TableColumnHeader><Label>File name</Label><Width>20</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Context</Label><Width>14</Width></TableColumnHeader>
+        </TableHeaders>
+        <TableRowEntries>
+          <TableRowEntry>
+            <TableColumnItems>
+              <TableColumnItem><PropertyName>Datetime</PropertyName><FormatString>{0:yyyy-MM-dd HH:mm:ss}</FormatString></TableColumnItem>
+              <TableColumnItem><PropertyName>transaction_id</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>content_filter_key</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>user</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>site_category</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>website</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>direction</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>action</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>file_name</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>context</PropertyName></TableColumnItem>
+            </TableColumnItems>
+          </TableRowEntry>
+        </TableRowEntries>
+      </TableControl>
+    </View>
+    <View>
+      <Name>Sfos.Log.Webcontentpolicy.List</Name>
+      <ViewSelectedBy>
+        <TypeName>Sfos.Log.Webcontentpolicy.List</TypeName>
+      </ViewSelectedBy>
+      <ListControl>
+        <ListEntries>
+          <ListEntry>
+            <ListItems>
+              <ListItem><PropertyName>Datetime</PropertyName><FormatString>{0:yyyy-MM-dd HH:mm:ss}</FormatString></ListItem>
+              <ListItem><PropertyName>transaction_id</PropertyName></ListItem>
+              <ListItem><PropertyName>content_filter_key</PropertyName></ListItem>
+              <ListItem><PropertyName>user</PropertyName></ListItem>
+              <ListItem><PropertyName>site_category</PropertyName></ListItem>
+              <ListItem><PropertyName>website</PropertyName></ListItem>
+              <ListItem><PropertyName>direction</PropertyName></ListItem>
+              <ListItem><PropertyName>action</PropertyName></ListItem>
+              <ListItem><PropertyName>file_name</PropertyName></ListItem>
+              <ListItem><PropertyName>context</PropertyName></ListItem>
+            </ListItems>
+          </ListEntry>
+        </ListEntries>
+      </ListControl>
+    </View>
+    <View>
+      <Name>Sfos.Log</Name>
+      <ViewSelectedBy>
+        <TypeName>Sfos.Log</TypeName>
+      </ViewSelectedBy>
+      <TableControl>
+        <TableHeaders>
+          <TableColumnHeader><Label>Datetime</Label><Width>19</Width></TableColumnHeader>
+          <TableColumnHeader><Label>log_type</Label><Width>12</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Component</Label><Width>16</Width></TableColumnHeader>
+          <TableColumnHeader><Label>Subtype</Label><Width>14</Width></TableColumnHeader>
+          <TableColumnHeader><Label>status</Label><Width>10</Width></TableColumnHeader>
+          <TableColumnHeader><Label>message</Label></TableColumnHeader>
+        </TableHeaders>
+        <TableRowEntries>
+          <TableRowEntry>
+            <TableColumnItems>
+              <TableColumnItem><PropertyName>Datetime</PropertyName><FormatString>{0:yyyy-MM-dd HH:mm:ss}</FormatString></TableColumnItem>
+              <TableColumnItem><PropertyName>log_type</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>log_component</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>log_subtype</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>status</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>message</PropertyName></TableColumnItem>
+            </TableColumnItems>
+          </TableRowEntry>
+        </TableRowEntries>
+      </TableControl>
+    </View>
+    <View>
+      <Name>Sfos.Log.List</Name>
+      <ViewSelectedBy>
+        <TypeName>Sfos.Log.List</TypeName>
+      </ViewSelectedBy>
+      <ListControl>
+        <ListEntries>
+          <ListEntry>
+            <ListItems>
+              <ListItem><PropertyName>Datetime</PropertyName><FormatString>{0:yyyy-MM-dd HH:mm:ss}</FormatString></ListItem>
+              <ListItem><PropertyName>log_type</PropertyName></ListItem>
+              <ListItem><PropertyName>log_component</PropertyName></ListItem>
+              <ListItem><PropertyName>log_subtype</PropertyName></ListItem>
+              <ListItem><PropertyName>status</PropertyName></ListItem>
+              <ListItem><PropertyName>message</PropertyName></ListItem>
+            </ListItems>
+          </ListEntry>
+        </ListEntries>
+      </ListControl>
+    </View>
+  </ViewDefinitions>
+</Configuration>

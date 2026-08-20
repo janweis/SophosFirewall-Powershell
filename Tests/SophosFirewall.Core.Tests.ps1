@@ -1,4 +1,4 @@
-﻿#requires -Version 5.1
+#requires -Version 5.1
 #requires -Modules Pester
 
 <#
@@ -51,7 +51,9 @@ Describe 'SophosFirewall.Core Module' {
                 'Get-SfosApiStatus',
                 'Assert-SfosApiReturnSuccess',
                 'Resolve-SfosParameters',
-                'ConvertTo-SfosXmlEscaped'
+                'ConvertTo-SfosXmlEscaped',
+                'Connect-SfosWebAdmin',
+                'Invoke-SfosWebAdminRequest'
             )
             
             foreach ($func in $requiredFunctions) {
@@ -1127,5 +1129,176 @@ Describe 'New-SfosMultipartRequestBody - Multipart Body Construction' {
             $bodyText = [System.Text.Encoding]::GetEncoding(28591).GetString($result.Body)
             $bodyText.EndsWith("--$boundary--`r`n") | Should -BeTrue
         }
+    }
+}
+
+# ------------------------------------------------------------------------------------------
+# Connect-SfosWebAdmin / Invoke-SfosWebAdminRequest reach the web admin interface (Web Admin
+# Console, Controller?mode=...) - not the documented XML API, and not the appliance's separate
+# CLI console reached through the web UI's own "Console" button. There is no equivalent
+# through Invoke-SfosApi. Moved here from SophosFirewall.Diagnostics, where the four-step
+# login (root GET for the session cookie, mode=151 login POST, index.jsp GET for the CSRF
+# token) and the mode 5001/5002 log viewer shapes were first measured against a live appliance
+# - see that module's own findings file. These tests only cover the transport itself.
+
+Describe 'Connect-SfosWebAdmin' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = 'fw.example.test'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+
+        $script:LoginOkJson = '{"status":200}'
+        # Single-quoted token text concatenated in, not interpolated - '$rFt0k3n' inside a
+        # double-quoted string would otherwise be read as a (nonexistent) variable reference.
+        $script:CsrfHtml = '<html><script>Cyberoam.c' + '$rFt0k3n' + " = 'tok123';</script></html>"
+    }
+
+    It 'Should perform the four-step login and return a session with the extracted CSRF token' {
+        Mock -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -MockWith {
+            if ($Body -like 'mode=151*') {
+                return [PSCustomObject]@{ StatusCode = 200; Content = $script:LoginOkJson }
+            }
+            if ($Uri -like '*/webconsole/webpages/index.jsp') {
+                return [PSCustomObject]@{ StatusCode = 200; Content = $script:CsrfHtml }
+            }
+            return [PSCustomObject]@{ StatusCode = 200; Content = '' }
+        }
+
+        $console = Connect-SfosWebAdmin @conn
+
+        $console.BaseUri | Should -Be 'https://fw.example.test:4444'
+        $console.Csrf | Should -Be 'tok123'
+        $console.SkipCertificateCheck | Should -BeFalse
+    }
+
+    It 'Should call the root page, the login POST and the CSRF page in that order' {
+        $script:CallOrder = [System.Collections.Generic.List[string]]::new()
+        Mock -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -MockWith {
+            if ($Body -like 'mode=151*') {
+                $script:CallOrder.Add('login')
+                return [PSCustomObject]@{ StatusCode = 200; Content = $script:LoginOkJson }
+            }
+            if ($Uri -like '*/webconsole/webpages/index.jsp') {
+                $script:CallOrder.Add('csrf')
+                return [PSCustomObject]@{ StatusCode = 200; Content = $script:CsrfHtml }
+            }
+            $script:CallOrder.Add('root')
+            return [PSCustomObject]@{ StatusCode = 200; Content = '' }
+        }
+
+        Connect-SfosWebAdmin @conn | Out-Null
+
+        @($script:CallOrder) | Should -Be @('root', 'login', 'csrf')
+    }
+
+    It 'Should send the credentials to mode 151 as JSON, with languageid 1' {
+        Mock -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -MockWith {
+            if ($Body -like 'mode=151*') {
+                return [PSCustomObject]@{ StatusCode = 200; Content = $script:LoginOkJson }
+            }
+            if ($Uri -like '*/webconsole/webpages/index.jsp') {
+                return [PSCustomObject]@{ StatusCode = 200; Content = $script:CsrfHtml }
+            }
+            return [PSCustomObject]@{ StatusCode = 200; Content = '' }
+        }
+
+        Connect-SfosWebAdmin @conn | Out-Null
+
+        Should -Invoke -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -Times 1 -Exactly -ParameterFilter {
+            if ($Uri -notlike '*/webconsole/Controller') { return $false }
+            $loginJson = [uri]::UnescapeDataString(($Body -replace '^mode=151&json=', '')) | ConvertFrom-Json
+            $loginJson.username -eq 'apiuser' -and $loginJson.password -eq 'pw' -and $loginJson.languageid -eq '1'
+        }
+    }
+
+    It 'Should throw naming the account and the firewall when the console login answers status -1' {
+        Mock -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -MockWith {
+            if ($Body -like 'mode=151*') {
+                return [PSCustomObject]@{ StatusCode = 200; Content = '{"status":-1}' }
+            }
+            return [PSCustomObject]@{ StatusCode = 200; Content = '' }
+        }
+
+        $thrown = $null
+        try { Connect-SfosWebAdmin @conn } catch { $thrown = $_ }
+
+        $thrown | Should -Not -BeNullOrEmpty
+        $thrown.Exception.Message | Should -BeLike "*$($conn.Username)*"
+        $thrown.Exception.Message | Should -BeLike "*$($conn.Firewall)*"
+    }
+
+    It 'Should throw when the CSRF token cannot be found on the start page' {
+        Mock -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -MockWith {
+            if ($Body -like 'mode=151*') {
+                return [PSCustomObject]@{ StatusCode = 200; Content = $script:LoginOkJson }
+            }
+            if ($Uri -like '*/webconsole/webpages/index.jsp') {
+                return [PSCustomObject]@{ StatusCode = 200; Content = '<html>no token here</html>' }
+            }
+            return [PSCustomObject]@{ StatusCode = 200; Content = '' }
+        }
+
+        { Connect-SfosWebAdmin @conn } | Should -Throw '*CSRF*'
+    }
+}
+
+Describe 'Invoke-SfosWebAdminRequest' {
+
+    BeforeAll {
+        $webAdminSession = [PSCustomObject]@{
+            BaseUri              = 'https://fw.example.test:4444'
+            WebSession            = $null
+            Csrf                 = 'tok123'
+            SkipCertificateCheck = $false
+        }
+    }
+
+    It 'Should POST to Controller with the csrf token and the required headers' {
+        Mock -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -MockWith {
+            [PSCustomObject]@{ StatusCode = 200; Content = '{"status":200,"syslog":[]}' }
+        }
+
+        Invoke-SfosWebAdminRequest -WebAdminSession $webAdminSession -Mode 5001 -Json '{"limit":200,"offset":0}' | Out-Null
+
+        Should -Invoke -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -Times 1 -Exactly -ParameterFilter {
+            $Uri -eq 'https://fw.example.test:4444/webconsole/Controller?csrf=tok123' -and
+            $Body -like 'mode=5001&json=*' -and
+            $Headers['X-Requested-With'] -eq 'XMLHttpRequest' -and
+            $Headers['Referer'] -eq 'https://fw.example.test:4444/webconsole/webpages/index.jsp'
+        }
+    }
+
+    It "Should default -Json to '{}' when not supplied" {
+        Mock -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -MockWith {
+            [PSCustomObject]@{ StatusCode = 200; Content = '{"status":200}' }
+        }
+
+        Invoke-SfosWebAdminRequest -WebAdminSession $webAdminSession -Mode 5002 | Out-Null
+
+        Should -Invoke -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -Times 1 -Exactly -ParameterFilter {
+            $Body -eq 'mode=5002&json=%7B%7D'
+        }
+    }
+
+    It "Should throw naming the mode when the response contains 'loginstylesheet'" {
+        Mock -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -MockWith {
+            [PSCustomObject]@{ StatusCode = 200; Content = '<html><link href="loginstylesheet.css"></html>' }
+        }
+
+        { Invoke-SfosWebAdminRequest -WebAdminSession $webAdminSession -Mode 5001 -Json '{}' } | Should -Throw '*mode 5001*'
+    }
+
+    It 'Should return the parsed JSON response' {
+        Mock -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -MockWith {
+            [PSCustomObject]@{ StatusCode = 200; Content = '{"status":200,"limit":200}' }
+        }
+
+        $result = Invoke-SfosWebAdminRequest -WebAdminSession $webAdminSession -Mode 5001 -Json '{}'
+        $result.status | Should -Be 200
+        $result.limit | Should -Be 200
     }
 }

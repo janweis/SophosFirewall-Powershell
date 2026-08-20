@@ -8,7 +8,12 @@
     of firewall entities such as hosts, services or rules; that lives in the domain modules
     that depend on this one.
 
-    Total Functions: 12 (9 exported, 3 internal helpers) - see README.md for the full
+    Also carries Connect-SfosWebAdmin and Invoke-SfosWebAdminRequest, an undocumented,
+    firmware-bound path into the web admin interface (Web Admin Console - not the appliance's
+    CLI console) for the handful of screens that have no equivalent in the XML API - see their
+    own help before using them.
+
+    Total Functions: 14 (11 exported, 3 internal helpers) - see README.md for the full
     cmdlet table.
 
     API reference:
@@ -1300,6 +1305,341 @@ function Get-SfosSession {
 
 #endregion
 
+#region Web Admin Console
+
+<#
+.SYNOPSIS
+    Logs into the Sophos Firewall's web admin interface and returns a session context.
+
+.DESCRIPTION
+    This is the web admin interface (Web Admin Console, Controller?mode=...) - the browser
+    UI an administrator signs into, and the interface the appliance itself names in its own
+    login log ("User <account> logged in successfully to Web Admin Console"). It is NOT the
+    appliance's CLI console reached through the web UI's own "Console" button - that is a
+    separate SSH/terminal feature this cmdlet does not touch. It is also not the documented
+    XML management API - there is no way to reach the web admin interface through
+    Invoke-SfosApi.
+
+    It is UNDOCUMENTED: no Sophos reference describes this mechanism, it is tied to the exact
+    firmware build the login/CSRF/web admin pages were measured against (SFOS 22.0.1.490), and
+    it can change or break on any firmware update without notice. Use it only where a domain
+    module needs a web admin screen that has no equivalent in the XML API - see that module's
+    own documentation for what it is used for and why.
+
+    Performs the four-step web admin login measured against a live appliance: GET the root
+    page to obtain the session cookie, POST the credentials (mode=151), GET the web admin
+    start page to read the CSRF token out of its HTML, and return everything a subsequent
+    request (Invoke-SfosWebAdminRequest) needs. No token or cookie is cached across calls to
+    this cmdlet - each call opens its own fresh web admin session.
+
+.PARAMETER Firewall
+    Optional. Host name or IP address of the firewall. If omitted, the value from the current
+    connection is used.
+
+.PARAMETER Port
+    Optional. TCP port of the management API, usually 4444. If omitted, the value from the
+    current connection is used.
+
+.PARAMETER Username
+    Optional. User name for the web admin login. If omitted, the value from the current
+    connection is used.
+
+.PARAMETER Password
+    Optional. Password for the web admin login, as a SecureString. If omitted, the value from
+    the current connection is used. Unpacked to plain text only for the instant the login
+    request is built, and cleared again in a finally block.
+
+.PARAMETER SkipCertificateCheck
+    Optional. Accepts the firewall certificate without validating it. Use this only for
+    appliances that still present a self-signed certificate. If omitted, the certificate is
+    validated.
+
+.PARAMETER Session
+    Optional. A session object from Connect-SfosFirewall, or the name of a session that was
+    registered with Connect-SfosFirewall -Name. Use it to address a specific firewall when you
+    work with more than one at a time. Any connection parameter you pass explicitly still
+    takes precedence. If omitted, the stored default connection is used.
+
+.INPUTS
+    None. This cmdlet does not accept pipeline input.
+
+.OUTPUTS
+    System.Management.Automation.PSCustomObject. The web admin session, with the properties
+    BaseUri, WebSession, Csrf and SkipCertificateCheck. Pass it to
+    Invoke-SfosWebAdminRequest.
+
+.EXAMPLE
+    $webAdmin = Connect-SfosWebAdmin -Firewall '192.0.2.10' -Port 4444 -Username 'admin' -Password $securePw -SkipCertificateCheck
+    Invoke-SfosWebAdminRequest -WebAdminSession $webAdmin -Mode 5002
+
+    Logs into the web admin interface directly and reads its filter catalog.
+
+.EXAMPLE
+    $webAdmin = Connect-SfosWebAdmin -Session 'fw1'
+
+    Logs into the web admin interface using a connection registered earlier with
+    Connect-SfosFirewall -Name 'fw1'.
+
+.LINK
+    https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+.LINK
+    Invoke-SfosWebAdminRequest
+#>
+function Connect-SfosWebAdmin {
+    # PSUseShouldProcessForStateChangingFunctions is suppressed on purpose, matching
+    # Connect-SfosFirewall's own reasoning: this only performs a login and returns a session
+    # context in this process; no configuration on the appliance changes, so there is nothing
+    # for ShouldProcess to confirm. Unlike Connect-SfosFirewall, this does contact the
+    # appliance on every call - but that contact is a login, not a write.
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '')]
+    [CmdletBinding()]
+    [OutputType([PSCustomObject])]
+    param(
+        [string]$Firewall,
+        [int]$Port,
+        [string]$Username,
+        [SecureString]$Password,
+        [switch]$SkipCertificateCheck,
+        [object]$Session
+    )
+
+    $params = Resolve-SfosParameters -BoundParameters $PSBoundParameters
+
+    $baseUri = "https://{0}:{1}" -f $params.Firewall, $params.Port
+    $invokeCommon = @{
+        UseBasicParsing = $true
+        TimeoutSec      = 30
+    }
+
+    $savedCertCallback = $null
+    $certCallbackChanged = $false
+    $certLockTaken = $false
+
+    if ($params.SkipCertificateCheck) {
+        if ($PSVersionTable.PSVersion.Major -le 5) {
+            # Shares Invoke-SfosApi's own process-wide lock: both guard the same static
+            # ServicePointManager callback, and two independent locks would give each other
+            # no protection at all against a concurrent call.
+            [System.Threading.Monitor]::Enter($script:CertCallbackLock)
+            $certLockTaken = $true
+            $savedCertCallback = [Net.ServicePointManager]::ServerCertificateValidationCallback
+            $certCallbackChanged = $true
+            [Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
+        }
+        else {
+            $invokeCommon['SkipCertificateCheck'] = $true
+        }
+    }
+
+    $plainPassword = $null
+    $passwordBstr = [IntPtr]::Zero
+
+    try {
+        try {
+            $rootResponse = Invoke-WebRequest -Uri "$baseUri/" -SessionVariable webSession -ErrorAction Stop @invokeCommon
+        }
+        catch {
+            throw "Could not reach the Sophos Firewall web console at $baseUri : $($_.Exception.Message)"
+        }
+        if ($rootResponse.StatusCode -ne 200) {
+            throw "Sophos Firewall web console at $baseUri returned HTTP $($rootResponse.StatusCode) while opening a session."
+        }
+
+        $passwordBstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($params.Password)
+        $plainPassword = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($passwordBstr)
+
+        $loginJson = @{ username = $params.Username; password = $plainPassword; languageid = '1' } | ConvertTo-Json -Compress
+        $loginBody = 'mode=151&json=' + [uri]::EscapeDataString($loginJson)
+
+        try {
+            $loginResponse = Invoke-WebRequest -Uri "$baseUri/webconsole/Controller" -Method Post `
+                -Body $loginBody -ContentType 'application/x-www-form-urlencoded' `
+                -WebSession $webSession -ErrorAction Stop @invokeCommon
+        }
+        catch {
+            throw "Sophos Firewall web console login failed for '$($params.Username)' on $baseUri : $($_.Exception.Message)"
+        }
+
+        $loginResult = $null
+        try {
+            $loginResult = $loginResponse.Content | ConvertFrom-Json -ErrorAction Stop
+        }
+        catch {
+            throw "Sophos Firewall web console login for '$($params.Username)' on $baseUri did not answer with the expected JSON. The console interface may have changed."
+        }
+
+        if (-not $loginResult.PSObject.Properties.Match('status').Count -or [int]$loginResult.status -ne 200) {
+            throw "Sophos Firewall web console login failed for '$($params.Username)' on $baseUri (status '$($loginResult.status)')."
+        }
+
+        try {
+            $pageResponse = Invoke-WebRequest -Uri "$baseUri/webconsole/webpages/index.jsp" `
+                -WebSession $webSession -ErrorAction Stop @invokeCommon
+        }
+        catch {
+            throw "Could not load the Sophos Firewall web console start page on $baseUri after login: $($_.Exception.Message)"
+        }
+
+        $csrfMatch = [regex]::Match($pageResponse.Content, 'Cyberoam\.c\$rFt0k3n\s*=\s*''([^'']+)''')
+        if (-not $csrfMatch.Success) {
+            throw "Could not read the CSRF token from the Sophos Firewall web console start page on $baseUri. The console interface may have changed."
+        }
+
+        return [PSCustomObject]@{
+            BaseUri              = $baseUri
+            WebSession           = $webSession
+            Csrf                 = $csrfMatch.Groups[1].Value
+            SkipCertificateCheck = [bool]$params.SkipCertificateCheck
+        }
+    }
+    finally {
+        if ($certCallbackChanged) {
+            [Net.ServicePointManager]::ServerCertificateValidationCallback = $savedCertCallback
+        }
+        if ($certLockTaken) {
+            [System.Threading.Monitor]::Exit($script:CertCallbackLock)
+        }
+        if ($passwordBstr -ne [IntPtr]::Zero) {
+            [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($passwordBstr)
+        }
+        $plainPassword = $null
+    }
+}
+
+<#
+.SYNOPSIS
+    Sends one request to the Sophos Firewall web admin interface's controller.
+
+.DESCRIPTION
+    This is the web admin interface (Web Admin Console, Controller?mode=...), not the
+    appliance's CLI console reached through the web UI's own "Console" button, and not the
+    documented XML management API - there is no way to reach the web admin interface through
+    Invoke-SfosApi.
+
+    It is UNDOCUMENTED, tied to the exact firmware build it was measured against, and can
+    change or break on any firmware update without notice. Use it only where a domain module
+    needs a web admin screen that has no equivalent in the XML API. Only call a mode you have
+    measured yourself: an unfamiliar mode number is a write against the web admin interface,
+    not necessarily a read, and can change settings or reboot/shut down the appliance instead
+    of just reading data.
+
+    POSTs to Controller?csrf=<token> with the given mode and JSON body, using the session
+    cookie and CSRF token from Connect-SfosWebAdmin, and returns the parsed JSON response. The
+    headers X-Requested-With and Referer are always sent - measured against a live appliance,
+    a request missing them can be answered with the web admin login page (HTML containing
+    'loginstylesheet') instead of the requested data. That case is detected here and turned
+    into a clear error, rather than an opaque parsing failure.
+
+.PARAMETER WebAdminSession
+    Required. The session context returned by Connect-SfosWebAdmin.
+
+.PARAMETER Mode
+    Required. The web admin controller mode, for example 5001 or 5002.
+
+.PARAMETER Json
+    Optional. The JSON body for this mode, as a compact string. Default '{}'.
+
+.INPUTS
+    None. This cmdlet does not accept pipeline input.
+
+.OUTPUTS
+    System.Management.Automation.PSCustomObject. The parsed JSON response.
+
+.EXAMPLE
+    $webAdmin = Connect-SfosWebAdmin -Session 'fw1'
+    Invoke-SfosWebAdminRequest -WebAdminSession $webAdmin -Mode 5002 -Json '{}'
+
+    Reads the web admin interface's filter catalog against a registered session.
+
+.LINK
+    https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+.LINK
+    Connect-SfosWebAdmin
+#>
+function Invoke-SfosWebAdminRequest {
+    [CmdletBinding()]
+    [OutputType([PSCustomObject])]
+    param(
+        [Parameter(Mandatory)]
+        [PSCustomObject]$WebAdminSession,
+
+        [Parameter(Mandatory)]
+        [int]$Mode,
+
+        [string]$Json = '{}'
+    )
+
+    $headers = @{
+        'X-Requested-With' = 'XMLHttpRequest'
+        'Referer'           = "$($WebAdminSession.BaseUri)/webconsole/webpages/index.jsp"
+    }
+    $body = "mode=$Mode&json=" + [uri]::EscapeDataString($Json)
+
+    $invokeParams = @{
+        Uri             = "$($WebAdminSession.BaseUri)/webconsole/Controller?csrf=$($WebAdminSession.Csrf)"
+        Method          = 'Post'
+        Body            = $body
+        ContentType     = 'application/x-www-form-urlencoded'
+        WebSession      = $WebAdminSession.WebSession
+        Headers         = $headers
+        UseBasicParsing = $true
+        TimeoutSec      = 30
+        ErrorAction     = 'Stop'
+    }
+
+    # The certificate callback Connect-SfosWebAdmin installs for PS 5.1 is restored before
+    # that cmdlet returns, so every later request in the same web admin session - this one
+    # included - has to re-apply -SkipCertificateCheck itself rather than relying on a
+    # callback left over from login.
+    $savedCertCallback = $null
+    $certCallbackChanged = $false
+    $certLockTaken = $false
+    if ($WebAdminSession.SkipCertificateCheck) {
+        if ($PSVersionTable.PSVersion.Major -le 5) {
+            [System.Threading.Monitor]::Enter($script:CertCallbackLock)
+            $certLockTaken = $true
+            $savedCertCallback = [Net.ServicePointManager]::ServerCertificateValidationCallback
+            $certCallbackChanged = $true
+            [Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
+        }
+        else {
+            $invokeParams['SkipCertificateCheck'] = $true
+        }
+    }
+
+    try {
+        try {
+            $response = Invoke-WebRequest @invokeParams
+        }
+        finally {
+            if ($certCallbackChanged) {
+                [Net.ServicePointManager]::ServerCertificateValidationCallback = $savedCertCallback
+            }
+            if ($certLockTaken) {
+                [System.Threading.Monitor]::Exit($script:CertCallbackLock)
+            }
+        }
+    }
+    catch {
+        throw "Sophos Firewall web console request (mode $Mode) failed: $($_.Exception.Message)"
+    }
+
+    if ($response.Content -match 'loginstylesheet') {
+        throw "Sophos Firewall web console request (mode $Mode) received the login page instead of data. This happens when the session is no longer valid, or when the required headers 'X-Requested-With: XMLHttpRequest' and 'Referer' are missing from the request."
+    }
+
+    try {
+        return $response.Content | ConvertFrom-Json -ErrorAction Stop
+    }
+    catch {
+        throw "Sophos Firewall web console request (mode $Mode) did not answer with the expected JSON. The console interface may have changed."
+    }
+}
+
+#endregion
+
 #region Archive Response Parsing
 
 <#
@@ -1546,7 +1886,9 @@ Export-ModuleMember -Function @(
     'Assert-SfosApiReturnSuccess',
     'Resolve-SfosParameters',
     'ConvertTo-SfosXmlEscaped',
-    'ConvertFrom-SfosArchive'
+    'ConvertFrom-SfosArchive',
+    'Connect-SfosWebAdmin',
+    'Invoke-SfosWebAdminRequest'
 )
 
 #endregion

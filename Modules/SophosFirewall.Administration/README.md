@@ -4,8 +4,8 @@
 Firewall: mail server notification, SNMP agent and communities, SNMPv3 users, system time,
 end-user messages, the appliance access matrix, the admin settings singleton (hostname, web
 admin ports, login security, password complexity, login disclaimer), the Local Service ACL,
-and a factory reset. It is for administrators who script the device-level configuration
-that sits outside network, routing and policy objects.
+a factory reset, and restart/shutdown of the appliance. It is for administrators who script
+the device-level configuration that sits outside network, routing and policy objects.
 
 Several cmdlets in this module change the settings that the current management session
 itself depends on. A wrong value on `Set-SfosApplianceAccess`, `Set-SfosWebAdminSettings`,
@@ -89,6 +89,8 @@ Set-SfosApplianceAccess -Ping 'LAN', 'WiFi', 'DMZ' -WhatIf
 | `New-SfosLocalServiceACL` | Creates a Local Service ACL rule. |
 | `Set-SfosLocalServiceACL` | Updates a Local Service ACL rule. |
 | `Remove-SfosLocalServiceACL` | Removes a Local Service ACL rule. |
+| `Restart-SfosFirewall` | Restarts the appliance (web admin console, not the XML API). |
+| `Stop-SfosFirewall` | Shuts the appliance down (web admin console, not the XML API). |
 
 ## Limitations
 
@@ -133,6 +135,16 @@ as parallel arrays; entries at the same index describe one server, and any array
 filled from the current configuration. There is no cmdlet to remove a single server. To clear
 the whole list, pass all three arrays empty:
 `Set-SfosNetFlowConfiguration -ServerName @() -NetflowServer @() -NetflowServerPort @()`.
+
+`Restart-SfosFirewall` and `Stop-SfosFirewall` are not part of the documented XML API - the
+vendor's operation index has no restart or shutdown operation at all. Both go through the
+same undocumented web admin console access used by the log viewer in
+`SophosFirewall.Diagnostics`, so they can change or break on a firmware update without
+notice. `Stop-SfosFirewall` has no counterpart to switch the appliance back on; that has to
+happen physically or through the hypervisor/virtualization console. Measured downtime for a
+restart on the lab appliance used to verify these cmdlets was about 3 minutes from request to
+the management port answering again - one data point, not a guarantee across hardware and
+configurations.
 
 ## License
 

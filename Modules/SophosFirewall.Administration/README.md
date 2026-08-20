@@ -141,10 +141,8 @@ vendor's operation index has no restart or shutdown operation at all. Both go th
 same undocumented web admin console access used by the log viewer in
 `SophosFirewall.Diagnostics`, so they can change or break on a firmware update without
 notice. `Stop-SfosFirewall` has no counterpart to switch the appliance back on; that has to
-happen physically or through the hypervisor/virtualization console. Measured downtime for a
-restart on the lab appliance used to verify these cmdlets was about 3 minutes from request to
-the management port answering again - one data point, not a guarantee across hardware and
-configurations.
+happen physically or through the hypervisor/virtualization console. How long a restart takes
+depends on the appliance's hardware and configuration; there is no fixed duration to rely on.
 
 ## License
 

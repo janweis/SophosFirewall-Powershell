@@ -12,8 +12,8 @@ Sophos Central administrator in the request body - Sophos requires a super admin
 outside any sub-estate for it. A tenant secured with a passkey or any other passwordless
 sign-in cannot supply those credentials at all, and the one-time password the web admin
 console offers as the alternative has no API equivalent: it appears in the administrator help
-and in no API operation. Register the firewall in the console, then use this module for the
-switches.
+and in no API operation. Register the firewall through the web admin console, then use this
+module for the switches.
 
 The same applies to clearing a registration and to the separate disable-management
 operation. Both exist in the API, neither can be verified from this side: they have no read
@@ -60,23 +60,25 @@ Get-SfosCentralManagement
 on is accepted, answered `200 Configuration applied successfully.` and not applied, because a
 service that is switched on has to be confirmed by a super admin in the Sophos Central
 console with *Accept services*. There is no API operation for that confirmation. Treat every
-switch here as one-way: what you turn off from PowerShell, you turn back on in the console.
+switch here as one-way: what you turn off through this module, you turn back on through the
+Sophos Central console, not through another call to this cmdlet.
 
 **`Set-SfosCentralManagement` reads the object back and throws when a change did not take
 effect.** A write that reports success and changes nothing is the worst outcome available,
 so the cmdlet does not rely on the status code alone.
 
 **These switches have a third value that no documentation mentions.** After a service is
-switched on in the console, `Get-SfosCentralManagement` reports `WaitingForApproval` for it
-until a super admin accepts it in Sophos Central; only then does it read `Enable`. A `Set`
-may request `Enable` or `Disable`; a field that comes back as `WaitingForApproval` produces a
-warning rather than an error, because the request was accepted and is pending.
+switched on through the web admin console, `Get-SfosCentralManagement` reports
+`WaitingForApproval` for it until a super admin accepts it in Sophos Central; only then does
+it read `Enable`. A `Set` may request `Enable` or `Disable`; a field that comes back as
+`WaitingForApproval` produces a warning rather than an error, because the request was
+accepted and is pending.
 
 **`FWBackup` depends on `CMStatus`.** In the web admin console the configuration backup
 checkbox is nested under *Manage from Sophos Central*. `Set-SfosCentralManagement` refuses to
 set `FWBackup` to `BackupEnable` while the resolved `CMStatus` is `Disable`, and throws a
-message naming both fields rather than sending a combination the console itself cannot
-produce.
+message naming both fields rather than sending a combination the web admin console itself
+cannot produce.
 
 **Nothing here reports the registration state.** Registration and these switches are
 independent according to Sophos: turning a switch off does not end a registration, and a

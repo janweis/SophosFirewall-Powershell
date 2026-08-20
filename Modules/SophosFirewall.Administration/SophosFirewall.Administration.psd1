@@ -60,7 +60,7 @@
             Tags         = @('Sophos', 'Firewall', 'API', 'XGS', 'SFOS', 'Administration', 'Notification', 'SNMP', 'Time', 'ApplianceAccess', 'AdminSettings')
             LicenseUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/blob/main/Modules/SophosFirewall.Administration/LICENSE.txt'
             ProjectUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/tree/main/Modules/SophosFirewall.Administration'
-            ReleaseNotes = 'Added Restart-SfosFirewall and Stop-SfosFirewall (web admin console modes 417/193 - not part of the XML API). Requires SophosFirewall.Core 1.4.0.'
+            ReleaseNotes = 'Added Restart-SfosFirewall and Stop-SfosFirewall, through the web admin console - not part of the XML API. Requires SophosFirewall.Core 1.4.0.'
         }
     }
 }

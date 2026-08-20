@@ -1320,17 +1320,16 @@ function Get-SfosSession {
     XML management API - there is no way to reach the web admin interface through
     Invoke-SfosApi.
 
-    It is UNDOCUMENTED: no Sophos reference describes this mechanism, it is tied to the exact
-    firmware build the login/CSRF/web admin pages were measured against (SFOS 22.0.1.490), and
-    it can change or break on any firmware update without notice. Use it only where a domain
-    module needs a web admin screen that has no equivalent in the XML API - see that module's
-    own documentation for what it is used for and why.
+    It is UNDOCUMENTED: no Sophos reference describes this mechanism, and it can change or
+    break on any firmware update without notice. Use it only where a domain module needs a
+    web admin screen that has no equivalent in the XML API - see that module's own
+    documentation for what it is used for and why.
 
-    Performs the four-step web admin login measured against a live appliance: GET the root
-    page to obtain the session cookie, POST the credentials (mode=151), GET the web admin
-    start page to read the CSRF token out of its HTML, and return everything a subsequent
-    request (Invoke-SfosWebAdminRequest) needs. No token or cookie is cached across calls to
-    this cmdlet - each call opens its own fresh web admin session.
+    Performs a four-step web admin login: GET the root page to obtain the session cookie,
+    POST the credentials, GET the web admin start page to read the CSRF token out of its
+    HTML, and return everything a subsequent request (Invoke-SfosWebAdminRequest) needs. No
+    token or cookie is cached across calls to this cmdlet - each call opens its own fresh web
+    admin session.
 
 .PARAMETER Firewall
     Optional. Host name or IP address of the firewall. If omitted, the value from the current
@@ -1517,25 +1516,25 @@ function Connect-SfosWebAdmin {
     documented XML management API - there is no way to reach the web admin interface through
     Invoke-SfosApi.
 
-    It is UNDOCUMENTED, tied to the exact firmware build it was measured against, and can
-    change or break on any firmware update without notice. Use it only where a domain module
-    needs a web admin screen that has no equivalent in the XML API. Only call a mode you have
-    measured yourself: an unfamiliar mode number is a write against the web admin interface,
-    not necessarily a read, and can change settings or reboot/shut down the appliance instead
-    of just reading data.
+    It is UNDOCUMENTED and can change or break on any firmware update without notice. Use it
+    only where a domain module needs a web admin screen that has no equivalent in the XML
+    API. Only call a mode you have verified yourself: an unfamiliar mode number is a write
+    against the web admin interface, not necessarily a read, and can change settings or
+    reboot/shut down the appliance instead of just reading data.
 
     POSTs to Controller?csrf=<token> with the given mode and JSON body, using the session
     cookie and CSRF token from Connect-SfosWebAdmin, and returns the parsed JSON response. The
-    headers X-Requested-With and Referer are always sent - measured against a live appliance,
-    a request missing them can be answered with the web admin login page (HTML containing
-    'loginstylesheet') instead of the requested data. That case is detected here and turned
-    into a clear error, rather than an opaque parsing failure.
+    headers X-Requested-With and Referer are always sent - a request missing them can be
+    answered with the web admin login page (HTML containing 'loginstylesheet') instead of the
+    requested data. That case is detected here and turned into a clear error, rather than an
+    opaque parsing failure.
 
 .PARAMETER WebAdminSession
     Required. The session context returned by Connect-SfosWebAdmin.
 
 .PARAMETER Mode
-    Required. The web admin controller mode, for example 5001 or 5002.
+    Required. The web admin controller mode to call, as an integer identifying the screen or
+    action on the web admin controller.
 
 .PARAMETER Json
     Optional. The JSON body for this mode, as a compact string. Default '{}'.

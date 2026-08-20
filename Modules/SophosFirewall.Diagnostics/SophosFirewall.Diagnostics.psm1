@@ -3,7 +3,7 @@
 
 <#
 .SYNOPSIS
-    Manages remote support access and reads the web console's log viewer on a Sophos Firewall.
+    Manages remote support access and reads the web admin console's log viewer on a Sophos Firewall.
 
 .DESCRIPTION
     Functions for the MONITOR & ANALYZE > Diagnostics area of the Sophos Firewall
@@ -12,13 +12,13 @@
     admin console and the shell of the firewall for troubleshooting, without needing the
     administrator's own credentials, for a duration the administrator chooses. There is
     exactly one instance of that object per firewall. The log viewer functions read the same
-    log records an administrator sees under Log Viewer in the web console; there is no
+    log records an administrator sees under Log Viewer in the web admin console; there is no
     equivalent read in the XML API.
 
     Total Functions: 14 (4 exported, 10 internal helpers) - see README.md for the full cmdlet
-    table. The web console access path itself (login, CSRF, the console POST) now lives in
-    SophosFirewall.Core as Connect-SfosWebAdmin and Invoke-SfosWebAdminRequest; this module only
-    adds the log-viewer-specific request/response handling on top of it.
+    table. The web admin console access path itself - login, CSRF, the console POST - is
+    implemented in SophosFirewall.Core as Connect-SfosWebAdmin and Invoke-SfosWebAdminRequest.
+    This module adds only the log-viewer-specific request and response handling on top of it.
 
     Connect once with Connect-SfosFirewall, then call the cmdlets in this module without
     repeating the connection parameters.
@@ -38,7 +38,7 @@
 .EXAMPLE
     Get-SfosLog -Category firewall -MaxRecords 50
 
-    Reads 50 firewall log records from the web console's log viewer.
+    Reads 50 firewall log records from the web admin console's log viewer.
 
 .LINK
     https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
@@ -801,16 +801,16 @@ function Select-SfosLogViewerRecordPair {
 
 <#
 .SYNOPSIS
-    Reads the category catalog of the Sophos Firewall web console's log viewer.
+    Reads the category catalog of the Sophos Firewall web admin console's log viewer.
 
 .DESCRIPTION
-    Returns the log viewer's own list of categories (mode 5002 of the console controller),
-    each with the condition the console uses to decide which log records belong to it. This is
-    the self-description that -Category on Get-SfosLog accepts; use it to see what a category
-    key actually matches, or to confirm the set of keys is still current after a firmware
-    update. This is not part of the XML API - see this module's own findings file for the measured
-    access path. Opens its own web console session; the session and its CSRF token are not
-    reused across calls.
+    Returns the log viewer's own list of categories, each with the condition the web admin
+    console uses to decide which log records belong to it. This is the self-description that
+    -Category on Get-SfosLog accepts; use it to see what a category key actually matches, or to
+    confirm the set of keys is still current after a firmware update. This is not part of the
+    XML API; it signs in to the web admin console instead, the same way Get-SfosLog does. Opens
+    its own web admin console session; the session and its CSRF token are not reused across
+    calls.
 
 .PARAMETER Firewall
     Optional. Host name or IP address of the firewall. If omitted, the value from the current
@@ -821,12 +821,12 @@ function Select-SfosLogViewerRecordPair {
     current connection is used.
 
 .PARAMETER Username
-    Optional. User name for the console login. If omitted, the value from the current
-    connection is used.
+    Optional. User name for the web admin console login. If omitted, the value from the
+    current connection is used.
 
 .PARAMETER Password
-    Optional. Password for the console login, as a SecureString. If omitted, the value from
-    the current connection is used.
+    Optional. Password for the web admin console login, as a SecureString. If omitted, the
+    value from the current connection is used.
 
 .PARAMETER SkipCertificateCheck
     Optional. Accepts the firewall certificate without validating it. Use this only for
@@ -845,8 +845,9 @@ function Select-SfosLogViewerRecordPair {
 .OUTPUTS
     System.Management.Automation.PSCustomObject. One object per category, with the properties
     Name (the key accepted by Get-SfosLog -Category), Label (the raw, untranslated label the
-    console stores for it) and Condition (the boolean expression the console evaluates against
-    a record's fields, or $null for the 'all' category, which has none).
+    web admin console stores for it) and Condition (the boolean expression the web admin
+    console evaluates against a record's fields, or $null for the 'all' category, which has
+    none).
 
 .EXAMPLE
     Get-SfosLogCategory
@@ -857,6 +858,10 @@ function Select-SfosLogViewerRecordPair {
     Get-SfosLogCategory | Where-Object Name -eq 'firewall' | Select-Object -ExpandProperty Condition
 
     Shows exactly which fields the 'firewall' category matches.
+
+.NOTES
+    Reading the log viewer's category catalog is not part of the documented XML API. It uses
+    the web admin console the way a browser does and can change with a firmware update.
 
 .LINK
     https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
@@ -1243,55 +1248,22 @@ function Invoke-SfosLogViewerFollowPoll {
 
 <#
 .SYNOPSIS
-    Reads log records from the Sophos Firewall web console's log viewer.
+    Retrieves log records from the Log Viewer of a Sophos Firewall web admin console.
 
 .DESCRIPTION
-    Returns the log records shown by the web admin console under Log Viewer - the same records
-    an administrator sees there, not the XML API, which has no equivalent read for this data.
-    See this module's own findings file for the measured access path and its limits.
+    Returns the log records an administrator sees under Log Viewer in the web admin console.
+    The Sophos Firewall XML API has no equivalent read, so this cmdlet signs in to the web
+    admin console instead and needs an account permitted to view logs there. The console
+    offers no server-side filtering: -Category and -Since are evaluated on the client after the
+    records are fetched, and the built-in field filters (-LogType, -LogComponent, -LogSubtype,
+    -Status, -User, -SourceIP, -DestinationIP, -DestinationPort, -MessageLike) are matched on
+    each record's raw text before it is decoded, so a record that cannot match one of them is
+    never decoded. Nothing on the firewall is changed.
 
-    -Category is a pre-filter only: the console controller ignores it on the server, so it is
-    evaluated here against every fetched record, the same way the console's own log viewer
-    does (see Get-SfosLogCategory for the condition each category actually matches). -Since is
-    likewise applied client-side.
-
-    Depth is reached with ONE call carrying a large limit, never by paging with offset: measured
-    against a live appliance, offset-based paging repeats the same page once it reaches roughly
-    750 records back, silently, with no error and no empty result (see this module's own findings file).
-    -MaxRecords therefore counts the records actually RETURNED, after -Category and -Since have
-    been applied - not the raw records fetched. To reach that count, the cmdlet asks for
-    -MaxRecords records first; if filtering leaves too few and the appliance still had at least
-    that many to give, it asks again with four times the limit, up to five attempts and a limit
-    of 50000 - the appliance's own observed ceiling for a single request (roughly half a year of
-    records on the appliance this was measured against). If the appliance runs out, or the
-    attempt/limit ceiling is reached, before enough matching records were found, the cmdlet warns
-    with the number it did find rather than silently returning fewer than asked for.
-
-    -LogType, -LogComponent, -LogSubtype, -Status, -User, -SourceIP, -DestinationIP,
-    -DestinationPort and -MessageLike are built-in field filters. Unlike -Category and -Since,
-    which are evaluated after every fetched record has already been decoded, these are matched
-    directly on each record's raw JSON text before ConvertFrom-Json runs, so a record that
-    cannot match one of them is never decoded at all - decoding is the expensive part of this
-    cmdlet, measured at roughly 2.5 times the cost of everything else combined (see this
-    module's own findings file). Several values on one of these parameters are OR-combined; different
-    parameters, -Category included, are AND-combined, never accumulated into an OR. They only
-    do exact or substring text matching on one field each; a range comparison such as a port
-    range, or arithmetic across fields, is still a job for Where-Object after the cmdlet, same
-    as it always was.
-
-    By default, each record is displayed in a table sized to that record's own log category -
-    the firewall category shows source/destination address and port columns, the web filter
-    category shows category/url/bytes columns, and so on; a category this module has no table
-    for, and every record shown without -Category or a single-valued -LogType to identify one,
-    falls back to a generic table. Sixteen of the seventeen category views reproduce the column
-    order and labels of the web admin console's own Log Viewer screen; the Firewall view is the
-    one exception and keeps this module's own nine-column choice - see this module's own findings file.
-    Wide categories (Firewall's nine columns, SSL/TLS inspection's fourteen) wrap or truncate in
-    a narrow console window; -List or Select-Object show the same fields without that. -List
-    switches to a one-field-per-line view of the same columns instead of a table; either way,
-    every field the record actually carries is still on the object itself, so
-    Select-Object/Format-Table -Property * still shows everything regardless of which default
-    view was picked.
+    -Category and the field filters are AND-combined; several values on one field filter are
+    OR-combined. The field filters do exact or substring text matching on one field each; a
+    range comparison such as a port range, or arithmetic across fields, is still a job for
+    Where-Object after the cmdlet.
 
 .PARAMETER Category
     Optional. One of the log viewer's own category keys. Default 'all', which returns every
@@ -1300,7 +1272,7 @@ function Invoke-SfosLogViewerFollowPoll {
     A category is not the same thing as a log type, and the two are easy to confuse. -LogType
     matches one field of the record, exactly as the appliance wrote it: Firewall, Event,
     Content Filtering, Anti-Virus, IDP and so on. A category is a condition over several
-    fields, defined by the web console itself - 'admin', for instance, is
+    fields, defined by the web admin console itself - 'admin', for instance, is
     log_type=Event AND log_subtype=Admin.
 
     So they do not line up one to one. Four categories - admin, system, authentication and vpn
@@ -1310,22 +1282,29 @@ function Invoke-SfosLogViewerFollowPoll {
     clearest place to see the mapping.
 
     Which to use: -LogType when you know the raw type - it filters before the records are
-    decoded and is measurably faster. -Category when you want exactly the slice the web console
-    shows. Both can be combined, and both can be combined with -LogSubtype and -LogComponent:
-    -LogType Event -LogSubtype Admin is the fast way to what -Category admin selects.
+    decoded and is measurably faster. -Category when you want exactly the slice the web admin
+    console shows. Both can be combined, and both can be combined with -LogSubtype and
+    -LogComponent: -LogType Event -LogSubtype Admin is the fast way to what -Category admin
+    selects.
 
 .PARAMETER MaxRecords
-    Optional. Number of records to return, counted after -Category and -Since have been
-    applied. Default 200. Reaching this count can take more than one request to the appliance -
-    see the description. Cannot be combined with -All.
+    Optional, default 200. The number of records returned after -Category and -Since have been
+    applied, not the number fetched from the appliance. Depth is reached by requesting a larger
+    limit in a single call, never by paging with an offset: offset-based paging becomes
+    unreliable after a few hundred records and silently repeats an earlier page instead of
+    erroring or returning nothing, so this cmdlet never sends one. If filtering leaves too few
+    matching records and the appliance still had at least that many to give, the request is
+    repeated with four times the limit, up to five attempts and a ceiling of 50000 records for
+    a single request. If the appliance runs out, or the attempt/limit ceiling is reached, before
+    enough matching records were found, the cmdlet returns what it found and warns rather than
+    silently returning fewer than asked for. Cannot be combined with -All.
 
 .PARAMETER All
-    Optional. Returns everything the appliance's log retention holds, in a single request with
-    limit 50000 - the appliance's own observed ceiling (measured at roughly 24600 records, about
-    half a year, taking about 5 seconds). That ceiling is the appliance's log retention, not a
-    limit this module imposes; if the response comes back at exactly 50000 records, the log may
-    hold more and the cmdlet warns that the result can be truncated. -Category and -Since still
-    apply. Cannot be combined with -MaxRecords or -Follow.
+    Optional. Returns everything the appliance's log retention holds, in a single request with a
+    limit of 50000, the ceiling for a single request. That ceiling reflects the appliance's own
+    log retention, not a limit this module imposes; if the response comes back at exactly 50000
+    records, the log may hold more and the cmdlet warns that the result can be truncated.
+    -Category and -Since still apply. Cannot be combined with -MaxRecords or -Follow.
 
 .PARAMETER Since
     Optional. Only returns records at or after this point in time. Applied client-side, after
@@ -1340,15 +1319,16 @@ function Invoke-SfosLogViewerFollowPoll {
 
 .PARAMETER Follow
     Optional. After showing the current backlog (bounded by -MaxRecords, filtered by -Category
-    and -Since exactly as without -Follow), keeps the console session open and streams only the
-    records that arrive afterwards, oldest first, until the caller stops the cmdlet - the
-    equivalent of tail -f for this log viewer. There is no push channel for these records; even
-    the web console's own log viewer only polls, on a fixed interval. -PollIntervalSeconds is
-    therefore the only control over how quickly a new record surfaces here.
+    and -Since exactly as without -Follow), keeps the web admin console session open and
+    streams only the records that arrive afterwards, oldest first, until the caller stops the
+    cmdlet - the equivalent of tail -f for this log viewer. There is no push channel for these
+    records; even the web admin console's own log viewer only polls, on a fixed interval.
+    -PollIntervalSeconds is therefore the only control over how quickly a new record surfaces
+    here.
 
 .PARAMETER PollIntervalSeconds
     Optional. Seconds to wait between polls while -Follow is running. Default 30, the same
-    interval the web console's own log viewer polls on. Has no effect without -Follow.
+    interval the web admin console's own log viewer polls on. Has no effect without -Follow.
 
 .PARAMETER LogType
     Optional. Matches the wire field log_type exactly - the raw type the appliance wrote into
@@ -1357,8 +1337,8 @@ function Invoke-SfosLogViewerFollowPoll {
     filter parameter, including -Category, the result is AND. Matched on the raw record text
     before it is decoded - see the description above.
 
-    This is a different thing from -Category, which is the web console's grouping over several
-    fields. One log type can hold several categories (Event covers admin, system,
+    This is a different thing from -Category, which is the web admin console's grouping over
+    several fields. One log type can hold several categories (Event covers admin, system,
     authentication and vpn) and one category can span several log types. See -Category for the
     full comparison.
 
@@ -1404,12 +1384,12 @@ function Invoke-SfosLogViewerFollowPoll {
     current connection is used.
 
 .PARAMETER Username
-    Optional. User name for the console login. If omitted, the value from the current
-    connection is used.
+    Optional. User name for the web admin console login. If omitted, the value from the
+    current connection is used.
 
 .PARAMETER Password
-    Optional. Password for the console login, as a SecureString. If omitted, the value from
-    the current connection is used.
+    Optional. Password for the web admin console login, as a SecureString. If omitted, the
+    value from the current connection is used.
 
 .PARAMETER SkipCertificateCheck
     Optional. Accepts the firewall certificate without validating it. Use this only for
@@ -1424,14 +1404,15 @@ function Invoke-SfosLogViewerFollowPoll {
 
 .PARAMETER List
     Optional. Shows the default one-field-per-line list view instead of the default table view.
-    Both use the same per-category columns - see the description above - and neither one removes
-    any field from the returned object itself. Prefer -List for the wider categories (Firewall,
-    SSL/TLS inspection) in a narrow console window, where the table view wraps.
+    Both use the same per-category columns, and neither removes any field from the returned
+    object itself - Select-Object or Format-Table -Property * still show everything regardless
+    of which default view was picked. Prefer -List for wide categories, such as Firewall or
+    SSL/TLS inspection, in a narrow console window, where the table view wraps or truncates.
 
 .PARAMETER AsJson
-    Optional. Returns each record exactly as the console decoded it, without the added
-    Datetime property, and without the fields the console's own JSON happens not to have sent
-    for that record type. No default view is applied to this output.
+    Optional. Returns each record exactly as the web admin console decoded it, without the
+    added Datetime property, and without the fields the console's own JSON happens not to have
+    sent for that record type. No default view is applied to this output.
 
 .INPUTS
     None. This cmdlet does not accept pipeline input.
@@ -1441,10 +1422,13 @@ function Invoke-SfosLogViewerFollowPoll {
     fields that record actually carries - an Event record and a Firewall record carry
     different fields. The console's own 'datetime' field is additionally parsed and exposed as
     Datetime ([datetime]); PowerShell property names are case-insensitive, so this replaces
-    rather than duplicates the original field. Returns an empty array, never $null, when
-    nothing matches. Returns the unmodified decoded record when -AsJson is used. With -Follow,
-    records are written to the pipeline one at a time as they are found, in chronological
-    order, and the cmdlet does not return until the caller stops it.
+    rather than duplicates the original field. Records are displayed as a table matching their
+    log category, chosen from -Category, or a single-valued -LogType, or a generic table when
+    neither identifies one; -List shows the same fields one per line instead. Returns an empty
+    array, never $null, when nothing matches. Returns the unmodified decoded record when
+    -AsJson is used. With -Follow, records are written to the pipeline one at a time as they
+    are found, in chronological order, and the cmdlet does not return until the caller stops
+    it.
 
 .EXAMPLE
     Get-SfosLog -MaxRecords 20
@@ -1472,8 +1456,8 @@ function Invoke-SfosLogViewerFollowPoll {
 .EXAMPLE
     Get-SfosLog -All | Where-Object { $_.Datetime -lt (Get-Date).AddMonths(-3) } | Select-Object -First 1
 
-    Reads everything the appliance's log retention holds - typically a few tens of thousands of
-    records, a handful of seconds - and finds the oldest record older than three months.
+    Reads everything the appliance's log retention holds and finds the oldest record older
+    than three months.
 
 .EXAMPLE
     Get-SfosLog -SourceIP '192.0.2.10' -Status 'Deny' -MaxRecords 50
@@ -1494,6 +1478,10 @@ function Invoke-SfosLogViewerFollowPoll {
 
     Shows the same 10 records and the same columns as the previous example, one field per line
     instead of a table.
+
+.NOTES
+    Reading the Log Viewer is not part of the documented XML API. It uses the web admin
+    console the way a browser does and can change with a firmware update.
 
 .LINK
     https://docs.sophos.com/nsg/sophos-firewall/22.0/api/

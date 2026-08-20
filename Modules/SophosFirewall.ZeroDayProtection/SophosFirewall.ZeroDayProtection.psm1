@@ -38,67 +38,67 @@
 #region ZeroDayProtectionSettings
 
 <#
-        .SYNOPSIS
-        Retrieves the zero-day protection settings from a Sophos Firewall.
+.SYNOPSIS
+    Retrieves the zero-day protection settings from a Sophos Firewall.
 
-        .DESCRIPTION
-        Returns the device-wide zero-day protection settings: the cloud datacenter used for
-        sandbox analysis and the file types excluded from that analysis. There is exactly one
-        instance of this object per firewall. The cmdlet only reads; nothing on the firewall is
-        changed. It needs an open connection from Connect-SfosFirewall, or the connection
-        parameters supplied directly.
+.DESCRIPTION
+    Returns the device-wide zero-day protection settings: the cloud datacenter used for
+    sandbox analysis and the file types excluded from that analysis. There is exactly one
+    instance of this object per firewall. The cmdlet only reads; nothing on the firewall is
+    changed. It needs an open connection from Connect-SfosFirewall, or the connection
+    parameters supplied directly.
 
-        .PARAMETER Firewall
-        Optional. Host name or IP address of the firewall. If omitted, the value from the
-        current connection is used.
+.PARAMETER Firewall
+    Optional. Host name or IP address of the firewall. If omitted, the value from the
+    current connection is used.
 
-        .PARAMETER Port
-        Optional. TCP port of the management API, usually 4444. If omitted, the value from
-        the current connection is used.
+.PARAMETER Port
+    Optional. TCP port of the management API, usually 4444. If omitted, the value from
+    the current connection is used.
 
-        .PARAMETER Username
-        Optional. User name for the API login. The account needs read permission for the
-        zero-day protection settings. If omitted, the value from the current connection is
-        used.
+.PARAMETER Username
+    Optional. User name for the API login. The account needs read permission for the
+    zero-day protection settings. If omitted, the value from the current connection is
+    used.
 
-        .PARAMETER Password
-        Optional. Password for the API login, as a SecureString. If omitted, the value from
-        the current connection is used.
+.PARAMETER Password
+    Optional. Password for the API login, as a SecureString. If omitted, the value from
+    the current connection is used.
 
-        .PARAMETER SkipCertificateCheck
-        Optional. Accepts the firewall certificate without validating it. Use this only for
-        appliances that still present a self-signed certificate. If omitted, the certificate
-        is validated.
+.PARAMETER SkipCertificateCheck
+    Optional. Accepts the firewall certificate without validating it. Use this only for
+    appliances that still present a self-signed certificate. If omitted, the certificate
+    is validated.
 
-        .PARAMETER Session
-        Optional. A session object from Connect-SfosFirewall, or the name of a session that
-        was registered with Connect-SfosFirewall -Name. Use it to address a specific firewall
-        when you work with more than one at a time. Any connection parameter you pass
-        explicitly still takes precedence. If omitted, the stored default connection is used.
+.PARAMETER Session
+    Optional. A session object from Connect-SfosFirewall, or the name of a session that
+    was registered with Connect-SfosFirewall -Name. Use it to address a specific firewall
+    when you work with more than one at a time. Any connection parameter you pass
+    explicitly still takes precedence. If omitted, the stored default connection is used.
 
-        .PARAMETER AsXml
-        Optional. Returns the raw XML element sent by the firewall instead of a PowerShell
-        object.
+.PARAMETER AsXml
+    Optional. Returns the raw XML element sent by the firewall instead of a PowerShell
+    object.
 
-        .INPUTS
-        None. This cmdlet does not accept pipeline input.
+.INPUTS
+    None. This cmdlet does not accept pipeline input.
 
-        .OUTPUTS
-        System.Management.Automation.PSCustomObject. One object with the properties
-        DataCenterLocation and ExcludeFileTypes. Returns System.Xml.XmlElement when -AsXml is
-        used.
+.OUTPUTS
+    System.Management.Automation.PSCustomObject. One object with the properties
+    DataCenterLocation and ExcludeFileTypes. Returns System.Xml.XmlElement when -AsXml is
+    used.
 
-        .EXAMPLE
-        Get-SfosZeroDayProtectionSettings
+.EXAMPLE
+    Get-SfosZeroDayProtectionSettings
 
-        Returns the current zero-day protection settings of the firewall of the current
-        connection.
+    Returns the current zero-day protection settings of the firewall of the current
+    connection.
 
-        .LINK
-        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+.LINK
+    https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
 
-        .LINK
-        Set-SfosZeroDayProtectionSettings
+.LINK
+    Set-SfosZeroDayProtectionSettings
 #>
 function Get-SfosZeroDayProtectionSettings {
     # PSUseSingularNouns is suppressed on purpose. 'Settings' is not a plural container here
@@ -162,85 +162,85 @@ function Get-SfosZeroDayProtectionSettings {
 }
 
 <#
-        .SYNOPSIS
-        Updates the zero-day protection settings on a Sophos Firewall.
+.SYNOPSIS
+    Updates the zero-day protection settings on a Sophos Firewall.
 
-        .DESCRIPTION
-        Updates the device-wide zero-day protection settings: the cloud datacenter used for
-        sandbox analysis and the file types excluded from that analysis. It needs an open
-        connection from Connect-SfosFirewall, or the connection parameters supplied directly,
-        and an account with permission to change the zero-day protection settings. The cmdlet
-        reads the current settings first and resends every field, overriding only what you
-        explicitly pass, so a field you do not pass keeps its current value - the firewall
-        replaces the whole object on every update and clears a field that is not sent.
+.DESCRIPTION
+    Updates the device-wide zero-day protection settings: the cloud datacenter used for
+    sandbox analysis and the file types excluded from that analysis. It needs an open
+    connection from Connect-SfosFirewall, or the connection parameters supplied directly,
+    and an account with permission to change the zero-day protection settings. The cmdlet
+    reads the current settings first and resends every field, overriding only what you
+    explicitly pass, so a field you do not pass keeps its current value - the firewall
+    replaces the whole object on every update and clears a field that is not sent.
 
-        Changing the datacenter may cause the loss of analysis for files that are currently
-        being processed by zero-day protection (Sophos admin help).
+    Changing the datacenter may cause the loss of analysis for files that are currently
+    being processed by zero-day protection (Sophos admin help).
 
-        .PARAMETER DataCenterLocation
-        Optional. Cloud datacenter used for sandbox analysis. If omitted, the current value is
-        kept.
+.PARAMETER DataCenterLocation
+    Optional. Cloud datacenter used for sandbox analysis. If omitted, the current value is
+    kept.
 
-        .PARAMETER ExcludeFileTypes
-        Optional. Names of the file types to exclude from zero-day protection analysis. Each
-        name must match an existing FileType object on the firewall - Get-SfosFileType from the
-        SophosFirewall.Web module lists the valid names; an unknown name is rejected with 501.
-        The vendor sample names "Database File", which does not exist on the appliance -
-        the correct name is "Database Files". Pass an empty array to clear the list. The
-        firewall documents a limit of 50 file types (status 502); this cmdlet does not enforce
-        it. If omitted, the current value is kept.
+.PARAMETER ExcludeFileTypes
+    Optional. Names of the file types to exclude from zero-day protection analysis. Each
+    name must match an existing FileType object on the firewall - Get-SfosFileType from the
+    SophosFirewall.Web module lists the valid names; an unknown name is rejected with 501.
+    The vendor sample names "Database File", which does not exist on the appliance -
+    the correct name is "Database Files". Pass an empty array to clear the list. The
+    firewall documents a limit of 50 file types (status 502); this cmdlet does not enforce
+    it. If omitted, the current value is kept.
 
-        .PARAMETER Firewall
-        Optional. Host name or IP address of the firewall. If omitted, the value from the
-        current connection is used.
+.PARAMETER Firewall
+    Optional. Host name or IP address of the firewall. If omitted, the value from the
+    current connection is used.
 
-        .PARAMETER Port
-        Optional. TCP port of the management API, usually 4444. If omitted, the value from
-        the current connection is used.
+.PARAMETER Port
+    Optional. TCP port of the management API, usually 4444. If omitted, the value from
+    the current connection is used.
 
-        .PARAMETER Username
-        Optional. User name for the API login. The account needs permission to change the
-        zero-day protection settings. If omitted, the value from the current connection is
-        used.
+.PARAMETER Username
+    Optional. User name for the API login. The account needs permission to change the
+    zero-day protection settings. If omitted, the value from the current connection is
+    used.
 
-        .PARAMETER Password
-        Optional. Password for the API login, as a SecureString. If omitted, the value from
-        the current connection is used.
+.PARAMETER Password
+    Optional. Password for the API login, as a SecureString. If omitted, the value from
+    the current connection is used.
 
-        .PARAMETER SkipCertificateCheck
-        Optional. Accepts the firewall certificate without validating it. Use this only for
-        appliances that still present a self-signed certificate. If omitted, the certificate
-        is validated.
+.PARAMETER SkipCertificateCheck
+    Optional. Accepts the firewall certificate without validating it. Use this only for
+    appliances that still present a self-signed certificate. If omitted, the certificate
+    is validated.
 
-        .PARAMETER Session
-        Optional. A session object from Connect-SfosFirewall, or the name of a session that
-        was registered with Connect-SfosFirewall -Name. Use it to address a specific firewall
-        when you work with more than one at a time. Any connection parameter you pass
-        explicitly still takes precedence. If omitted, the stored default connection is used.
+.PARAMETER Session
+    Optional. A session object from Connect-SfosFirewall, or the name of a session that
+    was registered with Connect-SfosFirewall -Name. Use it to address a specific firewall
+    when you work with more than one at a time. Any connection parameter you pass
+    explicitly still takes precedence. If omitted, the stored default connection is used.
 
-        .INPUTS
-        None. This cmdlet does not accept pipeline input.
+.INPUTS
+    None. This cmdlet does not accept pipeline input.
 
-        .OUTPUTS
-        None. The cmdlet writes no output and raises an error if the firewall rejects the
-        update.
+.OUTPUTS
+    None. The cmdlet writes no output and raises an error if the firewall rejects the
+    update.
 
-        .EXAMPLE
-        Set-SfosZeroDayProtectionSettings -DataCenterLocation 'eu.sandbox.sophos.com' -WhatIf
+.EXAMPLE
+    Set-SfosZeroDayProtectionSettings -DataCenterLocation 'eu.sandbox.sophos.com' -WhatIf
 
-        Shows what the call would change without sending it to the firewall.
+    Shows what the call would change without sending it to the firewall.
 
-        .EXAMPLE
-        Set-SfosZeroDayProtectionSettings -ExcludeFileTypes 'Audio Files', 'Video Files' -Confirm:$false
+.EXAMPLE
+    Set-SfosZeroDayProtectionSettings -ExcludeFileTypes 'Audio Files', 'Video Files' -Confirm:$false
 
-        Sets the excluded file types, leaving the datacenter untouched, without asking for
-        confirmation. Use this form only in scripts where the value has already been reviewed.
+    Sets the excluded file types, leaving the datacenter untouched, without asking for
+    confirmation. Use this form only in scripts where the value has already been reviewed.
 
-        .LINK
-        https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+.LINK
+    https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
 
-        .LINK
-        Get-SfosZeroDayProtectionSettings
+.LINK
+    Get-SfosZeroDayProtectionSettings
 #>
 function Set-SfosZeroDayProtectionSettings {
     # PSUseSingularNouns is suppressed on purpose. 'Settings' is not a plural container here

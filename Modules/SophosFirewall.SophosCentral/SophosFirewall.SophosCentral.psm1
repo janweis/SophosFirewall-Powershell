@@ -15,7 +15,7 @@
     password of a Sophos Central administrator in the request body. A tenant secured with a
     passkey, or with any other passwordless sign-in, cannot supply those, and the one-time
     password the web admin console accepts instead has no API equivalent. Register the
-    firewall in the console, then use this module for the switches.
+    firewall through the web admin console, then use this module for the switches.
 
     Total Functions: 2 - see README.md for the full cmdlet table.
 
@@ -102,8 +102,10 @@
 
 .OUTPUTS
     System.Management.Automation.PSCustomObject. One object with the properties FWBackup,
-    JoinMethod, UseCentralReporting and CMStatus. Returns System.Xml.XmlElement when -AsXml
-    is used.
+    JoinMethod, UseCentralReporting and CMStatus. UseCentralReporting and CMStatus normally
+    read Enable or Disable, but can also read the undocumented value WaitingForApproval while
+    a service that was just switched on is waiting for a super admin to confirm it in the
+    Sophos Central console. Returns System.Xml.XmlElement when -AsXml is used.
 
 .EXAMPLE
     Get-SfosCentralManagement
@@ -182,11 +184,21 @@ function Get-SfosCentralManagement {
     backup checkbox sits nested under the "Manage from Sophos Central" checkbox. This
     cmdlet refuses to set FWBackup to BackupEnable while CMStatus (whether passed explicitly
     or read back from the firewall) resolves to Disable, and throws instead of sending a
-    combination the firewall's own console cannot produce.
+    combination the firewall's own web admin console cannot produce.
+
+    Switching UseCentralReporting or CMStatus off takes effect immediately. Switching either
+    back on is accepted by the firewall and reported as a success, but has no effect until a
+    super admin confirms the service in the Sophos Central console with Accept services -
+    turning a service back on is not something this cmdlet, or the API behind it, can
+    complete on its own. After every update the cmdlet reads the settings back: a field that
+    still shows its previous value throws, naming the field and the Sophos Central console
+    step it is waiting on; a field that shows the undocumented value WaitingForApproval
+    produces a warning instead, because that outcome means the request was accepted and is
+    pending, not that it failed silently.
 
     This cmdlet changes only EnableCloudCentralManagement. It does not register or
-    unregister the firewall with Sophos Central, and switching CMStatus to Disable does not end an existing
-    registration.
+    unregister the firewall with Sophos Central, and switching CMStatus to Disable does not
+    end an existing registration.
 
 .PARAMETER FWBackup
     Optional. Whether configuration backups are sent to Sophos Central: BackupEnable or
@@ -202,14 +214,15 @@ function Get-SfosCentralManagement {
 
 .PARAMETER UseCentralReporting
     Optional. Whether centralized reporting in Sophos Central is on: Enable or Disable.
-    Corresponds to "Use Sophos Central reporting" in the web admin console. If omitted, the
-    current value is kept.
+    Corresponds to "Use Sophos Central reporting" in the web admin console. Switching this to
+    Enable is accepted by the firewall but not completed by this cmdlet alone - see the
+    description. If omitted, the current value is kept.
 
 .PARAMETER CMStatus
     Optional. Whether the firewall is managed from Sophos Central: Enable or Disable.
-    Corresponds to "Use Sophos Central management" in the web admin console. If omitted, the
-    current value is kept. Switching this off may require the corresponding services to be
-    re-accepted in the Sophos Central console before they resume.
+    Corresponds to "Use Sophos Central management" in the web admin console. Switching this
+    to Enable is accepted by the firewall but not completed by this cmdlet alone - see the
+    description. If omitted, the current value is kept.
 
 .PARAMETER Firewall
     Optional. Host name or IP address of the firewall. If omitted, the value from the
@@ -242,8 +255,9 @@ function Get-SfosCentralManagement {
     None. This cmdlet does not accept pipeline input.
 
 .OUTPUTS
-    None. The cmdlet writes no output and raises an error if the firewall rejects the
-    update.
+    None. The cmdlet writes no output. It throws if the firewall rejects the update, and
+    also if the firewall reports success but a requested change to UseCentralReporting or
+    CMStatus was not applied - see the description.
 
 .EXAMPLE
     Set-SfosCentralManagement -CMStatus Disable -WhatIf

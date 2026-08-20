@@ -52,8 +52,9 @@ that a call passing only one parameter leaves the other one in place.
 **Changing the datacenter may discard analysis in progress**, per the Sophos admin help: files
 currently being processed by zero-day protection lose that analysis when the datacenter changes.
 
-**The 50-file-type limit (status `502`) is documented but not enforced by this module** - it is
-not exercised by a write, to avoid an unnecessary change to a security setting during testing.
+**The 50-file-type limit (status `502`) is documented but not enforced by this module.** This
+module does not count the file types you pass; the firewall rejects a write that exceeds the
+limit with status `502`.
 
 ## License
 

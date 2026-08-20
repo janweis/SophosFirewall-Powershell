@@ -5,13 +5,12 @@
     matching type name. For sixteen of the seventeen categories, the column set and order
     reproduce the web admin console's own Log Viewer screen, read from the appliance's
     LogViewerConf.js (LogViewer.moduleJSON: the ordered column list and label overrides per
-    category) and resolved through common.js (the Language.* string table); every column and
-    order was cross-checked against the console screenshots supplied by the operator. The
-    Firewall category is the one exception and keeps this module's own nine-column choice from
-    before that comparison - see this module's own findings file. The console's "Live PCAP" entry is an
-    action button, not a data field (wire name packetcapturefilter), and is omitted everywhere.
-    Wide categories (Firewall, SSL/TLS inspection) wrap in a narrow console; use -List or
-    Select-Object there. See this module's own findings file and Get-SfosLog's own help.
+    category) and resolved through common.js (the Language.* string table). The Firewall
+    category is the one exception and keeps this module's own nine-column choice. The web admin
+    console's "Live PCAP" entry is an action button, not a data field (wire name
+    packetcapturefilter), and is omitted everywhere. Wide categories (Firewall, SSL/TLS
+    inspection) wrap in a narrow console window; use -List or Select-Object there. See
+    Get-SfosLog's own help for the full explanation.
 -->
 <Configuration>
   <ViewDefinitions>

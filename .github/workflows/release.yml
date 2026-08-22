@@ -119,6 +119,60 @@ jobs:
 
           $moduleNames = '${{ steps.plan.outputs.modules }}' | ConvertFrom-Json
 
+          # Pre-flight: can every dependency actually be resolved the way Publish-Module resolves
+          # them - against the Gallery, not against this checkout?
+          #
+          # Step 1 below validates the manifest with the repository on PSModulePath, so a
+          # dependency sitting right next to the module in Modules/ always resolves and the dry
+          # run comes back green. The real publish asks the Gallery instead, which is a different
+          # question entirely, and that is how a clean dry run was followed by a failed release.
+          # Ask the Gallery here, in both dry and real runs, before anything is uploaded.
+          Write-Host "`n=== Dependency pre-flight ===" -ForegroundColor Cyan
+          $planPosition = @{}
+          for ($i = 0; $i -lt $moduleNames.Count; $i++) { $planPosition[$moduleNames[$i]] = $i }
+          $preflightProblems = @()
+
+          for ($i = 0; $i -lt $moduleNames.Count; $i++) {
+            $name = $moduleNames[$i]
+            $mp = Join-Path $modulesRoot "$name\$name.psd1"
+            if (-not (Test-Path $mp)) { continue }
+            $data = Import-PowerShellDataFile -Path $mp
+            foreach ($dep in @($data.RequiredModules)) {
+              if (-not $dep) { continue }
+              $depName = if ($dep -is [string]) { $dep } else { $dep.ModuleName }
+              $depVer = if ($dep -is [string]) { $null } else { $dep.ModuleVersion }
+              $label = "$name requires $depName$(if ($depVer) { " $depVer" })"
+
+              $inGallery = $false
+              try {
+                $args = @{ Name = $depName; Repository = 'PSGallery'; ErrorAction = 'SilentlyContinue' }
+                if ($depVer) { $args['MinimumVersion'] = $depVer }
+                if (Find-Module @args) { $inGallery = $true }
+              }
+              catch { }
+
+              if ($inGallery) {
+                Write-Host "OK: $label - resolvable in the Gallery"
+              }
+              elseif ($planPosition.ContainsKey($depName) -and $planPosition[$depName] -lt $i) {
+                Write-Host "OK: $label - not in the Gallery yet, published earlier in this run" -ForegroundColor Yellow
+              }
+              elseif ($planPosition.ContainsKey($depName)) {
+                $preflightProblems += "$label - published LATER in this run. The publish order is wrong; move $depName ahead of $name."
+              }
+              else {
+                $preflightProblems += "$label - not in the Gallery and not part of this run. Publish $depName first, or select 'all'."
+              }
+            }
+          }
+
+          if ($preflightProblems) {
+            foreach ($problem in $preflightProblems) { Write-Error $problem }
+            Write-Error "Dependency pre-flight failed. Nothing was published."
+            exit 1
+          }
+          Write-Host "Dependency pre-flight passed." -ForegroundColor Green
+
           $results = @()
 
           foreach ($moduleName in $moduleNames) {
@@ -265,4 +319,5 @@ jobs:
             Write-Error "Could not publish: $(($failed | ForEach-Object { $_.Module }) -join ', '). See table above."
             exit 1
           }
+
 

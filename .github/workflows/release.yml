@@ -168,10 +168,13 @@ jobs:
 
             Write-Host "Versions already in Gallery: $(if ($existingVersions) { $existingVersions -join ', ' } else { '(none)' })"
 
+            # Already at the target version is nothing to do, not a failure. Treating it as one
+            # made a resumed run impossible: after a partial release the modules that did go out
+            # would fail the job for ever after, and the run could never be completed.
             if ($existingVersions -contains $result.Version) {
-              $result.Status = 'Skipped'
-              $result.Detail = "Version $($result.Version) already exists in the Gallery. Publishing is not possible (bump ModuleVersion first)."
-              Write-Error $result.Detail
+              $result.Status = 'AlreadyPublished'
+              $result.Detail = "Version $($result.Version) is already in the Gallery - nothing to do."
+              Write-Host $result.Detail -ForegroundColor Yellow
               $results += $result
               continue
             }
@@ -212,6 +215,29 @@ jobs:
                 $result.Status = 'Published'
                 $result.Detail = "Published $moduleName v$($result.Version) to PowerShell Gallery"
                 Write-Host "OK: $($result.Detail)" -ForegroundColor Green
+
+                # A package is not resolvable the moment it is uploaded - the Gallery indexes it
+                # a few minutes later. Publish-Module resolves RequiredModules through that same
+                # index, so publishing a dependent too early fails with "cannot resolve the module
+                # dependency", even though the dependency went out seconds ago. Wait here rather
+                # than let the next module inherit the race.
+                $deadline = (Get-Date).AddMinutes(15)
+                $indexed = $false
+                while (-not $indexed -and (Get-Date) -lt $deadline) {
+                  Start-Sleep -Seconds 20
+                  $found = Find-Module -Name $moduleName -RequiredVersion $result.Version `
+                    -Repository PSGallery -ErrorAction SilentlyContinue
+                  if ($found) { $indexed = $true }
+                  else { Write-Host "  waiting for the Gallery to index $moduleName v$($result.Version)..." }
+                }
+                if ($indexed) {
+                  Write-Host "OK: $moduleName v$($result.Version) is resolvable in the Gallery" -ForegroundColor Green
+                }
+                else {
+                  $result.Status = 'PublishedNotIndexed'
+                  $result.Detail = "Published, but not resolvable in the Gallery within 15 minutes. Modules depending on it will fail until it appears."
+                  Write-Warning $result.Detail
+                }
               }
               catch {
                 $result.Detail = "Publish-Module failed: $($_.Exception.Message)"
@@ -234,7 +260,9 @@ jobs:
           }
           $summary >> $env:GITHUB_STEP_SUMMARY
 
-          if ($results | Where-Object { $_.Status -eq 'Skipped' }) {
-            Write-Error "One or more modules could not be published. See table above."
+          $failed = @($results | Where-Object { $_.Status -notin @('Published', 'AlreadyPublished', 'DryRun') })
+          if ($failed) {
+            Write-Error "Could not publish: $(($failed | ForEach-Object { $_.Module }) -join ', '). See table above."
             exit 1
           }
+

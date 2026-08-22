@@ -1,6 +1,6 @@
 @{
     RootModule           = 'SophosFirewall.Authentication.psm1'
-    ModuleVersion        = '1.3.5'
+    ModuleVersion        = '1.4.0'
     GUID                 = '3c25abfe-0eba-4bc1-831a-d35445a2fd9f'
     Author               = 'Jan Weis'
     Description          = 'PowerShell module for managing authentication servers, users, groups, guest users, one-time passwords, captive portal and SSO on Sophos XGS / SFOS 22.0 firewalls via API.'
@@ -10,7 +10,7 @@
     RequiredModules      = @(
         @{
             ModuleName    = 'SophosFirewall.Core'
-            ModuleVersion = '1.3.5'
+            ModuleVersion = '1.4.0'
         }
     )
 
@@ -123,7 +123,7 @@
             Tags         = @('Sophos', 'Firewall', 'API', 'XGS', 'SFOS', 'Authentication', 'LDAP', 'RADIUS', 'OTP', 'SSO')
             LicenseUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/blob/main/Modules/SophosFirewall.Authentication/LICENSE.txt'
             ProjectUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/tree/main/Modules/SophosFirewall.Authentication'
-            ReleaseNotes = 'Documentation revised for production use: rewritten cmdlet help, module description and README. Set-SfosGuestUserSettings now asks for confirmation before it writes.'
+            ReleaseNotes = '1.4.0: No functional change in this module. The version numbers of the module collection are aligned, and this module now requires SophosFirewall.Core 1.4.0.'
         }
     }
 }

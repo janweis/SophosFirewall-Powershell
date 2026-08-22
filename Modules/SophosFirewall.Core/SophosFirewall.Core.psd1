@@ -35,7 +35,7 @@
             Tags         = @('Sophos', 'Firewall', 'XGS', 'SFOS', 'API', 'Core', 'Helper')
             LicenseUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/blob/main/Modules/SophosFirewall.Core/LICENSE.txt'
             ProjectUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/tree/main/Modules/SophosFirewall.Core'
-            ReleaseNotes = 'Added Connect-SfosWebAdmin and Invoke-SfosWebAdminRequest, moved here from SophosFirewall.Diagnostics so a second module can reach the web admin interface the same way. This is the Web Admin Console, not the appliance CLI console. Undocumented and firmware-bound - see their own help before using them.'
+            ReleaseNotes = '1.4.0: Adds two further ways to reach the appliance alongside the documented XML API. Connect-SfosWebAdmin and Invoke-SfosWebAdminRequest reach the web admin console for screens the XML API does not cover; both are undocumented and firmware-dependent. Connect-SfosCliConsole, Send-SfosCliInput, Receive-SfosCliOutput and Disconnect-SfosCliConsole reach the appliance device console; only the admin and support accounts may open it, it asks for the account password again, and an open session has to be closed explicitly. New -AcceptLoginDisclaimer switch on the connect cmdlets: where the appliance has a login disclaimer configured, a connection attempt without this switch now reports the disclaimer text instead of failing with an unrelated error, and the switch is the only way to accept it - no cmdlet accepts a disclaimer on the caller''s behalf.'
         }
     }
 }

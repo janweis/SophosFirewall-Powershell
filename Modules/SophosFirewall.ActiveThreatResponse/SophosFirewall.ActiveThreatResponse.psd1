@@ -1,6 +1,6 @@
 @{
     RootModule           = 'SophosFirewall.ActiveThreatResponse.psm1'
-    ModuleVersion        = '1.3.5'
+    ModuleVersion        = '1.4.0'
     GUID                 = '818bf495-5c4e-4bd4-a8e2-fef4b97d2372'
     Author               = 'Jan Weis'
     Description          = 'PowerShell module for managing Active Threat Response on Sophos XGS / SFOS 22.0 firewalls via API: ATP (Sophos X-Ops threat feeds) settings and third-party threat feeds.'
@@ -10,7 +10,7 @@
     RequiredModules      = @(
         @{
             ModuleName    = 'SophosFirewall.Core'
-            ModuleVersion = '1.3.5'
+            ModuleVersion = '1.4.0'
         }
     )
 
@@ -36,7 +36,7 @@
             Tags         = @('Sophos', 'Firewall', 'API', 'XGS', 'SFOS', 'ActiveThreatResponse', 'ATP', 'ThreatFeed')
             LicenseUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/blob/main/Modules/SophosFirewall.ActiveThreatResponse/LICENSE.txt'
             ProjectUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/tree/main/Modules/SophosFirewall.ActiveThreatResponse'
-            ReleaseNotes = 'Documentation revised for production use: rewritten cmdlet help, module description and README.'
+            ReleaseNotes = '1.4.0: No functional change in this module. The version numbers of the module collection are aligned, and this module now requires SophosFirewall.Core 1.4.0.'
         }
     }
 }

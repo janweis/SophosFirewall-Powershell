@@ -1,6 +1,6 @@
 @{
     RootModule           = 'SophosFirewall.Firewall.psm1'
-    ModuleVersion        = '1.3.5'
+    ModuleVersion        = '1.4.0'
     GUID                 = 'fe5a57d4-bdc0-4fce-958d-72bd4c9a77e9'
     Author               = 'Jan Weis'
     Description          = 'PowerShell module for managing firewall rules, rule groups, NAT rules and SSL/TLS inspection on Sophos XGS / SFOS 22.0 firewalls via API.'
@@ -10,7 +10,7 @@
     RequiredModules      = @(
         @{
             ModuleName    = 'SophosFirewall.Core'
-            ModuleVersion = '1.3.5'
+            ModuleVersion = '1.4.0'
         }
     )
 
@@ -47,7 +47,7 @@
             Tags         = @('Sophos', 'Firewall', 'API', 'XGS', 'SFOS', 'NAT', 'TLS', 'Security')
             LicenseUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/blob/main/Modules/SophosFirewall.Firewall/LICENSE.txt'
             ProjectUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/tree/main/Modules/SophosFirewall.Firewall'
-            ReleaseNotes = 'Documentation revised for production use: rewritten cmdlet help, module description and README.'
+            ReleaseNotes = '1.4.0: No functional change in this module. The version numbers of the module collection are aligned, and this module now requires SophosFirewall.Core 1.4.0.'
         }
     }
 }

@@ -1,6 +1,6 @@
 @{
     RootModule           = 'SophosFirewall.ZeroDayProtection.psm1'
-    ModuleVersion        = '1.3.5'
+    ModuleVersion        = '1.4.0'
     GUID                 = 'd37b892a-114a-4ba1-be66-15c102028706'
     Author               = 'Jan Weis'
     Description          = 'PowerShell module for managing zero-day protection settings on Sophos XGS / SFOS 22.0 firewalls via API: the sandbox analysis datacenter and excluded file types.'
@@ -11,7 +11,7 @@
     RequiredModules      = @(
         @{
             ModuleName    = 'SophosFirewall.Core'
-            ModuleVersion = '1.3.5'
+            ModuleVersion = '1.4.0'
         }
     )
 
@@ -29,7 +29,7 @@
             Tags         = @('Sophos', 'Firewall', 'API', 'XGS', 'SFOS', 'ZeroDayProtection', 'Sandbox')
             LicenseUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/blob/main/Modules/SophosFirewall.ZeroDayProtection/LICENSE.txt'
             ProjectUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/tree/main/Modules/SophosFirewall.ZeroDayProtection'
-            ReleaseNotes = 'First release. Adds read and update access to the zero-day protection settings singleton: analysis datacenter location and excluded file types.'
+            ReleaseNotes = '1.4.0: No functional change in this module. The version numbers of the module collection are aligned, and this module now requires SophosFirewall.Core 1.4.0.'
         }
     }
 }

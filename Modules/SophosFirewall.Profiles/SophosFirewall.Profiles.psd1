@@ -1,6 +1,6 @@
 @{
     RootModule           = 'SophosFirewall.Profiles.psm1'
-    ModuleVersion        = '1.3.5'
+    ModuleVersion        = '1.4.0'
     GUID                 = 'cadd6557-33e8-43e1-8169-516eac60dfdb'
     Author               = 'Jan Weis'
     Description          = 'PowerShell module for managing System > Profiles on Sophos XGS / SFOS 22.0 firewalls via API: schedules, access time policies, data transfer policies, decryption profiles and administrator role profiles.'
@@ -11,7 +11,7 @@
     RequiredModules      = @(
         @{
             ModuleName    = 'SophosFirewall.Core'
-            ModuleVersion = '1.3.5'
+            ModuleVersion = '1.4.0'
         }
     )
 
@@ -47,7 +47,7 @@
             Tags         = @('Sophos', 'Firewall', 'API', 'XGS', 'SFOS', 'Profiles', 'Schedule', 'Decryption')
             LicenseUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/blob/main/Modules/SophosFirewall.Profiles/LICENSE.txt'
             ProjectUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/tree/main/Modules/SophosFirewall.Profiles'
-            ReleaseNotes = 'First release. Adds schedules, access time policies, data transfer policies, decryption profiles and administrator role profiles.'
+            ReleaseNotes = '1.4.0: No functional change in this module. The version numbers of the module collection are aligned, and this module now requires SophosFirewall.Core 1.4.0.'
         }
     }
 }

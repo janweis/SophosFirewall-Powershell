@@ -1,5 +1,5 @@
 #requires -Version 5.1
-#requires -Modules @{ ModuleName = 'SophosFirewall.Core'; ModuleVersion = '1.3.5' }
+#requires -Modules @{ ModuleName = 'SophosFirewall.Core'; ModuleVersion = '1.4.0' }
 <#
         .SYNOPSIS
         Manages authentication servers, users, groups, one-time passwords, captive portal and SSO on Sophos Firewall.

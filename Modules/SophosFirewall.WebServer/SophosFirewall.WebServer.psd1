@@ -1,6 +1,6 @@
 @{
     RootModule           = 'SophosFirewall.WebServer.psm1'
-    ModuleVersion        = '1.3.5'
+    ModuleVersion        = '1.4.0'
     GUID                 = '47b5f07d-b08f-426d-bafc-ae25f1cd10ea'
     Author               = 'Jan Weis'
     Description          = 'PowerShell module for managing Web Server Protection (WAF) on Sophos XGS / SFOS 22.0 firewalls via API: web servers, protection policies, authentication policies and templates, slow HTTP protection settings.'
@@ -11,7 +11,7 @@
     RequiredModules      = @(
         @{
             ModuleName    = 'SophosFirewall.Core'
-            ModuleVersion = '1.3.5'
+            ModuleVersion = '1.4.0'
         }
     )
 
@@ -45,7 +45,7 @@
             Tags         = @('Sophos', 'Firewall', 'API', 'XGS', 'SFOS', 'WAF', 'WebServer', 'ReverseProxy')
             LicenseUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/blob/main/Modules/SophosFirewall.WebServer/LICENSE.txt'
             ProjectUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/tree/main/Modules/SophosFirewall.WebServer'
-            ReleaseNotes = '1.3.2: Adds New-SfosWebServerAuthenticationTemplate and Set-SfosWebServerAuthenticationTemplate, uploading the template (and asset files) via the multipart transport added to SophosFirewall.Core 1.3.2. Removing a template is still not possible through the API. 1.3.1: First release. Adds web servers, protection policies, authentication policies and templates, and slow HTTP protection settings.'
+            ReleaseNotes = '1.4.0: No functional change in this module. The version numbers of the module collection are aligned, and this module now requires SophosFirewall.Core 1.4.0.'
         }
     }
 }

@@ -1,6 +1,6 @@
 @{
     RootModule           = 'SophosFirewall.Web.psm1'
-    ModuleVersion        = '1.3.5'
+    ModuleVersion        = '1.4.0'
     GUID                 = '77a63a21-54db-4f49-a7c7-632f520bd61b'
     Author               = 'Jan Weis'
     Description          = 'PowerShell module for managing the web protection area of Sophos XGS / SFOS 22.0 firewalls via API.'
@@ -10,7 +10,7 @@
     RequiredModules      = @(
         @{
             ModuleName    = 'SophosFirewall.Core'
-            ModuleVersion = '1.3.5'
+            ModuleVersion = '1.4.0'
         }
     )
 
@@ -80,7 +80,7 @@
             Tags         = @('Sophos', 'Firewall', 'API', 'XGS', 'SFOS', 'Web', 'WebFilter', 'Security')
             LicenseUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/blob/main/Modules/SophosFirewall.Web/LICENSE.txt'
             ProjectUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/tree/main/Modules/SophosFirewall.Web'
-            ReleaseNotes = 'Set-SfosWebFilterSettings gained -TopImageFile and -BottomImageFile, uploading the block/warn page images through the multipart transport added to SophosFirewall.Core. Both fields are write-only; Get-SfosWebFilterSettings still does not return them.'
+            ReleaseNotes = '1.4.0: No functional change in this module. The version numbers of the module collection are aligned, and this module now requires SophosFirewall.Core 1.4.0.'
         }
     }
 }

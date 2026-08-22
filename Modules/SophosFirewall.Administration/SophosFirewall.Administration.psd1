@@ -60,7 +60,7 @@
             Tags         = @('Sophos', 'Firewall', 'API', 'XGS', 'SFOS', 'Administration', 'Notification', 'SNMP', 'Time', 'ApplianceAccess', 'AdminSettings')
             LicenseUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/blob/main/Modules/SophosFirewall.Administration/LICENSE.txt'
             ProjectUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/tree/main/Modules/SophosFirewall.Administration'
-            ReleaseNotes = 'Added Restart-SfosFirewall and Stop-SfosFirewall, through the web admin console - not part of the XML API. Requires SophosFirewall.Core 1.4.0.'
+            ReleaseNotes = '1.4.0: Adds Restart-SfosFirewall and Stop-SfosFirewall, reaching the appliance through the web admin console because the XML API offers no restart or shutdown operation. New -AcceptLoginDisclaimer switch, matching SophosFirewall.Core: where the appliance has a login disclaimer configured, these cmdlets now report the disclaimer text and require the switch to proceed, instead of failing with an unrelated error.'
         }
     }
 }

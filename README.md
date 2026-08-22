@@ -99,4 +99,5 @@ MIT License - Copyright (c) 2025 Jan Weis
 
 ## Links
 
+- [Changelog](CHANGELOG.md)
 - [Sophos Firewall API Documentation](https://docs.sophos.com/nsg/sophos-firewall/22.0/api/)

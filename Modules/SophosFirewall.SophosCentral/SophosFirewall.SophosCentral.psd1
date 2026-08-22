@@ -1,6 +1,6 @@
 @{
     RootModule           = 'SophosFirewall.SophosCentral.psm1'
-    ModuleVersion        = '1.3.5'
+    ModuleVersion        = '1.4.0'
     GUID                 = 'cecf576f-4bbc-4903-8626-5fc79e8adef3'
     Author               = 'Jan Weis'
     Description          = 'PowerShell module for the SYSTEM > Sophos Central area of Sophos XGS / SFOS 22.0 firewalls via API: the cloud central management switches for reporting, management and configuration backup.'
@@ -11,7 +11,7 @@
     RequiredModules      = @(
         @{
             ModuleName    = 'SophosFirewall.Core'
-            ModuleVersion = '1.3.5'
+            ModuleVersion = '1.4.0'
         }
     )
 
@@ -29,7 +29,7 @@
             Tags         = @('Sophos', 'Firewall', 'API', 'XGS', 'SFOS', 'SophosCentral', 'CentralManagement', 'Registration')
             LicenseUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/blob/main/Modules/SophosFirewall.SophosCentral/LICENSE.txt'
             ProjectUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/tree/main/Modules/SophosFirewall.SophosCentral'
-            ReleaseNotes = 'First release. Adds read and update access to the Sophos Central cloud management switches (EnableCloudCentralManagement), including a read-back check for the case where the firewall reports success without applying the change.'
+            ReleaseNotes = '1.4.0: No functional change in this module. The version numbers of the module collection are aligned, and this module now requires SophosFirewall.Core 1.4.0.'
         }
     }
 }

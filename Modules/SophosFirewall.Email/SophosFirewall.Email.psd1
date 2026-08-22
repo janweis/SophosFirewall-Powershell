@@ -1,6 +1,6 @@
 @{
     RootModule           = 'SophosFirewall.Email.psm1'
-    ModuleVersion        = '1.3.5'
+    ModuleVersion        = '1.4.0'
     GUID                 = '5503ab89-33ba-411d-b3e0-663b5cf824fd'
     Author               = 'Jan Weis'
     Description          = 'PowerShell module for managing email protection on Sophos XGS / SFOS 22.0 firewalls via API: SMTP and POP/IMAP scanning policies, MTA address groups, exception policies, data control lists, SPX, anti-spam rules and the mail configuration.'
@@ -11,7 +11,7 @@
     RequiredModules      = @(
         @{
             ModuleName    = 'SophosFirewall.Core'
-            ModuleVersion = '1.3.5'
+            ModuleVersion = '1.4.0'
         }
     )
 
@@ -97,7 +97,7 @@
             Tags         = @('Sophos', 'Firewall', 'API', 'XGS', 'SFOS', 'Email', 'SMTP', 'MTA', 'AntiSpam')
             LicenseUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/blob/main/Modules/SophosFirewall.Email/LICENSE.txt'
             ProjectUri   = 'https://github.com/janweis/SophosFirewall-PowerShell/tree/main/Modules/SophosFirewall.Email'
-            ReleaseNotes = 'First release. Covers the email area in both of its shapes: SMTP policies, MTA address groups, exception policies and data control lists for MTA mode, anti-spam rules and SMTP malware scanning policies for legacy mode, plus the objects both share - mail configuration, malware protection, POP/IMAP scanning policies, trusted domains and SPX. Relay, smarthost, blocked senders, DKIM and the quarantine digest are read-only.'
+            ReleaseNotes = '1.4.0: No functional change in this module. The version numbers of the module collection are aligned, and this module now requires SophosFirewall.Core 1.4.0.'
         }
     }
 }

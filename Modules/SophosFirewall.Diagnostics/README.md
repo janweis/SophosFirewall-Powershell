@@ -65,6 +65,8 @@ Set-SfosSupportAccess -ConfigOption Disable -Confirm:$false
 Get-SfosLogCategory
 Get-SfosLog -Category firewall -MaxRecords 50
 Get-SfosLog -SourceIP '192.0.2.10' -Status 'Deny' -MaxRecords 50
+Get-SfosLog -Category firewall -ExcludeSourceIP '192.0.2.10' -MaxRecords 50
+Get-SfosLog -AnyIP '192.0.2.10' -DestinationPort '443' -MaxRecords 50
 
 Get-SfosLog -Category firewall -MaxRecords 10          # default table, this module's own column set
 Get-SfosLog -Category firewall -MaxRecords 10 -List    # same columns, one field per line
@@ -78,6 +80,8 @@ Get-SfosLog -Category firewall -MaxRecords 10 -List    # same columns, one field
 | `Set-SfosSupportAccess` | Switches support access on or off and sets its duration. |
 | `Get-SfosLog` | Reads log records from the web admin console's log viewer, with a category pre-filter, built-in field filters matched on the raw record text before decoding, a client-side `-Since` cutoff, and a `-Follow` mode that streams newly arriving records. |
 | `Get-SfosLogCategory` | Lists the log viewer's own categories and the condition each one matches. |
+| `Export-SfosLog` | Captures a `Get-SfosLog` read into a file - same category pre-filter, field filters and `-Since` cutoff - so it can be filtered again later without contacting the appliance. |
+| `Import-SfosLog` | Reads a file written by `Export-SfosLog` back out, applying the same field filters `Get-SfosLog` offers, with no connection to any firewall. |
 | `Invoke-SfosCliCommand` | Runs one or more commands on the appliance's device console and returns the output of each. |
 | `Enter-SfosCliConsole` | Opens an interactive keyboard session on the appliance's device console. |
 
@@ -161,18 +165,53 @@ cmdlet warns that the result can be truncated. `-Category`/`-Since` still apply,
 `-MaxRecords` or with `-Follow`.
 
 **The built-in field filters (`-LogType`, `-LogComponent`, `-LogSubtype`, `-Status`, `-User`,
-`-SourceIP`, `-DestinationIP`, `-DestinationPort`, `-MessageLike`) match on the raw record text,
-before it is decoded - markedly faster than filtering afterwards with `Where-Object`, because
-decoding is the expensive part of processing a record and the pre-filter skips it for every
-record that cannot match.** The gain grows with a sharper filter and shrinks toward nothing on
-one that matches almost everything. Several values on one parameter are OR-combined; different
-parameters, `-Category` included, are AND-combined. They only do exact or substring matching on
-one field each; a range comparison (a port range, arithmetic across fields) is still a job for
+`-SourceIP`, `-DestinationIP`, `-SourcePort`, `-DestinationPort`, `-Protocol`, `-AnyIP`,
+`-AnyPort`, `-MessageLike`, `-Text`) match on the raw record text, before it is decoded -
+markedly faster than filtering afterwards with `Where-Object`, because decoding is the expensive
+part of processing a record and the pre-filter skips it for every record that cannot match.** The
+gain grows with a sharper filter and shrinks toward nothing on one that matches almost everything.
+Several values on one parameter are OR-combined; different parameters, `-Category` included, are
+AND-combined. Every field filter except `-Text` does exact or substring matching on one field
+each; a range comparison (a port range, arithmetic across fields) is still a job for
 `Where-Object` after the cmdlet. The match tolerates both spacings the appliance is known to use
 around the JSON colon and falls back to decoding and comparing on the parsed object - with a
-`-Verbose` message saying so - if a filtered field's own key is present in the fetched records
-but the raw-text match still found nothing, so the built-in filters cannot silently return too
-little if the appliance's JSON formatting ever changes.
+`-Verbose` message saying so - if a filtered field's own key is present in the fetched records but
+the raw-text match still found nothing, so the built-in filters cannot silently return too little
+if the appliance's JSON formatting ever changes.
+
+**`-Protocol` matches the wire field `protocol` exactly, but its values are not consistent across
+the log.** Some protocols are logged by name (`TCP`, `UDP`), others by number (for example `2`).
+This parameter never translates between the two forms - it compares whatever the appliance
+actually sent, so `-Protocol ICMP` finds nothing if that protocol happens to be logged as a
+number on this appliance. Inspect a few records with `-AsJson` first if the wire form for a given
+protocol is not already known.
+
+**`-Text` is not tied to one wire field like every filter above it - it matches when the search
+text appears in the *value* of any field the record carries, and only in a value, never in a
+field name.** A naive search over a record's whole raw JSON text would treat the field name
+`"dst_port"` as a hit for `-Text 'port'` and return every record that has a destination port at
+all, regardless of what that record actually contains - which is worse than no filter, because
+the result still looks plausible. `-Text` is built to search values only, so `-Text 'port'`
+returns nothing unless the word 'port' genuinely appears inside some field's value. Several
+values are OR-combined the same way as every other filter, and `-ExcludeText` is its negated
+counterpart.
+
+**Every field filter has an `Exclude*` counterpart** (`-ExcludeLogType`, `-ExcludeStatus`,
+`-ExcludeSourceIP`, `-ExcludeAnyIP`, `-ExcludeMessageLike`, and so on) **that keeps everything
+except a match on the same terms.** Several values on one `Exclude*` parameter are OR-combined
+the same way an include filter's values are: `-ExcludeStatus Allow,Reject` drops a record
+matching either one. An `Exclude*` filter never drops a record that does not carry the field it
+inspects at all - `-ExcludeMessageLike` does not discard the many records that have no `message`
+field - which is the entire point of it being a negation rather than an inverted `Where-Object`
+clause run after the fact.
+
+**The `Any` prefix means "either side": `-AnyIP` and `-AnyPort` each match either side of a
+connection at once** - `-AnyIP` matches `src_ip` or `dst_ip`, `-AnyPort` matches `src_port` or
+`dst_port` - so a single value finds an address or port regardless of which side of the
+connection it was on. `-SourceIP`/`-DestinationIP` and `-SourcePort`/`-DestinationPort` (with
+their `Exclude*` counterparts) remain available to pin down one side only. `-AnyPort` is not
+named `-Port` because `-Port` is already `Get-SfosLog`'s own connection parameter (the TCP
+management port).
 
 **`Get-SfosLog`'s default output is a table sized to the record's own log category, not a
 generic dump.** Sixteen of the seventeen category views reproduce the column order and labels
@@ -202,6 +241,32 @@ first; if the oldest record it gets back still looks newer than the last one alr
 gap was not bridged and the same poll asks again with four times the limit, up to three attempts
 before it gives up and warns - lower `-PollIntervalSeconds` if that happens often, so each poll
 has fewer new records to catch up on.
+
+## Capturing a read once, filtering it many times (`Export-SfosLog` / `Import-SfosLog`)
+
+`Export-SfosLog` runs the same fetch `Get-SfosLog` runs - the same category pre-filter, the same
+built-in field filters, the same client-side `-Since` cutoff - and writes the exact raw record
+text to a file instead of returning it to the pipeline. `Import-SfosLog` reads that file back,
+applying any of the same field filters `Get-SfosLog` offers, through the very same matching
+helpers, so a filtered read from the file never disagrees with a filtered read from the live
+appliance. No connection parameter exists on `Import-SfosLog`; nothing is contacted.
+
+This is for a log that rotates before every follow-up question about it has been asked, or for
+not asking the appliance again for every new filter. `-Category`, `-Since`, `-MaxRecords` and
+`-All` are not available on `Import-SfosLog` - they already decided which records went into the
+file when `Export-SfosLog` ran, and cannot be widened afterwards without a new capture.
+
+**The file records what it does not contain.** Alongside the captured records, it carries the
+firewall the capture came from, the category and `-Since` cutoff requested, every field filter
+already applied at capture time, the record count, and the timestamp of the newest captured
+record on the appliance's own clock (`ExportedAt` - not the exporting machine's clock, and left
+out entirely when nothing was captured, since there is no other way to ask the appliance for its
+current time through this transport). `Import-SfosLog` warns and names every filter that was
+already applied, so a narrowed capture is never read back as if it were complete.
+
+**`Export-SfosLog` refuses to overwrite an existing file without `-Force`.** `-WhatIf` still reads
+the log records from the appliance - the same way `Set-SfosSupportAccess` still reads the current
+state under `-WhatIf` - but shows what would be written and never touches the file system.
 
 ## Limits
 

@@ -72,6 +72,33 @@
     Get-SfosLogViewerRecordPage, that only the records passing the pre-filter are ever handed to
     ConvertFrom-Json, not every record the appliance returned.
 
+    Get-SfosLog tolerates the raw syslog stream carrying entries the appliance itself leaves
+    empty: a null or empty/whitespace-only entry is dropped before decoding, and an entry that
+    is not valid JSON is skipped with a Verbose message rather than aborting the whole page -
+    both proven by returning exactly the valid records on either side, without error.
+    -MessageLike is [string[]], matching the other eight field filters: several values
+    OR-combine on the message field, and -MessageLike still AND-combines with a different field
+    filter such as -SourceIP.
+
+    Every built-in field filter has an Exclude* counterpart (-ExcludeStatus, -ExcludeUser, ...):
+    it removes exactly the matching records, removes all of them when given several OR-combined
+    values, AND-combines with an include filter on a different field, and - the defining rule of
+    negation here - never drops a record that does not carry the excluded field at all, checked
+    directly against both Test-SfosLogViewerRawFieldMatch (the pre-filter) and
+    Test-SfosLogViewerDecodedFieldMatch (the decode fallback). -AnyIP and -AnyPort match either
+    side of a connection (src_ip/dst_ip, src_port/dst_port) and nothing else; -SourcePort -
+    previously missing while -DestinationPort already existed - matches only the source side; and
+    -AnyIP still AND-combines with a single-sided filter such as -DestinationPort.
+
+    -Protocol is an exact-match field filter like the others above - including that it never
+    translates between the name and number forms the appliance logs a protocol under. -Text has
+    no fixed wire field: it matches when the search text is found in the VALUE of any field the
+    record carries. Coverage: a match found in two different fields; ORing two values; ANDing
+    with a field filter; -ExcludeText keeping a record where the text is in no field at all; and
+    - the one test this filter exists for - a search term that occurs only inside a field NAME
+    (such as 'port' inside dst_port) returning no records rather than every record, both on the
+    live path and the same result read back through Import-SfosLog from an exported file.
+
     Get-SfosLog's default table/list views (SophosFirewall.Diagnostics.Format.ps1xml): the
     manifest names the format file and it is well-formed XML the module loads without error; the
     firewall table view lists exactly its nine specified columns in the specified order, checked
@@ -95,6 +122,16 @@
     itself is closed even when a command fails, and the failure still propagates; a session
     supplied through -CliSession is reused and left open; and -WhatIf still runs the menu
     navigation but never sends the command itself, closing its own session regardless.
+
+    Export-SfosLog captures a Get-SfosLog read to a file; Import-SfosLog reads it back without
+    contacting any firewall. Coverage: a round trip through Export/Import returns the same
+    objects, field by field, that Get-SfosLog itself returns for the same raw records; an
+    include filter, an exclude filter and a both-sided filter each give the same result applied
+    through Import-SfosLog against a file as applied live through Get-SfosLog; refusing to
+    overwrite an existing file without -Force and overwriting it with -Force; -WhatIf writing no
+    file; -PassThru returning the written file; Import-SfosLog warning and naming the filters a
+    file was captured with, and not warning for an unfiltered capture; and a missing, unrelated
+    or unparsable file each throwing an error that names the path.
 
 .NOTES
     Minimum supported PowerShell version: 5.1
@@ -194,11 +231,11 @@ Describe 'Module Loading' {
         Get-Module SophosFirewall.Core | Should -Not -BeNullOrEmpty
     }
 
-    It 'Should export exactly 6 functions' {
-        (Get-Module SophosFirewall.Diagnostics).ExportedFunctions.Count | Should -Be 6
+    It 'Should export exactly 8 functions' {
+        (Get-Module SophosFirewall.Diagnostics).ExportedFunctions.Count | Should -Be 8
     }
 
-    It 'Manifest FunctionsToExport should list exactly 6 functions, matching the loaded module' {
+    It 'Manifest FunctionsToExport should list exactly 8 functions, matching the loaded module' {
         $modulesDir = Join-Path (Split-Path -Parent $PSScriptRoot) 'Modules'
         $manifestPath = Join-Path $modulesDir 'SophosFirewall.Diagnostics\SophosFirewall.Diagnostics.psd1'
 
@@ -211,8 +248,8 @@ Describe 'Module Loading' {
             $env:PSModulePath = $originalModulePath
         }
 
-        $manifest.ExportedFunctions.Count | Should -Be 6
-        @($manifest.ExportedFunctions.Keys | Sort-Object) | Should -Be @('Enter-SfosCliConsole', 'Get-SfosLog', 'Get-SfosLogCategory', 'Get-SfosSupportAccess', 'Invoke-SfosCliCommand', 'Set-SfosSupportAccess')
+        $manifest.ExportedFunctions.Count | Should -Be 8
+        @($manifest.ExportedFunctions.Keys | Sort-Object) | Should -Be @('Enter-SfosCliConsole', 'Export-SfosLog', 'Get-SfosLog', 'Get-SfosLogCategory', 'Get-SfosSupportAccess', 'Import-SfosLog', 'Invoke-SfosCliCommand', 'Set-SfosSupportAccess')
     }
 }
 
@@ -221,6 +258,7 @@ $script:CmdletParameterCases = @(
     @{ Function = 'Set-SfosSupportAccess' }
     @{ Function = 'Get-SfosLog' }
     @{ Function = 'Get-SfosLogCategory' }
+    @{ Function = 'Export-SfosLog' }
     @{ Function = 'Invoke-SfosCliCommand' }
     @{ Function = 'Enter-SfosCliConsole' }
 )
@@ -272,6 +310,25 @@ Describe 'Cmdlet existence and parameters' {
         $cmd = Get-Command Invoke-SfosCliCommand -Module SophosFirewall.Diagnostics
         $cmd.Parameters.Keys | Should -Contain 'WhatIf'
         $cmd.Parameters.Keys | Should -Contain 'Confirm'
+    }
+
+    It 'Export-SfosLog supports ShouldProcess' {
+        $cmd = Get-Command Export-SfosLog -Module SophosFirewall.Diagnostics
+        $cmd.Parameters.Keys | Should -Contain 'WhatIf'
+        $cmd.Parameters.Keys | Should -Contain 'Confirm'
+    }
+
+    It 'Import-SfosLog has no connection parameters - it never contacts a firewall' {
+        $cmd = Get-Command Import-SfosLog -Module SophosFirewall.Diagnostics
+        foreach ($connParam in 'Firewall', 'Port', 'Username', 'Password', 'SkipCertificateCheck', 'Session') {
+            $cmd.Parameters.Keys | Should -Not -Contain $connParam
+        }
+        $cmd.Parameters.Keys | Should -Contain 'Path'
+        $cmd.Parameters.Keys | Should -Contain 'SourceIP'
+        $cmd.Parameters.Keys | Should -Not -Contain 'Category'
+        $cmd.Parameters.Keys | Should -Not -Contain 'Since'
+        $cmd.Parameters.Keys | Should -Not -Contain 'MaxRecords'
+        $cmd.Parameters.Keys | Should -Not -Contain 'All'
     }
 }
 
@@ -1797,6 +1854,685 @@ Describe 'Get-SfosLog field filters' {
 }
 
 # ------------------------------------------------------------------------------------------
+# -Protocol matches the wire field protocol exactly, like every other single-field filter; it
+# does not translate between the name and number forms the appliance uses inconsistently. -Text
+# is different from every other filter: it has no fixed wire field at all, and matches when the
+# search text appears in the VALUE of any field the record carries - never in a field name. The
+# critical case is a search term that only ever occurs as a field name (e.g. 'port' inside
+# "dst_port"): that must return nothing, not every record.
+
+Describe 'Get-SfosLog -Protocol and -Text' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = '192.0.2.1'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+
+        $script:LoginOkJson = '{"status":200}'
+        $script:CsrfHtml = '<html><script>Cyberoam.c' + '$rFt0k3n' + " = 'tok123';</script></html>"
+    }
+
+    It 'Protocol filters to an exact match on the raw record text' {
+        $records = @(
+            (@{ id = 1; protocol = 'TCP' } | ConvertTo-Json -Compress),
+            (@{ id = 2; protocol = 'UDP' } | ConvertTo-Json -Compress),
+            (@{ id = 3; protocol = 'TCP' } | ConvertTo-Json -Compress)
+        )
+        $script:Page = @{ status = 200; limit = 200; offset = 0; syslog = $records } | ConvertTo-Json -Depth 5 -Compress
+
+        Mock -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -MockWith {
+            if ($Body -like 'mode=151*') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:LoginOkJson } }
+            if ($Uri -like '*/webconsole/webpages/index.jsp') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:CsrfHtml } }
+            if ($Body -like 'mode=5001*') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:Page } }
+            return [PSCustomObject]@{ StatusCode = 200; Content = '' }
+        }
+
+        $result = Get-SfosLog -Protocol 'TCP' @conn -AsJson -WarningAction SilentlyContinue
+
+        @($result.id | Sort-Object) | Should -Be @(1, 3)
+    }
+
+    It 'Protocol does not translate between a name and a number - matches only the exact wire value' {
+        $records = @(
+            (@{ id = 1; protocol = 'ICMP' } | ConvertTo-Json -Compress),
+            (@{ id = 2; protocol = '1' } | ConvertTo-Json -Compress)  # same protocol, logged as a number on this record
+        )
+        $script:Page = @{ status = 200; limit = 200; offset = 0; syslog = $records } | ConvertTo-Json -Depth 5 -Compress
+
+        Mock -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -MockWith {
+            if ($Body -like 'mode=151*') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:LoginOkJson } }
+            if ($Uri -like '*/webconsole/webpages/index.jsp') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:CsrfHtml } }
+            if ($Body -like 'mode=5001*') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:Page } }
+            return [PSCustomObject]@{ StatusCode = 200; Content = '' }
+        }
+
+        $result = Get-SfosLog -Protocol 'ICMP' @conn -AsJson -WarningAction SilentlyContinue
+
+        @($result.id) | Should -Be @(1)
+    }
+
+    It 'ExcludeProtocol removes exactly the matching records and keeps the rest' {
+        $records = @(
+            (@{ id = 1; protocol = 'TCP' } | ConvertTo-Json -Compress),
+            (@{ id = 2; protocol = 'UDP' } | ConvertTo-Json -Compress)
+        )
+        $script:Page = @{ status = 200; limit = 200; offset = 0; syslog = $records } | ConvertTo-Json -Depth 5 -Compress
+
+        Mock -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -MockWith {
+            if ($Body -like 'mode=151*') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:LoginOkJson } }
+            if ($Uri -like '*/webconsole/webpages/index.jsp') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:CsrfHtml } }
+            if ($Body -like 'mode=5001*') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:Page } }
+            return [PSCustomObject]@{ StatusCode = 200; Content = '' }
+        }
+
+        $result = Get-SfosLog -ExcludeProtocol 'TCP' @conn -AsJson -WarningAction SilentlyContinue
+
+        @($result.id) | Should -Be @(2)
+    }
+
+    It 'Text matches a value found in different fields, not one fixed wire field' {
+        $records = @(
+            (@{ id = 1; src_ip = '192.0.2.10'; message = 'nothing relevant' } | ConvertTo-Json -Compress),  # match in src_ip
+            (@{ id = 2; src_ip = '198.51.100.1'; message = 'seen from 192.0.2.10 earlier' } | ConvertTo-Json -Compress),  # match in message
+            (@{ id = 3; src_ip = '198.51.100.2'; message = 'unrelated' } | ConvertTo-Json -Compress)  # no match anywhere
+        )
+        $script:Page = @{ status = 200; limit = 200; offset = 0; syslog = $records } | ConvertTo-Json -Depth 5 -Compress
+
+        Mock -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -MockWith {
+            if ($Body -like 'mode=151*') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:LoginOkJson } }
+            if ($Uri -like '*/webconsole/webpages/index.jsp') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:CsrfHtml } }
+            if ($Body -like 'mode=5001*') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:Page } }
+            return [PSCustomObject]@{ StatusCode = 200; Content = '' }
+        }
+
+        $result = Get-SfosLog -Text '192.0.2.10' @conn -AsJson -WarningAction SilentlyContinue
+
+        @($result.id | Sort-Object) | Should -Be @(1, 2)
+    }
+
+    It 'Text with a word that only occurs as a field name returns no records - the critical case this filter exists to get right' {
+        $records = @(
+            (@{ id = 1; dst_port = '443'; hb_status = 'No Heartbeat' } | ConvertTo-Json -Compress),
+            (@{ id = 2; dst_port = '8080'; hb_status = 'No Heartbeat' } | ConvertTo-Json -Compress)
+        )
+        $script:Page = @{ status = 200; limit = 200; offset = 0; syslog = $records } | ConvertTo-Json -Depth 5 -Compress
+
+        Mock -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -MockWith {
+            if ($Body -like 'mode=151*') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:LoginOkJson } }
+            if ($Uri -like '*/webconsole/webpages/index.jsp') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:CsrfHtml } }
+            if ($Body -like 'mode=5001*') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:Page } }
+            return [PSCustomObject]@{ StatusCode = 200; Content = '' }
+        }
+
+        # 'port' occurs only inside the field NAME "dst_port" on both records, never inside a
+        # field VALUE - a naive whole-record-text search would match both records here.
+        $result = Get-SfosLog -Text 'port' @conn -AsJson -WarningAction SilentlyContinue
+
+        @($result) | Should -BeNullOrEmpty
+    }
+
+    It 'ORs two -Text values: a record matching either one is kept' {
+        $records = @(
+            (@{ id = 1; message = 'alpha' } | ConvertTo-Json -Compress),
+            (@{ id = 2; message = 'beta' } | ConvertTo-Json -Compress),
+            (@{ id = 3; message = 'gamma' } | ConvertTo-Json -Compress)
+        )
+        $script:Page = @{ status = 200; limit = 200; offset = 0; syslog = $records } | ConvertTo-Json -Depth 5 -Compress
+
+        Mock -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -MockWith {
+            if ($Body -like 'mode=151*') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:LoginOkJson } }
+            if ($Uri -like '*/webconsole/webpages/index.jsp') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:CsrfHtml } }
+            if ($Body -like 'mode=5001*') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:Page } }
+            return [PSCustomObject]@{ StatusCode = 200; Content = '' }
+        }
+
+        $result = Get-SfosLog -Text 'alpha', 'beta' @conn -AsJson -WarningAction SilentlyContinue
+
+        @($result.id | Sort-Object) | Should -Be @(1, 2)
+    }
+
+    It 'ANDs -Text with a field filter (-Status)' {
+        $records = @(
+            (@{ id = 1; status = 'Deny'; message = 'alpha' } | ConvertTo-Json -Compress),   # Text hit, Status hit - kept
+            (@{ id = 2; status = 'Allow'; message = 'alpha' } | ConvertTo-Json -Compress),  # Text hit, Status miss - dropped
+            (@{ id = 3; status = 'Deny'; message = 'other' } | ConvertTo-Json -Compress)    # Text miss - dropped
+        )
+        $script:Page = @{ status = 200; limit = 200; offset = 0; syslog = $records } | ConvertTo-Json -Depth 5 -Compress
+
+        Mock -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -MockWith {
+            if ($Body -like 'mode=151*') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:LoginOkJson } }
+            if ($Uri -like '*/webconsole/webpages/index.jsp') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:CsrfHtml } }
+            if ($Body -like 'mode=5001*') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:Page } }
+            return [PSCustomObject]@{ StatusCode = 200; Content = '' }
+        }
+
+        $result = Get-SfosLog -Text 'alpha' -Status 'Deny' @conn -AsJson -WarningAction SilentlyContinue
+
+        @($result.id) | Should -Be @(1)
+    }
+
+    It 'ExcludeText removes only the matching records and keeps everything else, including a record where the text appears nowhere' {
+        $records = @(
+            (@{ id = 1; src_ip = '192.0.2.10'; message = 'first' } | ConvertTo-Json -Compress),   # match in src_ip - dropped
+            (@{ id = 2; src_ip = '198.51.100.1'; message = 'saw 192.0.2.10 earlier' } | ConvertTo-Json -Compress),  # match in message - dropped
+            (@{ id = 3; src_ip = '198.51.100.2'; message = 'clean' } | ConvertTo-Json -Compress)   # no match anywhere - kept
+        )
+        $script:Page = @{ status = 200; limit = 200; offset = 0; syslog = $records } | ConvertTo-Json -Depth 5 -Compress
+
+        Mock -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -MockWith {
+            if ($Body -like 'mode=151*') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:LoginOkJson } }
+            if ($Uri -like '*/webconsole/webpages/index.jsp') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:CsrfHtml } }
+            if ($Body -like 'mode=5001*') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:Page } }
+            return [PSCustomObject]@{ StatusCode = 200; Content = '' }
+        }
+
+        $result = Get-SfosLog -ExcludeText '192.0.2.10' @conn -AsJson -WarningAction SilentlyContinue
+
+        @($result.id) | Should -Be @(3)
+    }
+
+    It 'an ExcludeText filter never drops a record - decoded fallback, matched the same way as the raw pre-filter' {
+        InModuleScope SophosFirewall.Diagnostics {
+            $filter = Get-SfosLogViewerFieldFilter -BoundParameters @{ ExcludeText = @('foo') }
+
+            $withMatch = [PSCustomObject]@{ id = 2; message = 'a foo here' }
+            $withoutMatch = [PSCustomObject]@{ id = 3; message = 'nothing relevant' }
+
+            Test-SfosLogViewerDecodedFieldMatch -Record $withMatch -FieldFilter $filter | Should -BeFalse
+            Test-SfosLogViewerDecodedFieldMatch -Record $withoutMatch -FieldFilter $filter | Should -BeTrue
+        }
+    }
+}
+
+# ------------------------------------------------------------------------------------------
+# Measured against a live appliance: the syslog array mode 5001 returns occasionally carries
+# an entry that is $null or an empty/whitespace-only string, or one that is not valid JSON.
+# Get-SfosLog has to skip those quietly rather than surface a PowerShell binding error for
+# every one of them while the rest of the page is perfectly usable.
+
+Describe 'Get-SfosLog tolerates empty and malformed raw records' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = '192.0.2.1'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+
+        $script:LoginOkJson = '{"status":200}'
+        $script:CsrfHtml = '<html><script>Cyberoam.c' + '$rFt0k3n' + " = 'tok123';</script></html>"
+    }
+
+    It 'drops null and empty entries in the raw stream and returns only the valid records, without erroring' {
+        $records = @(
+            (@{ id = 1; message = 'first' } | ConvertTo-Json -Compress),
+            '',
+            $null,
+            (@{ id = 2; message = 'second' } | ConvertTo-Json -Compress)
+        )
+        $script:Page = @{ status = 200; limit = 200; offset = 0; syslog = $records } | ConvertTo-Json -Depth 5 -Compress
+
+        Mock -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -MockWith {
+            if ($Body -like 'mode=151*') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:LoginOkJson } }
+            if ($Uri -like '*/webconsole/webpages/index.jsp') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:CsrfHtml } }
+            if ($Body -like 'mode=5001*') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:Page } }
+            return [PSCustomObject]@{ StatusCode = 200; Content = '' }
+        }
+
+        $script:Result = $null
+        { $script:Result = Get-SfosLog @conn -AsJson -WarningAction SilentlyContinue } | Should -Not -Throw
+
+        @($script:Result.id | Sort-Object) | Should -Be @(1, 2)
+    }
+
+    It 'skips a record that is not valid JSON and still returns the records around it' {
+        $records = @(
+            (@{ id = 1; message = 'ok before' } | ConvertTo-Json -Compress),
+            '{not valid json',
+            (@{ id = 2; message = 'ok after' } | ConvertTo-Json -Compress)
+        )
+        $script:Page = @{ status = 200; limit = 200; offset = 0; syslog = $records } | ConvertTo-Json -Depth 5 -Compress
+
+        Mock -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -MockWith {
+            if ($Body -like 'mode=151*') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:LoginOkJson } }
+            if ($Uri -like '*/webconsole/webpages/index.jsp') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:CsrfHtml } }
+            if ($Body -like 'mode=5001*') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:Page } }
+            return [PSCustomObject]@{ StatusCode = 200; Content = '' }
+        }
+
+        $allOutput = Get-SfosLog @conn -AsJson -Verbose -WarningAction SilentlyContinue 4>&1
+        $verboseMessages = @($allOutput | Where-Object { $_ -is [System.Management.Automation.VerboseRecord] })
+        $result = @($allOutput | Where-Object { $_ -isnot [System.Management.Automation.VerboseRecord] })
+
+        @($result.id | Sort-Object) | Should -Be @(1, 2)
+        ($verboseMessages -join ' ') | Should -BeLike '*skip*'
+    }
+}
+
+# ------------------------------------------------------------------------------------------
+# -MessageLike is [string[]], like the other eight built-in field filters, so several values
+# are OR-combined on the same field while different field filters still AND together.
+
+Describe 'Get-SfosLog -MessageLike accepts multiple values' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = '192.0.2.1'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+
+        $script:LoginOkJson = '{"status":200}'
+        $script:CsrfHtml = '<html><script>Cyberoam.c' + '$rFt0k3n' + " = 'tok123';</script></html>"
+    }
+
+    It 'Get-SfosLog declares MessageLike as string[]' {
+        $cmd = Get-Command Get-SfosLog -Module SophosFirewall.Diagnostics
+        $cmd.Parameters['MessageLike'].ParameterType | Should -Be ([string[]])
+    }
+
+    It 'ORs two -MessageLike values: a record matching either one is kept' {
+        $records = @(
+            (@{ id = 1; message = 'connection timeout on port 443' } | ConvertTo-Json -Compress),
+            (@{ id = 2; message = 'authentication failure for user admin' } | ConvertTo-Json -Compress),
+            (@{ id = 3; message = 'clean shutdown' } | ConvertTo-Json -Compress)
+        )
+        $script:Page = @{ status = 200; limit = 200; offset = 0; syslog = $records } | ConvertTo-Json -Depth 5 -Compress
+
+        Mock -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -MockWith {
+            if ($Body -like 'mode=151*') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:LoginOkJson } }
+            if ($Uri -like '*/webconsole/webpages/index.jsp') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:CsrfHtml } }
+            if ($Body -like 'mode=5001*') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:Page } }
+            return [PSCustomObject]@{ StatusCode = 200; Content = '' }
+        }
+
+        $result = Get-SfosLog -MessageLike 'timeout', 'failure' @conn -AsJson -WarningAction SilentlyContinue
+
+        @($result.id | Sort-Object) | Should -Be @(1, 2)
+    }
+
+    It 'ANDs -MessageLike with -SourceIP: only a record matching both is kept' {
+        $records = @(
+            (@{ id = 1; message = 'connection timeout'; src_ip = '192.0.2.10' } | ConvertTo-Json -Compress),  # both match -> kept
+            (@{ id = 2; message = 'connection timeout'; src_ip = '192.0.2.99' } | ConvertTo-Json -Compress),  # message only -> dropped
+            (@{ id = 3; message = 'clean shutdown'; src_ip = '192.0.2.10' } | ConvertTo-Json -Compress)       # src_ip only -> dropped
+        )
+        $script:Page = @{ status = 200; limit = 200; offset = 0; syslog = $records } | ConvertTo-Json -Depth 5 -Compress
+
+        Mock -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -MockWith {
+            if ($Body -like 'mode=151*') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:LoginOkJson } }
+            if ($Uri -like '*/webconsole/webpages/index.jsp') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:CsrfHtml } }
+            if ($Body -like 'mode=5001*') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:Page } }
+            return [PSCustomObject]@{ StatusCode = 200; Content = '' }
+        }
+
+        $result = Get-SfosLog -MessageLike 'timeout' -SourceIP '192.0.2.10' @conn -AsJson -WarningAction SilentlyContinue
+
+        @($result.id) | Should -Be @(1)
+    }
+}
+
+# ------------------------------------------------------------------------------------------
+# Regression coverage for a defect where -MessageLike (and every other built-in field filter)
+# could report "found only 0" for a record known to be on the appliance. Root cause: the
+# -MaxRecords widening loop fetches a fresh, independent top-N window on every attempt -
+# offset-based paging is unreliable past roughly 750 records (see this module's own findings
+# file) - and used to replace $pairs outright with whatever the latest attempt found. A record
+# genuinely matched on a narrower attempt is not guaranteed to reappear in a wider attempt's
+# window (new records arriving between the two calls push it further back), so a match already
+# found used to be discarded the moment a later, wider attempt did not repeat it. Reproduced
+# below with exactly the shape measured against a live appliance: 600 fetched records, exactly
+# one carrying "message", which forces the loop to widen because FetchedCount equals the
+# requested limit.
+Describe 'Get-SfosLog widening retry loop does not lose a match already found on a narrower attempt' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = '192.0.2.1'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+
+        $script:LoginOkJson = '{"status":200}'
+        $script:CsrfHtml = '<html><script>Cyberoam.c' + '$rFt0k3n' + " = 'tok123';</script></html>"
+
+        function New-SparseLogPage {
+            param(
+                [int]$Count,
+                [int]$MatchIndex,
+                [string]$MatchMessage,
+                [string]$MatchStatus = 'Allow',
+                [string]$IdPrefix = 'r'
+            )
+            $records = New-Object System.Collections.Generic.List[string]
+            for ($i = 1; $i -le $Count; $i++) {
+                if ($i -eq $MatchIndex -and $MatchMessage) {
+                    $records.Add((@{ id = "$IdPrefix-$i"; log_type = 'Firewall'; status = $MatchStatus; message = $MatchMessage } | ConvertTo-Json -Compress))
+                }
+                else {
+                    $records.Add((@{ id = "$IdPrefix-$i"; log_type = 'Firewall'; status = 'Allow' } | ConvertTo-Json -Compress))
+                }
+            }
+            return @{ status = 200; limit = $Count; offset = 0; syslog = $records.ToArray() } | ConvertTo-Json -Depth 5 -Compress
+        }
+
+    }
+
+    It 'keeps the -MessageLike match found on the first (600-record) attempt once the widened (2400-record) attempt does not repeat it' {
+        # First attempt: 600 records, fetched count equals the requested limit, so the loop
+        # widens even though the match was already found. Second attempt: fewer records than
+        # requested (so the loop stops there), none carrying "message" - as measured, the
+        # single matching record did not reappear once the request widened.
+        $narrowPage = New-SparseLogPage -Count 600 -MatchIndex 300 -MatchMessage 'Could not associate packet to any connection.'
+        $widePage = New-SparseLogPage -Count 700 -MatchIndex -1 -MatchMessage $null
+
+        Mock -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -MockWith {
+            if ($Body -like 'mode=151*') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:LoginOkJson } }
+            if ($Uri -like '*/webconsole/webpages/index.jsp') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:CsrfHtml } }
+            if ($Body -like 'mode=5001*') {
+                $bodyObj = [uri]::UnescapeDataString(($Body -replace '^mode=5001&json=', '')) | ConvertFrom-Json
+                if ([int]$bodyObj.limit -eq 600) { return [PSCustomObject]@{ StatusCode = 200; Content = $script:NarrowPage } }
+                return [PSCustomObject]@{ StatusCode = 200; Content = $script:WidePage }
+            }
+            return [PSCustomObject]@{ StatusCode = 200; Content = '' }
+        }
+        $script:NarrowPage = $narrowPage
+        $script:WidePage = $widePage
+
+        $result = Get-SfosLog -MaxRecords 600 -MessageLike 'Could' @conn -AsJson -WarningAction SilentlyContinue -WarningVariable warnings
+
+        @($result).Count | Should -Be 1
+        $result[0].message | Should -BeLike '*Could not associate*'
+        ($warnings -join ' ') | Should -BeLike '*found only 1 of the requested 600*'
+    }
+
+    It 'ORs two -MessageLike values found on different widening attempts, keeping both' {
+        # The first value's match sits in the narrow (600) attempt; the second value's match
+        # only shows up once the loop widens to the next attempt. Both must survive.
+        $narrowPage = New-SparseLogPage -Count 600 -MatchIndex 300 -MatchMessage 'Could not associate packet to any connection.' -IdPrefix 'n'
+        $widePage = New-SparseLogPage -Count 700 -MatchIndex 50 -MatchMessage 'connection timeout on port 443' -IdPrefix 'w'
+
+        Mock -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -MockWith {
+            if ($Body -like 'mode=151*') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:LoginOkJson } }
+            if ($Uri -like '*/webconsole/webpages/index.jsp') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:CsrfHtml } }
+            if ($Body -like 'mode=5001*') {
+                $bodyObj = [uri]::UnescapeDataString(($Body -replace '^mode=5001&json=', '')) | ConvertFrom-Json
+                if ([int]$bodyObj.limit -eq 600) { return [PSCustomObject]@{ StatusCode = 200; Content = $script:NarrowPage } }
+                return [PSCustomObject]@{ StatusCode = 200; Content = $script:WidePage }
+            }
+            return [PSCustomObject]@{ StatusCode = 200; Content = '' }
+        }
+        $script:NarrowPage = $narrowPage
+        $script:WidePage = $widePage
+
+        $result = Get-SfosLog -MaxRecords 600 -MessageLike 'Could', 'timeout' @conn -AsJson -WarningAction SilentlyContinue
+
+        @($result.id | Sort-Object) | Should -Be @('n-300', 'w-50')
+    }
+
+    It 'combines -MessageLike with an exact field filter (AND) across the widening loop without losing the match' {
+        $narrowPage = New-SparseLogPage -Count 600 -MatchIndex 300 -MatchMessage 'Could not associate packet to any connection.' -MatchStatus 'Deny'
+        $widePage = New-SparseLogPage -Count 700 -MatchIndex -1 -MatchMessage $null
+
+        Mock -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -MockWith {
+            if ($Body -like 'mode=151*') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:LoginOkJson } }
+            if ($Uri -like '*/webconsole/webpages/index.jsp') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:CsrfHtml } }
+            if ($Body -like 'mode=5001*') {
+                $bodyObj = [uri]::UnescapeDataString(($Body -replace '^mode=5001&json=', '')) | ConvertFrom-Json
+                if ([int]$bodyObj.limit -eq 600) { return [PSCustomObject]@{ StatusCode = 200; Content = $script:NarrowPage } }
+                return [PSCustomObject]@{ StatusCode = 200; Content = $script:WidePage }
+            }
+            return [PSCustomObject]@{ StatusCode = 200; Content = '' }
+        }
+        $script:NarrowPage = $narrowPage
+        $script:WidePage = $widePage
+
+        $result = Get-SfosLog -MaxRecords 600 -MessageLike 'Could' -Status Deny @conn -AsJson -WarningAction SilentlyContinue
+
+        @($result).Count | Should -Be 1
+        $result[0].status | Should -Be 'Deny'
+    }
+
+    It 'returns an empty result, not the full set, when the search term matches nothing across the widening loop' {
+        $narrowPage = New-SparseLogPage -Count 600 -MatchIndex 300 -MatchMessage 'Could not associate packet to any connection.'
+        $widePage = New-SparseLogPage -Count 700 -MatchIndex -1 -MatchMessage $null
+
+        Mock -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -MockWith {
+            if ($Body -like 'mode=151*') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:LoginOkJson } }
+            if ($Uri -like '*/webconsole/webpages/index.jsp') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:CsrfHtml } }
+            if ($Body -like 'mode=5001*') {
+                $bodyObj = [uri]::UnescapeDataString(($Body -replace '^mode=5001&json=', '')) | ConvertFrom-Json
+                if ([int]$bodyObj.limit -eq 600) { return [PSCustomObject]@{ StatusCode = 200; Content = $script:NarrowPage } }
+                return [PSCustomObject]@{ StatusCode = 200; Content = $script:WidePage }
+            }
+            return [PSCustomObject]@{ StatusCode = 200; Content = '' }
+        }
+        $script:NarrowPage = $narrowPage
+        $script:WidePage = $widePage
+
+        $result = Get-SfosLog -MaxRecords 600 -MessageLike 'nonexistent-search-term' @conn -AsJson -WarningAction SilentlyContinue -WarningVariable warnings
+
+        @($result).Count | Should -Be 0
+        ($warnings -join ' ') | Should -BeLike '*found only 0 of the requested 600*'
+    }
+}
+
+# ------------------------------------------------------------------------------------------
+# Exclude* filters invert the same field match (Test-SfosLogViewerRawFieldMatch and
+# Test-SfosLogViewerDecodedFieldMatch, both driven by the Negate flag Get-SfosLogViewerFieldFilter
+# sets on an Exclude* entry): a record is dropped only when the field actually carries one of
+# the excluded values, never because the field is missing.
+
+Describe 'Get-SfosLog built-in field filters: negation (Exclude*)' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = '192.0.2.1'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+
+        $script:LoginOkJson = '{"status":200}'
+        $script:CsrfHtml = '<html><script>Cyberoam.c' + '$rFt0k3n' + " = 'tok123';</script></html>"
+    }
+
+    It 'ExcludeStatus removes exactly the matching records and keeps the rest' {
+        $records = @(
+            (@{ id = 1; status = 'Deny' } | ConvertTo-Json -Compress),
+            (@{ id = 2; status = 'Allow' } | ConvertTo-Json -Compress),
+            (@{ id = 3; status = 'Deny' } | ConvertTo-Json -Compress)
+        )
+        $script:Page = @{ status = 200; limit = 200; offset = 0; syslog = $records } | ConvertTo-Json -Depth 5 -Compress
+
+        Mock -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -MockWith {
+            if ($Body -like 'mode=151*') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:LoginOkJson } }
+            if ($Uri -like '*/webconsole/webpages/index.jsp') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:CsrfHtml } }
+            if ($Body -like 'mode=5001*') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:Page } }
+            return [PSCustomObject]@{ StatusCode = 200; Content = '' }
+        }
+
+        $result = Get-SfosLog -ExcludeStatus 'Deny' @conn -AsJson -WarningAction SilentlyContinue
+
+        @($result.id | Sort-Object) | Should -Be @(2)
+    }
+
+    It 'ExcludeStatus with two values removes both' {
+        $records = @(
+            (@{ id = 1; status = 'Deny' } | ConvertTo-Json -Compress),
+            (@{ id = 2; status = 'Allow' } | ConvertTo-Json -Compress),
+            (@{ id = 3; status = 'Reject' } | ConvertTo-Json -Compress)
+        )
+        $script:Page = @{ status = 200; limit = 200; offset = 0; syslog = $records } | ConvertTo-Json -Depth 5 -Compress
+
+        Mock -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -MockWith {
+            if ($Body -like 'mode=151*') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:LoginOkJson } }
+            if ($Uri -like '*/webconsole/webpages/index.jsp') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:CsrfHtml } }
+            if ($Body -like 'mode=5001*') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:Page } }
+            return [PSCustomObject]@{ StatusCode = 200; Content = '' }
+        }
+
+        $result = Get-SfosLog -ExcludeStatus 'Deny', 'Reject' @conn -AsJson -WarningAction SilentlyContinue
+
+        @($result.id) | Should -Be @(2)
+    }
+
+    It 'combines an include filter and an Exclude* filter as AND' {
+        $records = @(
+            (@{ id = 1; status = 'Deny'; user = 'alice' } | ConvertTo-Json -Compress),  # kept: Deny, not bob
+            (@{ id = 2; status = 'Deny'; user = 'bob' } | ConvertTo-Json -Compress),    # dropped: excluded user
+            (@{ id = 3; status = 'Allow'; user = 'alice' } | ConvertTo-Json -Compress)  # dropped: not Deny
+        )
+        $script:Page = @{ status = 200; limit = 200; offset = 0; syslog = $records } | ConvertTo-Json -Depth 5 -Compress
+
+        Mock -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -MockWith {
+            if ($Body -like 'mode=151*') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:LoginOkJson } }
+            if ($Uri -like '*/webconsole/webpages/index.jsp') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:CsrfHtml } }
+            if ($Body -like 'mode=5001*') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:Page } }
+            return [PSCustomObject]@{ StatusCode = 200; Content = '' }
+        }
+
+        $result = Get-SfosLog -Status Deny -ExcludeUser bob @conn -AsJson -WarningAction SilentlyContinue
+
+        @($result.id) | Should -Be @(1)
+    }
+
+    It 'an Exclude* filter never drops a record that does not carry the field at all - raw pre-filter' {
+        InModuleScope SophosFirewall.Diagnostics {
+            $filter = Get-SfosLogViewerFieldFilter -BoundParameters @{ ExcludeMessageLike = @('foo') }
+
+            $withoutField = '{"id":1}'
+            $withMatch = '{"id":2,"message":"a foo here"}'
+            $withoutMatch = '{"id":3,"message":"nothing relevant"}'
+
+            Test-SfosLogViewerRawFieldMatch -Raw $withoutField -FieldFilter $filter | Should -BeTrue
+            Test-SfosLogViewerRawFieldMatch -Raw $withMatch -FieldFilter $filter | Should -BeFalse
+            Test-SfosLogViewerRawFieldMatch -Raw $withoutMatch -FieldFilter $filter | Should -BeTrue
+        }
+    }
+
+    It 'an Exclude* filter never drops a record that does not carry the field at all - decoded fallback' {
+        InModuleScope SophosFirewall.Diagnostics {
+            $filter = Get-SfosLogViewerFieldFilter -BoundParameters @{ ExcludeMessageLike = @('foo') }
+
+            $withoutField = [PSCustomObject]@{ id = 1 }
+            $withMatch = [PSCustomObject]@{ id = 2; message = 'a foo here' }
+            $withoutMatch = [PSCustomObject]@{ id = 3; message = 'nothing relevant' }
+
+            Test-SfosLogViewerDecodedFieldMatch -Record $withoutField -FieldFilter $filter | Should -BeTrue
+            Test-SfosLogViewerDecodedFieldMatch -Record $withMatch -FieldFilter $filter | Should -BeFalse
+            Test-SfosLogViewerDecodedFieldMatch -Record $withoutMatch -FieldFilter $filter | Should -BeTrue
+        }
+    }
+}
+
+# ------------------------------------------------------------------------------------------
+# -AnyIP and -AnyPort (named -AnyPort, not -Port, because the connection parameter of the same
+# name already occupies -Port - see this module's own findings file) match either side of a
+# connection: src_ip/dst_ip and src_port/dst_port. -SourcePort fills in -DestinationPort's
+# previously missing counterpart.
+
+Describe 'Get-SfosLog -AnyIP and -AnyPort match either side of a connection' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = '192.0.2.1'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+
+        $script:LoginOkJson = '{"status":200}'
+        $script:CsrfHtml = '<html><script>Cyberoam.c' + '$rFt0k3n' + " = 'tok123';</script></html>"
+    }
+
+    It '-AnyIP matches an address on either the source or the destination side, and nothing else' {
+        $records = @(
+            (@{ id = 1; src_ip = '192.0.2.10'; dst_ip = '198.51.100.1' } | ConvertTo-Json -Compress),  # source side
+            (@{ id = 2; src_ip = '198.51.100.1'; dst_ip = '192.0.2.10' } | ConvertTo-Json -Compress),  # destination side
+            (@{ id = 3; src_ip = '198.51.100.1'; dst_ip = '198.51.100.2' } | ConvertTo-Json -Compress) # neither side
+        )
+        $script:Page = @{ status = 200; limit = 200; offset = 0; syslog = $records } | ConvertTo-Json -Depth 5 -Compress
+
+        Mock -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -MockWith {
+            if ($Body -like 'mode=151*') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:LoginOkJson } }
+            if ($Uri -like '*/webconsole/webpages/index.jsp') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:CsrfHtml } }
+            if ($Body -like 'mode=5001*') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:Page } }
+            return [PSCustomObject]@{ StatusCode = 200; Content = '' }
+        }
+
+        $result = Get-SfosLog -AnyIP '192.0.2.10' @conn -AsJson -WarningAction SilentlyContinue
+
+        @($result.id | Sort-Object) | Should -Be @(1, 2)
+    }
+
+    It '-AnyPort matches a port on either the source or the destination side, and nothing else' {
+        $records = @(
+            (@{ id = 1; src_port = '8080'; dst_port = '443' } | ConvertTo-Json -Compress),   # source side
+            (@{ id = 2; src_port = '443'; dst_port = '8080' } | ConvertTo-Json -Compress),   # destination side
+            (@{ id = 3; src_port = '80'; dst_port = '22' } | ConvertTo-Json -Compress)       # neither side
+        )
+        $script:Page = @{ status = 200; limit = 200; offset = 0; syslog = $records } | ConvertTo-Json -Depth 5 -Compress
+
+        Mock -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -MockWith {
+            if ($Body -like 'mode=151*') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:LoginOkJson } }
+            if ($Uri -like '*/webconsole/webpages/index.jsp') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:CsrfHtml } }
+            if ($Body -like 'mode=5001*') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:Page } }
+            return [PSCustomObject]@{ StatusCode = 200; Content = '' }
+        }
+
+        $result = Get-SfosLog -AnyPort '8080' @conn -AsJson -WarningAction SilentlyContinue
+
+        @($result.id | Sort-Object) | Should -Be @(1, 2)
+    }
+
+    It '-SourcePort matches only the source side' {
+        $records = @(
+            (@{ id = 1; src_port = '8080'; dst_port = '443' } | ConvertTo-Json -Compress),   # source side - kept
+            (@{ id = 2; src_port = '443'; dst_port = '8080' } | ConvertTo-Json -Compress)    # destination side - dropped
+        )
+        $script:Page = @{ status = 200; limit = 200; offset = 0; syslog = $records } | ConvertTo-Json -Depth 5 -Compress
+
+        Mock -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -MockWith {
+            if ($Body -like 'mode=151*') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:LoginOkJson } }
+            if ($Uri -like '*/webconsole/webpages/index.jsp') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:CsrfHtml } }
+            if ($Body -like 'mode=5001*') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:Page } }
+            return [PSCustomObject]@{ StatusCode = 200; Content = '' }
+        }
+
+        $result = Get-SfosLog -SourcePort '8080' @conn -AsJson -WarningAction SilentlyContinue
+
+        @($result.id) | Should -Be @(1)
+    }
+
+    It '-AnyIP combined with -DestinationPort acts as AND' {
+        $records = @(
+            (@{ id = 1; src_ip = '192.0.2.10'; dst_ip = '198.51.100.1'; dst_port = '443' } | ConvertTo-Json -Compress),  # host hit, port hit - kept
+            (@{ id = 2; src_ip = '192.0.2.10'; dst_ip = '198.51.100.1'; dst_port = '8080' } | ConvertTo-Json -Compress), # host hit, port miss - dropped
+            (@{ id = 3; src_ip = '198.51.100.2'; dst_ip = '198.51.100.1'; dst_port = '443' } | ConvertTo-Json -Compress) # host miss - dropped
+        )
+        $script:Page = @{ status = 200; limit = 200; offset = 0; syslog = $records } | ConvertTo-Json -Depth 5 -Compress
+
+        Mock -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -MockWith {
+            if ($Body -like 'mode=151*') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:LoginOkJson } }
+            if ($Uri -like '*/webconsole/webpages/index.jsp') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:CsrfHtml } }
+            if ($Body -like 'mode=5001*') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:Page } }
+            return [PSCustomObject]@{ StatusCode = 200; Content = '' }
+        }
+
+        $result = Get-SfosLog -AnyIP '192.0.2.10' -DestinationPort '443' @conn -AsJson -WarningAction SilentlyContinue
+
+        @($result.id) | Should -Be @(1)
+    }
+}
+
+# ------------------------------------------------------------------------------------------
 # Invoke-SfosCliCommand reaches the device console, a third access path implemented in
 # SophosFirewall.Core as Connect-SfosCliConsole/Send-SfosCliInput/Receive-SfosCliOutput/
 # Disconnect-SfosCliConsole (see this module's own findings file). Those four are mocked here at
@@ -1914,3 +2650,242 @@ Describe 'Invoke-SfosCliCommand' {
         Should -Invoke -CommandName Disconnect-SfosCliConsole -ModuleName SophosFirewall.Diagnostics -Times 1 -Exactly
     }
 }
+
+# ------------------------------------------------------------------------------------------
+# Export-SfosLog / Import-SfosLog: capture a Get-SfosLog read to a file once, then filter it
+# repeatedly with Import-SfosLog, without contacting the appliance again. Export-SfosLog still
+# talks to the web console (Invoke-WebRequest mocked in SophosFirewall.Core's scope, exactly
+# like the Get-SfosLog tests above); Import-SfosLog never does.
+
+Describe 'Export-SfosLog / Import-SfosLog' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = '192.0.2.1'
+            Port     = 4444
+            Username = 'apiuser'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+
+        $script:LoginOkJson = '{"status":200}'
+        $script:CsrfHtml = '<html><script>Cyberoam.c' + '$rFt0k3n' + " = 'tok123';</script></html>"
+
+        # Five raw records, JSON-encoded exactly the way the console sends them - deliberately
+        # spanning several fields (source/destination address, user, status, message) so include,
+        # exclude and both-sided field filters each have something to prove.
+        $script:SampleRecords = @(
+            (@{ id = 1; log_type = 'Firewall'; src_ip = '192.0.2.10'; dst_ip = '192.0.2.20'; user = 'admin'; status = 'Allow'; protocol = 'TCP'; message = 'alpha'; datetime = '2026-08-20 10:00:00'; tz_offset = '+0200' } | ConvertTo-Json -Compress),
+            (@{ id = 2; log_type = 'Firewall'; src_ip = '192.0.2.11'; dst_ip = '192.0.2.10'; user = 'svc-backup'; status = 'Deny'; protocol = 'TCP'; message = 'beta'; datetime = '2026-08-20 10:01:00'; tz_offset = '+0200' } | ConvertTo-Json -Compress),
+            (@{ id = 3; log_type = 'IPS'; src_ip = '192.0.2.12'; dst_ip = '192.0.2.13'; user = 'admin'; status = 'Allow'; protocol = 'UDP'; message = 'gamma'; datetime = '2026-08-20 10:02:00'; tz_offset = '+0200' } | ConvertTo-Json -Compress),
+            (@{ id = 4; log_type = 'Firewall'; src_ip = '192.0.2.13'; dst_ip = '192.0.2.10'; user = 'jdoe'; status = 'Deny'; protocol = 'TCP'; message = 'delta'; datetime = '2026-08-20 10:03:00'; tz_offset = '+0200' } | ConvertTo-Json -Compress),
+            (@{ id = 5; log_type = 'Firewall'; src_ip = '192.0.2.14'; dst_ip = '192.0.2.15'; user = 'admin'; status = 'Allow'; protocol = 'TCP'; message = 'epsilon'; datetime = '2026-08-20 10:04:00'; tz_offset = '+0200' } | ConvertTo-Json -Compress)
+        )
+        $script:SamplePage = @{ status = 200; limit = 200; offset = 0; syslog = $script:SampleRecords } | ConvertTo-Json -Depth 5 -Compress
+
+        $script:FirewallCatalogJson = @{
+            filter = @{ module = @{ val = @{
+                            firewall = @{ label = 'Firewall'; condition = '( "log_type=Firewall" )' }
+                        } } }
+        } | ConvertTo-Json -Depth 8 -Compress
+
+        # Defined in BeforeAll, not at the Describe body's top level: a function declared there
+        # runs during Pester's discovery phase and is not reliably visible to It blocks in the
+        # later run phase.
+        function New-SampleConsoleMock {
+            Mock -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -MockWith {
+                if ($Body -like 'mode=151*') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:LoginOkJson } }
+                if ($Uri -like '*/webconsole/webpages/index.jsp') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:CsrfHtml } }
+                if ($Body -like 'mode=5002*') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:FirewallCatalogJson } }
+                if ($Body -like 'mode=5001*') { return [PSCustomObject]@{ StatusCode = 200; Content = $script:SamplePage } }
+                return [PSCustomObject]@{ StatusCode = 200; Content = '' }
+            }
+        }
+    }
+
+    It 'writes a file that Import-SfosLog reads back into the same objects Get-SfosLog returns for the same raw records' {
+        New-SampleConsoleMock
+        $path = Join-Path $TestDrive 'roundtrip.sfoslog'
+
+        Export-SfosLog -Path $path -MaxRecords 10 @conn -Confirm:$false -WarningAction SilentlyContinue
+
+        $live = @(Get-SfosLog -MaxRecords 10 @conn -WarningAction SilentlyContinue | Sort-Object id)
+        $imported = @(Import-SfosLog -Path $path | Sort-Object id)
+
+        $imported.Count | Should -Be $live.Count
+        $imported.Count | Should -Be 5
+
+        for ($i = 0; $i -lt $live.Count; $i++) {
+            $imported[$i].id | Should -Be $live[$i].id
+            $imported[$i].log_type | Should -Be $live[$i].log_type
+            $imported[$i].src_ip | Should -Be $live[$i].src_ip
+            $imported[$i].dst_ip | Should -Be $live[$i].dst_ip
+            $imported[$i].user | Should -Be $live[$i].user
+            $imported[$i].status | Should -Be $live[$i].status
+            $imported[$i].message | Should -Be $live[$i].message
+            $imported[$i].Datetime | Should -Be $live[$i].Datetime
+            $imported[$i].PSObject.TypeNames[0] | Should -Be $live[$i].PSObject.TypeNames[0]
+        }
+    }
+
+    It 'an include filter (-SourceIP) gives the same result on the file path as on the live path' {
+        New-SampleConsoleMock
+        $path = Join-Path $TestDrive 'include.sfoslog'
+        Export-SfosLog -Path $path -MaxRecords 10 @conn -Confirm:$false -WarningAction SilentlyContinue
+
+        $live = @(Get-SfosLog -SourceIP '192.0.2.10' -MaxRecords 10 @conn -AsJson -WarningAction SilentlyContinue | Sort-Object id)
+        $imported = @(Import-SfosLog -Path $path -SourceIP '192.0.2.10' -AsJson | Sort-Object id)
+
+        $imported.Count | Should -Be 1
+        @($imported.id) | Should -Be @($live.id)
+    }
+
+    It 'an exclude filter (-ExcludeUser) gives the same result on the file path as on the live path' {
+        New-SampleConsoleMock
+        $path = Join-Path $TestDrive 'exclude.sfoslog'
+        Export-SfosLog -Path $path -MaxRecords 10 @conn -Confirm:$false -WarningAction SilentlyContinue
+
+        $live = @(Get-SfosLog -ExcludeUser 'svc-backup' -MaxRecords 10 @conn -AsJson -WarningAction SilentlyContinue | Sort-Object id)
+        $imported = @(Import-SfosLog -Path $path -ExcludeUser 'svc-backup' -AsJson | Sort-Object id)
+
+        $imported.Count | Should -Be 4
+        @($imported.id) | Should -Be @($live.id)
+    }
+
+    It 'a both-sided filter (-AnyIP) gives the same result on the file path as on the live path' {
+        New-SampleConsoleMock
+        $path = Join-Path $TestDrive 'host.sfoslog'
+        Export-SfosLog -Path $path -MaxRecords 10 @conn -Confirm:$false -WarningAction SilentlyContinue
+
+        $live = @(Get-SfosLog -AnyIP '192.0.2.10' -MaxRecords 10 @conn -AsJson -WarningAction SilentlyContinue | Sort-Object id)
+        $imported = @(Import-SfosLog -Path $path -AnyIP '192.0.2.10' -AsJson | Sort-Object id)
+
+        # id 1 (src_ip 192.0.2.10) and id 2/4 (dst_ip 192.0.2.10) all match either side.
+        $imported.Count | Should -Be 3
+        @($imported.id) | Should -Be @($live.id)
+    }
+
+    It '-Protocol gives the same result on the file path as on the live path' {
+        New-SampleConsoleMock
+        $path = Join-Path $TestDrive 'protocol.sfoslog'
+        Export-SfosLog -Path $path -MaxRecords 10 @conn -Confirm:$false -WarningAction SilentlyContinue
+
+        $live = @(Get-SfosLog -Protocol 'UDP' -MaxRecords 10 @conn -AsJson -WarningAction SilentlyContinue | Sort-Object id)
+        $imported = @(Import-SfosLog -Path $path -Protocol 'UDP' -AsJson | Sort-Object id)
+
+        $imported.Count | Should -Be 1
+        @($imported.id) | Should -Be @($live.id)
+    }
+
+    It '-Text gives the same result on the file path as on the live path' {
+        New-SampleConsoleMock
+        $path = Join-Path $TestDrive 'text.sfoslog'
+        Export-SfosLog -Path $path -MaxRecords 10 @conn -Confirm:$false -WarningAction SilentlyContinue
+
+        $live = @(Get-SfosLog -Text '192.0.2.10' -MaxRecords 10 @conn -AsJson -WarningAction SilentlyContinue | Sort-Object id)
+        $imported = @(Import-SfosLog -Path $path -Text '192.0.2.10' -AsJson | Sort-Object id)
+
+        # id 1 (src_ip), id 2/4 (dst_ip) - matched wherever the value appears, not one fixed field.
+        $imported.Count | Should -Be 3
+        @($imported.id) | Should -Be @($live.id)
+    }
+
+    It 'throws without -Force when the target file already exists' {
+        $path = Join-Path $TestDrive 'existing.sfoslog'
+        Set-Content -Path $path -Value 'placeholder'
+
+        { Export-SfosLog -Path $path -MaxRecords 5 @conn -Confirm:$false } | Should -Throw "*$path*"
+
+        (Get-Content -Path $path -Raw).TrimEnd() | Should -Be 'placeholder'
+    }
+
+    It 'overwrites the target file with -Force' {
+        New-SampleConsoleMock
+        $path = Join-Path $TestDrive 'existing2.sfoslog'
+        Set-Content -Path $path -Value 'placeholder'
+
+        Export-SfosLog -Path $path -MaxRecords 5 -Force @conn -Confirm:$false -WarningAction SilentlyContinue
+
+        (Get-Content -Path $path -Raw).TrimEnd() | Should -Not -Be 'placeholder'
+        (Get-Content -Path $path -Raw | ConvertFrom-Json).RecordCount | Should -Be 5
+    }
+
+    It '-WhatIf writes no file' {
+        New-SampleConsoleMock
+        $path = Join-Path $TestDrive 'whatif.sfoslog'
+
+        Export-SfosLog -Path $path -MaxRecords 5 @conn -WhatIf -WarningAction SilentlyContinue
+
+        Test-Path -Path $path | Should -BeFalse
+    }
+
+    It '-PassThru returns the written file as a FileInfo' {
+        New-SampleConsoleMock
+        $path = Join-Path $TestDrive 'passthru.sfoslog'
+
+        $result = Export-SfosLog -Path $path -MaxRecords 5 -PassThru @conn -Confirm:$false -WarningAction SilentlyContinue
+
+        $result | Should -BeOfType [System.IO.FileInfo]
+        $result.FullName | Should -Be (Get-Item -Path $path).FullName
+    }
+
+    It 'Import-SfosLog warns and names the filters recorded at capture time' {
+        New-SampleConsoleMock
+        $path = Join-Path $TestDrive 'recorded-filters.sfoslog'
+
+        Export-SfosLog -Path $path -Category firewall -SourceIP '192.0.2.10' -MaxRecords 10 @conn -Confirm:$false -WarningAction SilentlyContinue
+
+        $warnings = $null
+        Import-SfosLog -Path $path -WarningVariable warnings -WarningAction SilentlyContinue | Out-Null
+
+        $warnings | Should -Not -BeNullOrEmpty
+        # The category is scope, not a field filter. Naming it here would make the warning fire
+        # on every capture, and one that always fires is one nobody reads.
+        "$warnings" | Should -Not -BeLike '*Category=*'
+        "$warnings" | Should -BeLike '*src_ip*'
+        "$warnings" | Should -BeLike '*192.0.2.10*'
+    }
+
+    It 'Import-SfosLog does not warn about a capture that only chose a category' {
+        New-SampleConsoleMock
+        $path = Join-Path $TestDrive 'category-only.sfoslog'
+
+        Export-SfosLog -Path $path -Category firewall -MaxRecords 10 @conn -Confirm:$false -WarningAction SilentlyContinue
+
+        $warnings = $null
+        Import-SfosLog -Path $path -WarningVariable warnings -WarningAction SilentlyContinue | Out-Null
+
+        $warnings | Should -BeNullOrEmpty
+    }
+    It 'Import-SfosLog does not warn about a capture with no filters applied' {
+        New-SampleConsoleMock
+        $path = Join-Path $TestDrive 'no-filters.sfoslog'
+
+        Export-SfosLog -Path $path -MaxRecords 10 @conn -Confirm:$false -WarningAction SilentlyContinue
+
+        $warnings = $null
+        Import-SfosLog -Path $path -WarningVariable warnings -WarningAction SilentlyContinue | Out-Null
+
+        $warnings | Should -BeNullOrEmpty
+    }
+
+    It 'throws an error naming the path for a file that does not exist' {
+        $path = Join-Path $TestDrive 'missing.sfoslog'
+
+        { Import-SfosLog -Path $path } | Should -Throw "*$path*"
+    }
+
+    It 'throws an error naming the path for a file that is not a Sophos Firewall log export' {
+        $path = Join-Path $TestDrive 'unrelated.json'
+        Set-Content -Path $path -Value '{"foo":"bar"}'
+
+        { Import-SfosLog -Path $path } | Should -Throw "*$path*"
+    }
+
+    It 'throws an error naming the path for a file that is not valid JSON at all' {
+        $path = Join-Path $TestDrive 'notjson.txt'
+        Set-Content -Path $path -Value 'this is not json {{{'
+
+        { Import-SfosLog -Path $path } | Should -Throw "*$path*"
+    }
+}
+

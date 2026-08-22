@@ -22,6 +22,8 @@
         'Set-SfosSupportAccess',
         'Get-SfosLog',
         'Get-SfosLogCategory',
+        'Export-SfosLog',
+        'Import-SfosLog',
         'Invoke-SfosCliCommand',
         'Enter-SfosCliConsole'
     )

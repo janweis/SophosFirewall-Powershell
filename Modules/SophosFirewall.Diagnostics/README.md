@@ -15,6 +15,17 @@ and read the same records the web admin console's own Log Viewer page shows. Thi
 is not part of the documented API and can change with a firmware update. The account used
 still needs permission to view the log viewer in the web admin console.
 
+## Device console access is not the XML API either
+
+`Invoke-SfosCliCommand` and `Enter-SfosCliConsole` reach a third access path, alongside the XML
+API and the web admin console: the appliance's device console, the menu-driven, keystroke-based
+interface an administrator would otherwise reach from a physical or serial console. Only the
+`admin` and `support` accounts can open it, and the console asks for that account's password
+again as a separate step, even though the caller already authenticated to reach it. The device
+console runs every command immediately, without a confirmation prompt of its own, and its main
+menu carries an entry that shuts down or restarts the appliance - review a command before
+sending it.
+
 ## Security note
 
 Switching support access on lets Sophos support connect to the firewall's web admin console
@@ -67,6 +78,8 @@ Get-SfosLog -Category firewall -MaxRecords 10 -List    # same columns, one field
 | `Set-SfosSupportAccess` | Switches support access on or off and sets its duration. |
 | `Get-SfosLog` | Reads log records from the web admin console's log viewer, with a category pre-filter, built-in field filters matched on the raw record text before decoding, a client-side `-Since` cutoff, and a `-Follow` mode that streams newly arriving records. |
 | `Get-SfosLogCategory` | Lists the log viewer's own categories and the condition each one matches. |
+| `Invoke-SfosCliCommand` | Runs one or more commands on the appliance's device console and returns the output of each. |
+| `Enter-SfosCliConsole` | Opens an interactive keyboard session on the appliance's device console. |
 
 ## Log type or category - they are not the same thing
 

@@ -86,6 +86,16 @@
     variant of the same view; -AsJson sets no type name at all; and a record missing one of a
     view's columns (out_interface) formats without error.
 
+    Invoke-SfosCliCommand reaches the device console, a third access path implemented in
+    SophosFirewall.Core as Connect-SfosCliConsole, Send-SfosCliInput, Receive-SfosCliOutput and
+    Disconnect-SfosCliConsole; those four are mocked at their call site inside this module, the
+    same way Invoke-SfosApi is mocked above. Coverage: the menu navigation (sending '4' then
+    Enter) runs once before the command; -SkipMenu omits it; the command's own echo and the
+    trailing prompt line are stripped from the returned output; a session opened by the cmdlet
+    itself is closed even when a command fails, and the failure still propagates; a session
+    supplied through -CliSession is reused and left open; and -WhatIf still runs the menu
+    navigation but never sends the command itself, closing its own session regardless.
+
 .NOTES
     Minimum supported PowerShell version: 5.1
 
@@ -121,6 +131,58 @@ if (-not (Test-Path $script:ModulePath)) {
 Import-Module $CoreModulePath -Force
 Import-Module $script:ModulePath -Force
 
+# The device console transport (Connect-SfosCliConsole, Send-SfosCliInput, Receive-
+# SfosCliOutput, Disconnect-SfosCliConsole) is being added to SophosFirewall.Core separately.
+# Until that lands, this suite defines them here with the agreed signature so Invoke-
+# SfosCliCommand's tests below can mock them with working parameter binding. Once Core exports
+# the real functions, Get-Command finds them first and this block is skipped.
+if (-not (Get-Command Connect-SfosCliConsole -ErrorAction SilentlyContinue)) {
+    Write-Warning 'SophosFirewall.Core does not export the device console transport (Connect-SfosCliConsole/Send-SfosCliInput/Receive-SfosCliOutput/Disconnect-SfosCliConsole) yet - defining stand-in functions with the agreed signature for this test run.'
+
+    function Connect-SfosCliConsole {
+        param(
+            [string]$Firewall,
+            [int]$Port,
+            [string]$Username,
+            [SecureString]$Password,
+            [switch]$SkipCertificateCheck,
+            [object]$Session
+        )
+    }
+
+    function Send-SfosCliInput {
+        [CmdletBinding(DefaultParameterSetName = 'Text')]
+        param(
+            [Parameter(Mandatory)]
+            [object]$CliSession,
+
+            [Parameter(Mandatory, ParameterSetName = 'Text')]
+            [string]$Text,
+
+            [Parameter(Mandatory, ParameterSetName = 'Key')]
+            [string]$Key
+        )
+    }
+
+    function Receive-SfosCliOutput {
+        param(
+            [Parameter(Mandatory)]
+            [object]$CliSession,
+
+            [int]$TimeoutSeconds,
+
+            [string]$Until
+        )
+    }
+
+    function Disconnect-SfosCliConsole {
+        param(
+            [Parameter(Mandatory)]
+            [object]$CliSession
+        )
+    }
+}
+
 # --------------------------------------------------------------------------------------------
 
 Describe 'Module Loading' {
@@ -132,11 +194,11 @@ Describe 'Module Loading' {
         Get-Module SophosFirewall.Core | Should -Not -BeNullOrEmpty
     }
 
-    It 'Should export exactly 4 functions' {
-        (Get-Module SophosFirewall.Diagnostics).ExportedFunctions.Count | Should -Be 4
+    It 'Should export exactly 6 functions' {
+        (Get-Module SophosFirewall.Diagnostics).ExportedFunctions.Count | Should -Be 6
     }
 
-    It 'Manifest FunctionsToExport should list exactly 4 functions, matching the loaded module' {
+    It 'Manifest FunctionsToExport should list exactly 6 functions, matching the loaded module' {
         $modulesDir = Join-Path (Split-Path -Parent $PSScriptRoot) 'Modules'
         $manifestPath = Join-Path $modulesDir 'SophosFirewall.Diagnostics\SophosFirewall.Diagnostics.psd1'
 
@@ -149,8 +211,8 @@ Describe 'Module Loading' {
             $env:PSModulePath = $originalModulePath
         }
 
-        $manifest.ExportedFunctions.Count | Should -Be 4
-        @($manifest.ExportedFunctions.Keys | Sort-Object) | Should -Be @('Get-SfosLog', 'Get-SfosLogCategory', 'Get-SfosSupportAccess', 'Set-SfosSupportAccess')
+        $manifest.ExportedFunctions.Count | Should -Be 6
+        @($manifest.ExportedFunctions.Keys | Sort-Object) | Should -Be @('Enter-SfosCliConsole', 'Get-SfosLog', 'Get-SfosLogCategory', 'Get-SfosSupportAccess', 'Invoke-SfosCliCommand', 'Set-SfosSupportAccess')
     }
 }
 
@@ -159,6 +221,8 @@ $script:CmdletParameterCases = @(
     @{ Function = 'Set-SfosSupportAccess' }
     @{ Function = 'Get-SfosLog' }
     @{ Function = 'Get-SfosLogCategory' }
+    @{ Function = 'Invoke-SfosCliCommand' }
+    @{ Function = 'Enter-SfosCliConsole' }
 )
 
 Describe 'Cmdlet existence and parameters' {
@@ -200,6 +264,12 @@ Describe 'Cmdlet existence and parameters' {
 
     It 'Set-SfosSupportAccess supports ShouldProcess' {
         $cmd = Get-Command Set-SfosSupportAccess -Module SophosFirewall.Diagnostics
+        $cmd.Parameters.Keys | Should -Contain 'WhatIf'
+        $cmd.Parameters.Keys | Should -Contain 'Confirm'
+    }
+
+    It 'Invoke-SfosCliCommand supports ShouldProcess' {
+        $cmd = Get-Command Invoke-SfosCliCommand -Module SophosFirewall.Diagnostics
         $cmd.Parameters.Keys | Should -Contain 'WhatIf'
         $cmd.Parameters.Keys | Should -Contain 'Confirm'
     }
@@ -1723,5 +1793,124 @@ Describe 'Get-SfosLog field filters' {
             { $result | Out-String } | Should -Not -Throw
             $result[0].PSObject.Properties.Match('out_interface').Count | Should -Be 0
         }
+    }
+}
+
+# ------------------------------------------------------------------------------------------
+# Invoke-SfosCliCommand reaches the device console, a third access path implemented in
+# SophosFirewall.Core as Connect-SfosCliConsole/Send-SfosCliInput/Receive-SfosCliOutput/
+# Disconnect-SfosCliConsole (see this module's own findings file). Those four are mocked here at
+# their call site inside SophosFirewall.Diagnostics - the same pattern already used above for
+# Invoke-SfosApi, a Core-defined function called from this module's own functions.
+
+Describe 'Invoke-SfosCliCommand' {
+
+    BeforeAll {
+        $conn = @{
+            Firewall = '192.0.2.1'
+            Port     = 4444
+            Username = 'admin'
+            Password = (ConvertTo-SecureString 'pw' -AsPlainText -Force)
+        }
+    }
+
+    It 'navigates to the device console menu, sends the command, and returns the cleaned output' {
+        Mock -CommandName Connect-SfosCliConsole -ModuleName SophosFirewall.Diagnostics -MockWith {
+            [PSCustomObject]@{ BaseUri = 'https://192.0.2.1:4444'; Banner = 'MAIN MENU' }
+        }
+        Mock -CommandName Send-SfosCliInput -ModuleName SophosFirewall.Diagnostics -MockWith { }
+        Mock -CommandName Receive-SfosCliOutput -ModuleName SophosFirewall.Diagnostics -MockWith {
+            param($CliSession, $TimeoutSeconds, $Until)
+            if ($Until -eq 'console>\s*$') {
+                "show version`r`nSFOS 22.0.0`r`nconsole> "
+            }
+        }
+        Mock -CommandName Disconnect-SfosCliConsole -ModuleName SophosFirewall.Diagnostics -MockWith { }
+
+        $result = Invoke-SfosCliCommand -Command 'show version' @conn -Confirm:$false
+
+        $result | Should -Be 'SFOS 22.0.0'
+
+        Should -Invoke -CommandName Send-SfosCliInput -ModuleName SophosFirewall.Diagnostics -Times 1 -Exactly -ParameterFilter {
+            $Text -eq '4'
+        }
+        Should -Invoke -CommandName Send-SfosCliInput -ModuleName SophosFirewall.Diagnostics -Times 1 -Exactly -ParameterFilter {
+            $Text -eq 'show version'
+        }
+        Should -Invoke -CommandName Send-SfosCliInput -ModuleName SophosFirewall.Diagnostics -Times 2 -Exactly -ParameterFilter {
+            $Key -eq 'Enter'
+        }
+        Should -Invoke -CommandName Disconnect-SfosCliConsole -ModuleName SophosFirewall.Diagnostics -Times 1 -Exactly
+    }
+
+    It 'skips the menu navigation with -SkipMenu' {
+        Mock -CommandName Connect-SfosCliConsole -ModuleName SophosFirewall.Diagnostics -MockWith {
+            [PSCustomObject]@{ BaseUri = 'https://192.0.2.1:4444'; Banner = 'console> ' }
+        }
+        Mock -CommandName Send-SfosCliInput -ModuleName SophosFirewall.Diagnostics -MockWith { }
+        Mock -CommandName Receive-SfosCliOutput -ModuleName SophosFirewall.Diagnostics -MockWith {
+            "show version`r`nSFOS 22.0.0`r`nconsole> "
+        }
+        Mock -CommandName Disconnect-SfosCliConsole -ModuleName SophosFirewall.Diagnostics -MockWith { }
+
+        Invoke-SfosCliCommand -Command 'show version' -SkipMenu @conn -Confirm:$false | Out-Null
+
+        Should -Invoke -CommandName Send-SfosCliInput -ModuleName SophosFirewall.Diagnostics -Times 0 -Exactly -ParameterFilter {
+            $Text -eq '4'
+        }
+    }
+
+    It 'closes its own session when a command fails, and rethrows' {
+        Mock -CommandName Connect-SfosCliConsole -ModuleName SophosFirewall.Diagnostics -MockWith {
+            [PSCustomObject]@{ BaseUri = 'https://192.0.2.1:4444'; Banner = 'MAIN MENU' }
+        }
+        Mock -CommandName Send-SfosCliInput -ModuleName SophosFirewall.Diagnostics -MockWith {
+            param($CliSession, $Text, $Key)
+            if ($PSBoundParameters.ContainsKey('Text') -and $Text -ne '4') {
+                throw 'device console rejected the command'
+            }
+        }
+        Mock -CommandName Receive-SfosCliOutput -ModuleName SophosFirewall.Diagnostics -MockWith { 'console> ' }
+        Mock -CommandName Disconnect-SfosCliConsole -ModuleName SophosFirewall.Diagnostics -MockWith { }
+
+        { Invoke-SfosCliCommand -Command 'show version' @conn -Confirm:$false } | Should -Throw '*device console rejected the command*'
+
+        Should -Invoke -CommandName Disconnect-SfosCliConsole -ModuleName SophosFirewall.Diagnostics -Times 1 -Exactly
+    }
+
+    It 'reuses a supplied -CliSession and does not close it' {
+        Mock -CommandName Connect-SfosCliConsole -ModuleName SophosFirewall.Diagnostics -MockWith { }
+        Mock -CommandName Send-SfosCliInput -ModuleName SophosFirewall.Diagnostics -MockWith { }
+        Mock -CommandName Receive-SfosCliOutput -ModuleName SophosFirewall.Diagnostics -MockWith {
+            "show version`r`nSFOS 22.0.0`r`nconsole> "
+        }
+        Mock -CommandName Disconnect-SfosCliConsole -ModuleName SophosFirewall.Diagnostics -MockWith { }
+
+        $existingSession = [PSCustomObject]@{ BaseUri = 'https://192.0.2.1:4444'; Banner = 'MAIN MENU' }
+
+        $result = Invoke-SfosCliCommand -Command 'show version' -CliSession $existingSession -SkipMenu -Confirm:$false
+
+        $result | Should -Be 'SFOS 22.0.0'
+        Should -Invoke -CommandName Connect-SfosCliConsole -ModuleName SophosFirewall.Diagnostics -Times 0 -Exactly
+        Should -Invoke -CommandName Disconnect-SfosCliConsole -ModuleName SophosFirewall.Diagnostics -Times 0 -Exactly
+    }
+
+    It '-WhatIf still navigates the menu but never sends the command, and still closes its own session' {
+        Mock -CommandName Connect-SfosCliConsole -ModuleName SophosFirewall.Diagnostics -MockWith {
+            [PSCustomObject]@{ BaseUri = 'https://192.0.2.1:4444'; Banner = 'MAIN MENU' }
+        }
+        Mock -CommandName Send-SfosCliInput -ModuleName SophosFirewall.Diagnostics -MockWith { }
+        Mock -CommandName Receive-SfosCliOutput -ModuleName SophosFirewall.Diagnostics -MockWith { 'console> ' }
+        Mock -CommandName Disconnect-SfosCliConsole -ModuleName SophosFirewall.Diagnostics -MockWith { }
+
+        Invoke-SfosCliCommand -Command 'reboot' @conn -WhatIf
+
+        Should -Invoke -CommandName Send-SfosCliInput -ModuleName SophosFirewall.Diagnostics -Times 1 -Exactly -ParameterFilter {
+            $Text -eq '4'
+        }
+        Should -Invoke -CommandName Send-SfosCliInput -ModuleName SophosFirewall.Diagnostics -Times 0 -Exactly -ParameterFilter {
+            $Text -eq 'reboot'
+        }
+        Should -Invoke -CommandName Disconnect-SfosCliConsole -ModuleName SophosFirewall.Diagnostics -Times 1 -Exactly
     }
 }

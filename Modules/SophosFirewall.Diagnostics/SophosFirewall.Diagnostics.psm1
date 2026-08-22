@@ -15,10 +15,14 @@
     log records an administrator sees under Log Viewer in the web admin console; there is no
     equivalent read in the XML API.
 
-    Total Functions: 14 (4 exported, 10 internal helpers) - see README.md for the full cmdlet
+    Total Functions: 16 (6 exported, 10 internal helpers) - see README.md for the full cmdlet
     table. The web admin console access path itself - login, CSRF, the console POST - is
     implemented in SophosFirewall.Core as Connect-SfosWebAdmin and Invoke-SfosWebAdminRequest.
     This module adds only the log-viewer-specific request and response handling on top of it.
+    The device console access path - login, keystroke send/receive - is implemented in
+    SophosFirewall.Core as Connect-SfosCliConsole, Send-SfosCliInput, Receive-SfosCliOutput and
+    Disconnect-SfosCliConsole. This module adds only the command-and-response handling on top
+    of it.
 
     Connect once with Connect-SfosFirewall, then call the cmdlets in this module without
     repeating the connection parameters.
@@ -839,6 +843,11 @@ function Select-SfosLogViewerRecordPair {
     work with more than one at a time. Any connection parameter you pass explicitly still
     takes precedence. If omitted, the stored default connection is used.
 
+.PARAMETER AcceptLoginDisclaimer
+    Optional. Confirms a login disclaimer configured on the appliance, on behalf of the
+    account logging in. Without this switch, this cmdlet fails on an appliance that shows a
+    login disclaimer, with an error describing the disclaimer.
+
 .INPUTS
     None. This cmdlet does not accept pipeline input.
 
@@ -878,14 +887,16 @@ function Get-SfosLogCategory {
         [string]$Username,
         [SecureString]$Password,
         [switch]$SkipCertificateCheck,
-        [object]$Session
+        [object]$Session,
+
+        [switch]$AcceptLoginDisclaimer
     )
 
     $params = Resolve-SfosParameters -BoundParameters $PSBoundParameters
 
     $console = Connect-SfosWebAdmin -Firewall $params.Firewall -Port $params.Port `
         -Username $params.Username -Password $params.Password `
-        -SkipCertificateCheck:$params.SkipCertificateCheck
+        -SkipCertificateCheck:$params.SkipCertificateCheck -AcceptLoginDisclaimer:$AcceptLoginDisclaimer
 
     $catalog = Invoke-SfosWebAdminRequest -WebAdminSession $console -Mode 5002 -Json '{}'
 
@@ -1402,6 +1413,11 @@ function Invoke-SfosLogViewerFollowPoll {
     work with more than one at a time. Any connection parameter you pass explicitly still
     takes precedence. If omitted, the stored default connection is used.
 
+.PARAMETER AcceptLoginDisclaimer
+    Optional. Confirms a login disclaimer configured on the appliance, on behalf of the
+    account logging in. Without this switch, this cmdlet fails on an appliance that shows a
+    login disclaimer, with an error describing the disclaimer.
+
 .PARAMETER List
     Optional. Shows the default one-field-per-line list view instead of the default table view.
     Both use the same per-category columns, and neither removes any field from the returned
@@ -1527,6 +1543,7 @@ function Get-SfosLog {
         [SecureString]$Password,
         [switch]$SkipCertificateCheck,
         [object]$Session,
+        [switch]$AcceptLoginDisclaimer,
 
         # Output parameters
         [switch]$List,
@@ -1551,7 +1568,7 @@ function Get-SfosLog {
 
     $console = Connect-SfosWebAdmin -Firewall $params.Firewall -Port $params.Port `
         -Username $params.Username -Password $params.Password `
-        -SkipCertificateCheck:$params.SkipCertificateCheck
+        -SkipCertificateCheck:$params.SkipCertificateCheck -AcceptLoginDisclaimer:$AcceptLoginDisclaimer
 
     $hasSince = $PSBoundParameters.ContainsKey('Since')
 
@@ -1701,7 +1718,7 @@ function Get-SfosLog {
             # already throws.
             $console = Connect-SfosWebAdmin -Firewall $params.Firewall -Port $params.Port `
                 -Username $params.Username -Password $params.Password `
-                -SkipCertificateCheck:$params.SkipCertificateCheck
+                -SkipCertificateCheck:$params.SkipCertificateCheck -AcceptLoginDisclaimer:$AcceptLoginDisclaimer
             $pollParams['LogViewerConsole'] = $console
             $poll = Invoke-SfosLogViewerFollowPoll @pollParams
         }
@@ -1722,6 +1739,385 @@ function Get-SfosLog {
         }
 
         Write-Verbose ("Get-SfosLog -Follow: poll fetched {0} record(s) across {1} attempt(s), output {2}." -f $poll.FetchedCount, $poll.AttemptsUsed, @($poll.NewPairsOrdered).Count)
+    }
+}
+
+#endregion
+
+#region DeviceConsole
+
+# The device console is a third access path alongside the XML API and the web admin console: a
+# menu-driven, keystroke-based interface reached the same way an administrator would reach it
+# from a physical or serial console. Per repository rule S:1, the transport - login, sending
+# keystrokes, collecting output - is implemented once in SophosFirewall.Core (Connect-
+# SfosCliConsole, Send-SfosCliInput, Receive-SfosCliOutput, Disconnect-SfosCliConsole). This
+# module only adds the command-and-response handling and the interactive pass-through on top of
+# it, never calling Invoke-WebRequest directly.
+
+<#
+.SYNOPSIS
+    Runs one or more commands on a Sophos Firewall's device console and returns their output.
+
+.DESCRIPTION
+    Sends each command to the device console prompt and returns the text the console printed in
+    response. Opens a device console session with Connect-SfosCliConsole when -CliSession is not
+    supplied, and closes that session again once every command has run or as soon as a command
+    fails; passing an existing -CliSession instead keeps that session open for further use once
+    this cmdlet returns. Only the admin and support accounts can open the device console, and the
+    console asks for that account's password again as a separate step, even though the caller
+    already authenticated to reach it.
+
+    The device console runs every command immediately, without a confirmation prompt of its own,
+    and its main menu carries an entry that shuts down or restarts the appliance. Review a
+    command before sending it - this cmdlet's own -WhatIf/-Confirm only guards the sending of the
+    command, not what the device console does with it once received.
+
+.PARAMETER Command
+    Required, accepts pipeline input. One or more command lines to send to the device console,
+    each sent on its own and followed by Enter. Every command produces one output string.
+
+.PARAMETER CliSession
+    Optional. An existing device console session, as returned by Connect-SfosCliConsole. When
+    supplied, that session is reused and left open when this cmdlet returns; when omitted, this
+    cmdlet opens its own session and closes it again once it is done, including when a command
+    fails.
+
+.PARAMETER Firewall
+    Optional. Host name or IP address of the firewall. If omitted, the value from the current
+    connection is used. Ignored when -CliSession is supplied.
+
+.PARAMETER Port
+    Optional. TCP port used to reach the firewall, usually 4444. If omitted, the value from the
+    current connection is used. Ignored when -CliSession is supplied.
+
+.PARAMETER Username
+    Optional. Account used to open the device console. Only the admin and support accounts can
+    open it; the console then asks for that account's password again as a separate step. If
+    omitted, the value from the current connection is used. Ignored when -CliSession is supplied.
+
+.PARAMETER Password
+    Optional. Password for the account above, as a SecureString - supplied once here and used
+    again by the console's own password prompt. If omitted, the value from the current
+    connection is used. Ignored when -CliSession is supplied.
+
+.PARAMETER SkipCertificateCheck
+    Optional. Accepts the firewall certificate without validating it. Use this only for
+    appliances that still present a self-signed certificate. Ignored when -CliSession is
+    supplied.
+
+.PARAMETER Session
+    Optional. A session object from Connect-SfosFirewall, or the name of a session that was
+    registered with Connect-SfosFirewall -Name. Used to resolve the connection parameters above
+    when they are not supplied directly. Ignored when -CliSession is supplied.
+
+.PARAMETER AcceptLoginDisclaimer
+    Optional. Confirms a login disclaimer configured on the appliance, on behalf of the
+    account logging in. Without this switch, opening a new console session on an appliance
+    that shows a login disclaimer fails with an error describing the disclaimer. Ignored when
+    -CliSession is supplied.
+
+.PARAMETER SkipMenu
+    Optional. Skips navigating from the device console's main menu to the console prompt before
+    the first command is sent, on the assumption that -CliSession already sits at a prompt - for
+    example because a previous call already navigated it. Without this switch, the cmdlet
+    selects the Device Console entry from the main menu once, before sending any command.
+
+.PARAMETER Prompt
+    Optional, default 'console>\s*$'. Regular expression that recognises the end of the
+    console's response to a command. Change this only if the console prompt in use differs from
+    the default.
+
+.PARAMETER TimeoutSeconds
+    Optional, default 30. How long to wait for -Prompt to appear after sending a command, in
+    seconds.
+
+.INPUTS
+    System.String. Command lines can be piped in.
+
+.OUTPUTS
+    System.String. One string per command, holding the console's response with the command's own
+    echo and the following prompt line removed, and terminal escape sequences stripped.
+
+.EXAMPLE
+    Connect-SfosFirewall -Firewall '192.0.2.1' -Credential (Get-Credential) -SkipCertificateCheck
+    Invoke-SfosCliCommand -Command 'show version' -Confirm:$false
+
+    Runs one command on the device console using the current connection and returns its output.
+
+.EXAMPLE
+    Invoke-SfosCliCommand -Command 'show version' -WhatIf
+
+    Shows which command would be sent, without actually sending it.
+
+.EXAMPLE
+    'show version', 'show system diagnostic' | Invoke-SfosCliCommand -Confirm:$false
+
+    Runs two commands over a single device console session and returns one string per command.
+
+.LINK
+    https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+.LINK
+    Connect-SfosFirewall
+#>
+function Invoke-SfosCliCommand {
+    [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory, ValueFromPipeline)]
+        [string[]]$Command,
+
+        [object]$CliSession,
+
+        # Connection parameters (optional - use stored context if not provided)
+        [string]$Firewall,
+        [int]$Port,
+        [string]$Username,
+        [SecureString]$Password,
+        [switch]$SkipCertificateCheck,
+        [object]$Session,
+        [switch]$AcceptLoginDisclaimer,
+
+        [switch]$SkipMenu,
+        [string]$Prompt = 'console>\s*$',
+        [int]$TimeoutSeconds = 30
+    )
+
+    begin {
+        $commands = [System.Collections.Generic.List[string]]::new()
+    }
+
+    process {
+        foreach ($item in $Command) {
+            $commands.Add($item)
+        }
+    }
+
+    end {
+        $ownSession = -not $PSBoundParameters.ContainsKey('CliSession')
+        $cliSession = $CliSession
+
+        try {
+            if ($ownSession) {
+                $params = Resolve-SfosParameters -BoundParameters $PSBoundParameters
+                $cliSession = Connect-SfosCliConsole -Firewall $params.Firewall -Port $params.Port `
+                    -Username $params.Username -Password $params.Password `
+                    -SkipCertificateCheck:$params.SkipCertificateCheck -AcceptLoginDisclaimer:$AcceptLoginDisclaimer
+            }
+
+            if (-not $SkipMenu) {
+                # Selects menu entry 4, Device Console, and waits for its prompt - once per
+                # call, regardless of how many commands are sent afterwards.
+                Send-SfosCliInput -CliSession $cliSession -Text '4'
+                Send-SfosCliInput -CliSession $cliSession -Key 'Enter'
+                $null = Receive-SfosCliOutput -CliSession $cliSession -TimeoutSeconds $TimeoutSeconds -Until $Prompt
+            }
+
+            foreach ($cmd in $commands) {
+                if (-not $PSCmdlet.ShouldProcess("CLI command '$cmd' on $($cliSession.BaseUri)", 'Invoke')) {
+                    continue
+                }
+
+                Send-SfosCliInput -CliSession $cliSession -Text $cmd
+                Send-SfosCliInput -CliSession $cliSession -Key 'Enter'
+                $raw = Receive-SfosCliOutput -CliSession $cliSession -TimeoutSeconds $TimeoutSeconds -Until $Prompt
+
+                # The captured text carries the console's own echo of the typed command as its
+                # first line and the next prompt as its last line; neither belongs to the
+                # command's actual output.
+                $lines = @($raw -split "`r?`n")
+                if ($lines.Count -gt 0) { $lines = @($lines[1..($lines.Count - 1)]) }
+                if ($lines.Count -gt 0) { $lines = @($lines[0..($lines.Count - 2)]) }
+                $cleaned = ($lines -join "`n") -replace '\x1B\[[0-9;]*[A-Za-z]', ''
+
+                $cleaned
+            }
+        }
+        finally {
+            if ($ownSession -and $cliSession) {
+                Disconnect-SfosCliConsole -CliSession $cliSession
+            }
+        }
+    }
+}
+
+<#
+.SYNOPSIS
+    Opens an interactive keyboard session on a Sophos Firewall's device console.
+
+.DESCRIPTION
+    Hands the keyboard to the device console and passes every keystroke and console response
+    through, the same way an administrator would work at a physical or serial console, until the
+    caller ends the session with Ctrl+Q. Opens a device console session with Connect-
+    SfosCliConsole when -CliSession is not supplied, and closes that session again once the
+    interactive session ends; passing an existing -CliSession instead keeps that session open for
+    further use once this cmdlet returns. Only the admin and support accounts can open the device
+    console, and the console asks for that account's password again as a separate step, even
+    though the caller already authenticated to reach it.
+
+    The console runs every command immediately, without a confirmation prompt of its own, and its
+    main menu carries an entry that shuts down or restarts the appliance - that entry is reachable
+    from this interactive session exactly as it would be at a physical console.
+
+    Requires an interactive host with keyboard input. Running this cmdlet from a non-interactive
+    session throws instead of waiting indefinitely for a key press that will never arrive.
+
+.PARAMETER Firewall
+    Optional. Host name or IP address of the firewall. If omitted, the value from the current
+    connection is used. Ignored when -CliSession is supplied.
+
+.PARAMETER Port
+    Optional. TCP port used to reach the firewall, usually 4444. If omitted, the value from the
+    current connection is used. Ignored when -CliSession is supplied.
+
+.PARAMETER Username
+    Optional. Account used to open the device console. Only the admin and support accounts can
+    open it; the console then asks for that account's password again as a separate step. If
+    omitted, the value from the current connection is used. Ignored when -CliSession is supplied.
+
+.PARAMETER Password
+    Optional. Password for the account above, as a SecureString - supplied once here and used
+    again by the console's own password prompt. If omitted, the value from the current
+    connection is used. Ignored when -CliSession is supplied.
+
+.PARAMETER SkipCertificateCheck
+    Optional. Accepts the firewall certificate without validating it. Use this only for
+    appliances that still present a self-signed certificate. Ignored when -CliSession is
+    supplied.
+
+.PARAMETER Session
+    Optional. A session object from Connect-SfosFirewall, or the name of a session that was
+    registered with Connect-SfosFirewall -Name. Used to resolve the connection parameters above
+    when they are not supplied directly. Ignored when -CliSession is supplied.
+
+.PARAMETER AcceptLoginDisclaimer
+    Optional. Confirms a login disclaimer configured on the appliance, on behalf of the
+    account logging in. Without this switch, opening a new console session on an appliance
+    that shows a login disclaimer fails with an error describing the disclaimer. Ignored when
+    -CliSession is supplied.
+
+.PARAMETER CliSession
+    Optional. An existing device console session, as returned by Connect-SfosCliConsole. When
+    supplied, that session is reused and left open when this cmdlet returns; when omitted, this
+    cmdlet opens its own session and closes it again once the interactive session ends.
+
+.INPUTS
+    None. This cmdlet reads the keyboard directly and does not accept pipeline input.
+
+.OUTPUTS
+    None. Console output is written directly to the host as it arrives; nothing is returned to
+    the pipeline.
+
+.EXAMPLE
+    Enter-SfosCliConsole -Firewall '192.0.2.1' -Username 'admin' -Password (Read-Host -AsSecureString) -SkipCertificateCheck
+
+    Opens the device console's main menu interactively. Navigate it with the keyboard as at a
+    physical console, and press Ctrl+Q to end the session.
+
+.LINK
+    https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+.LINK
+    Invoke-SfosCliCommand
+#>
+function Enter-SfosCliConsole {
+    # PSAvoidUsingWriteHost is suppressed on purpose: this cmdlet is an interactive keyboard
+    # pass-through, not a pipeline producer. Console output has to reach the terminal
+    # synchronously, in the exact bytes the device console sent, which Write-Output cannot do.
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '')]
+    [CmdletBinding()]
+    param(
+        [string]$Firewall,
+        [int]$Port,
+        [string]$Username,
+        [SecureString]$Password,
+        [switch]$SkipCertificateCheck,
+        [object]$Session,
+        [switch]$AcceptLoginDisclaimer,
+
+        [object]$CliSession
+    )
+
+    try {
+        $null = $Host.UI.RawUI.KeyAvailable
+    }
+    catch {
+        throw "Enter-SfosCliConsole needs an interactive console with keyboard input. This host ('$($Host.Name)') does not provide one; run this cmdlet from a console host, not from a non-interactive session."
+    }
+
+    $ownSession = -not $PSBoundParameters.ContainsKey('CliSession')
+    $cliSession = $CliSession
+    $originalTreatControlCAsInput = [Console]::TreatControlCAsInput
+
+    try {
+        if ($ownSession) {
+            $params = Resolve-SfosParameters -BoundParameters $PSBoundParameters
+            $cliSession = Connect-SfosCliConsole -Firewall $params.Firewall -Port $params.Port `
+                -Username $params.Username -Password $params.Password `
+                -SkipCertificateCheck:$params.SkipCertificateCheck -AcceptLoginDisclaimer:$AcceptLoginDisclaimer
+        }
+
+        [Console]::Write($cliSession.Banner)
+
+        # Ctrl+C would otherwise raise the console's CancelKeyPress event and terminate this
+        # cmdlet outright instead of being read as a key; capturing it here lets it be forwarded
+        # to the device console as a Break, and Ctrl+Q remains the only way out of this loop.
+        [Console]::TreatControlCAsInput = $true
+
+        while ($true) {
+            if (-not [Console]::KeyAvailable) {
+                Start-Sleep -Milliseconds 50
+                continue
+            }
+
+            $key = [Console]::ReadKey($true)
+
+            if ($key.Modifiers -band [ConsoleModifiers]::Control) {
+                if ($key.Key -eq [ConsoleKey]::Q) {
+                    break
+                }
+                if ($key.Key -eq [ConsoleKey]::C) {
+                    $output = Send-SfosCliInput -CliSession $cliSession -Key 'Break'
+                    if ($output) { [Console]::Write($output) }
+                    continue
+                }
+            }
+
+            $mappedKey = switch ($key.Key) {
+                'Enter' { 'Enter' }
+                'Backspace' { 'Backspace' }
+                'Tab' { 'Tab' }
+                'Delete' { 'Delete' }
+                'Home' { 'Home' }
+                'End' { 'End' }
+                'LeftArrow' { 'LeftArrow' }
+                'RightArrow' { 'RightArrow' }
+                'UpArrow' { 'UpArrow' }
+                'DownArrow' { 'DownArrow' }
+                'Escape' { 'Escape' }
+                default { $null }
+            }
+
+            if ($mappedKey) {
+                $output = Send-SfosCliInput -CliSession $cliSession -Key $mappedKey
+            }
+            elseif ($key.KeyChar) {
+                $output = Send-SfosCliInput -CliSession $cliSession -Text ([string]$key.KeyChar)
+            }
+            else {
+                continue
+            }
+
+            if ($output) {
+                [Console]::Write($output)
+            }
+        }
+    }
+    finally {
+        [Console]::TreatControlCAsInput = $originalTreatControlCAsInput
+        if ($ownSession -and $cliSession) {
+            Disconnect-SfosCliConsole -CliSession $cliSession
+        }
     }
 }
 

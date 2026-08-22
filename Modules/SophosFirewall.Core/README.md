@@ -79,6 +79,38 @@ and that element's text must be the file's base name, matching the uploaded file
 that do not pass `-MultipartFile` are unaffected - the request is sent exactly as before
 this parameter existed.
 
+### Reaching the appliance's CLI console
+
+`Connect-SfosCliConsole`, `Send-SfosCliInput`, `Receive-SfosCliOutput` and
+`Disconnect-SfosCliConsole` reach the appliance's own text console - the same screen an
+administrator opens from the "Console" entry of the web admin interface - rather than the
+XML API or the web admin screens `Connect-SfosWebAdmin` reaches. Use it only for actions
+that have no equivalent anywhere else in this module suite.
+
+A few things to know before using it:
+
+- Only the `admin` and `support` accounts can open the console; every other account is
+  turned away.
+- The console asks for the account's password a second time once the session opens, even
+  though the caller already authenticated to reach it. `Connect-SfosCliConsole` answers
+  that prompt automatically.
+- Always close a session you opened with `Disconnect-SfosCliConsole`, including on an
+  error path. A session that is not closed stays open on the appliance.
+- The console's main menu includes an entry that reboots or shuts down the appliance, and
+  every key reaches it exactly as if typed at a physical terminal, with no confirmation
+  prompt of its own. Never send an entry you have not verified yourself.
+- Like the web admin interface, this path is undocumented and specific to the current
+  firmware; it can change or stop working on a future update without notice.
+
+```powershell
+$cli = Connect-SfosCliConsole -Session 'fw1'
+$cli.Banner
+Send-SfosCliInput -CliSession $cli -Text '4'
+Send-SfosCliInput -CliSession $cli -Key 'Enter'
+Receive-SfosCliOutput -CliSession $cli -Until 'console>'
+Disconnect-SfosCliConsole -CliSession $cli
+```
+
 ### Reading a file response
 
 Certificate, CertificateAuthority, CRL and FormTemplate answer a Get with a tar archive
@@ -114,6 +146,10 @@ independently of the tar structure.
 | `ConvertFrom-SfosArchive` | Reads the tar archive returned by Certificate, CertificateAuthority, CRL and FormTemplate instead of XML. |
 | `Connect-SfosWebAdmin` | Logs into the web admin interface (Web Admin Console - not the XML API, not the appliance's CLI console) and returns a session context. Undocumented and firmware-bound - see its own help before using it. |
 | `Invoke-SfosWebAdminRequest` | Sends one request to the web admin interface's controller. Undocumented and firmware-bound - see its own help before using it. |
+| `Connect-SfosCliConsole` | Opens a session on the appliance's own CLI console (reached through the web admin interface's "Console" entry) and returns its context. Undocumented and firmware-bound - see its own help before using it. |
+| `Send-SfosCliInput` | Sends one piece of input - text or a named key - to an open CLI console session. |
+| `Receive-SfosCliOutput` | Collects pending output from an open CLI console session. |
+| `Disconnect-SfosCliConsole` | Closes a CLI console session. |
 
 ## Status codes
 

@@ -19,7 +19,11 @@
         'ConvertTo-SfosXmlEscaped',
         'ConvertFrom-SfosArchive',
         'Connect-SfosWebAdmin',
-        'Invoke-SfosWebAdminRequest'
+        'Invoke-SfosWebAdminRequest',
+        'Connect-SfosCliConsole',
+        'Send-SfosCliInput',
+        'Receive-SfosCliOutput',
+        'Disconnect-SfosCliConsole'
     )
     
     CmdletsToExport      = @()

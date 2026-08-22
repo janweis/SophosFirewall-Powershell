@@ -52,13 +52,70 @@ Describe 'SophosFirewall.Core Module' {
                 'Assert-SfosApiReturnSuccess',
                 'Resolve-SfosParameters',
                 'ConvertTo-SfosXmlEscaped',
+                'ConvertFrom-SfosArchive',
                 'Connect-SfosWebAdmin',
-                'Invoke-SfosWebAdminRequest'
+                'Invoke-SfosWebAdminRequest',
+                'Connect-SfosCliConsole',
+                'Send-SfosCliInput',
+                'Receive-SfosCliOutput',
+                'Disconnect-SfosCliConsole'
             )
-            
+
             foreach ($func in $requiredFunctions) {
                 $module.ExportedFunctions.Keys | Should -Contain $func
             }
+        }
+
+        It 'Manifest FunctionsToExport should list exactly 15 functions, matching the loaded module' {
+            $modulesDir = Join-Path (Split-Path -Parent $PSScriptRoot) 'Modules'
+            $manifestPath = Join-Path $modulesDir 'SophosFirewall.Core\SophosFirewall.Core.psd1'
+
+            $originalModulePath = $env:PSModulePath
+            $env:PSModulePath = "$modulesDir;$originalModulePath"
+            try {
+                $manifest = Test-ModuleManifest -Path $manifestPath -ErrorAction Stop
+            }
+            finally {
+                $env:PSModulePath = $originalModulePath
+            }
+
+            $manifest.ExportedFunctions.Count | Should -Be 15
+            @($manifest.ExportedFunctions.Keys | Sort-Object) | Should -Be @(
+                'Assert-SfosApiReturnSuccess',
+                'Connect-SfosCliConsole',
+                'Connect-SfosFirewall',
+                'Connect-SfosWebAdmin',
+                'ConvertFrom-SfosArchive',
+                'ConvertTo-SfosXmlEscaped',
+                'Disconnect-SfosCliConsole',
+                'Disconnect-SfosFirewall',
+                'Get-SfosApiStatus',
+                'Get-SfosSession',
+                'Invoke-SfosApi',
+                'Invoke-SfosWebAdminRequest',
+                'Receive-SfosCliOutput',
+                'Resolve-SfosParameters',
+                'Send-SfosCliInput'
+            )
+        }
+
+        It 'Should export the same functions the psm1 exports via Export-ModuleMember' {
+            $modulePath = if (Test-Path "$PSScriptRoot\..\Modules\SophosFirewall.Core\SophosFirewall.Core.psm1") {
+                "$PSScriptRoot\..\Modules\SophosFirewall.Core\SophosFirewall.Core.psm1"
+            } else {
+                "$PSScriptRoot\..\..\Modules\SophosFirewall.Core\SophosFirewall.Core.psm1"
+            }
+            $psm1Content = Get-Content -LiteralPath $modulePath -Raw
+            $exportBlockMatch = [regex]::Match($psm1Content, "Export-ModuleMember\s+-Function\s+@\(([^)]*)\)")
+            $exportBlockMatch.Success | Should -BeTrue
+
+            $psm1Exports = [regex]::Matches($exportBlockMatch.Groups[1].Value, "'([^']+)'") |
+                ForEach-Object { $_.Groups[1].Value } | Sort-Object
+
+            $module = Get-Module -Name 'SophosFirewall.Core'
+            $moduleExports = @($module.ExportedFunctions.Keys | Sort-Object)
+
+            @($psm1Exports) | Should -Be $moduleExports
         }
     }
     
@@ -1244,6 +1301,114 @@ Describe 'Connect-SfosWebAdmin' {
 
         { Connect-SfosWebAdmin @conn } | Should -Throw '*CSRF*'
     }
+
+    It 'Should have AcceptLoginDisclaimer as a switch, with the six connection parameters in their existing order before it' {
+        $cmd = Get-Command Connect-SfosWebAdmin
+        $names = @($cmd.Parameters.Keys | Where-Object { $cmd.Parameters[$_].ParameterSets.ContainsKey('__AllParameterSets') })
+        $connectionOrder = @('Firewall', 'Port', 'Username', 'Password', 'SkipCertificateCheck', 'Session', 'AcceptLoginDisclaimer')
+        @($names | Where-Object { $_ -in $connectionOrder }) | Should -Be $connectionOrder
+        $cmd.Parameters['AcceptLoginDisclaimer'].ParameterType | Should -Be ([switch])
+    }
+
+    It 'Should throw a disclaimer error naming the disclaimer when the appliance redirects to AccessBanner and the switch is not passed' {
+        Mock -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -MockWith {
+            if ($Body -like 'mode=151*') {
+                return [PSCustomObject]@{ StatusCode = 200; Content = '{"status":200,"redirectionURL":"/system/AccessBanner.html","disclaimer_message":"A C C E S S  W A R N I N G","username":"apiuser","languageid":1}' }
+            }
+            return [PSCustomObject]@{ StatusCode = 200; Content = '' }
+        }
+
+        { Connect-SfosWebAdmin @conn } | Should -Throw '*disclaimer*'
+    }
+
+    It 'Should confirm the disclaimer with mode 716 and accessaction 1 when the switch is passed, then complete normally' {
+        Mock -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -MockWith {
+            if ($Body -like 'mode=151*') {
+                return [PSCustomObject]@{ StatusCode = 200; Content = '{"status":200,"redirectionURL":"/system/AccessBanner.html","disclaimer_message":"A C C E S S  W A R N I N G","username":"apiuser","languageid":1}' }
+            }
+            if ($Body -like 'mode=716*') {
+                return [PSCustomObject]@{ StatusCode = 200; Content = '{"status":200}' }
+            }
+            if ($Uri -like '*/webconsole/webpages/index.jsp') {
+                return [PSCustomObject]@{ StatusCode = 200; Content = $script:CsrfHtml }
+            }
+            return [PSCustomObject]@{ StatusCode = 200; Content = '' }
+        }
+
+        $console = Connect-SfosWebAdmin @conn -AcceptLoginDisclaimer
+
+        $console.Csrf | Should -Be 'tok123'
+        Should -Invoke -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -Times 1 -Exactly -ParameterFilter {
+            if ($Uri -notlike '*/webconsole/Controller') { return $false }
+            if ($Body -notlike 'mode=716*') { return $false }
+            $disclaimerJson = [uri]::UnescapeDataString(($Body -replace '^mode=716&json=', '')) | ConvertFrom-Json
+            $disclaimerJson.accessaction -eq 1 -and $disclaimerJson.uname -eq 'apiuser' -and $disclaimerJson.languageid -eq 1
+        }
+    }
+
+    It 'Should never fetch index.jsp before confirming the disclaimer - measured: fetching it first discards the session' {
+        $script:CallOrder = [System.Collections.Generic.List[string]]::new()
+        Mock -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -MockWith {
+            if ($Body -like 'mode=151*') {
+                $script:CallOrder.Add('login')
+                return [PSCustomObject]@{ StatusCode = 200; Content = '{"status":200,"redirectionURL":"/system/AccessBanner.html","disclaimer_message":"A C C E S S  W A R N I N G","username":"apiuser","languageid":1}' }
+            }
+            if ($Body -like 'mode=716*') {
+                $script:CallOrder.Add('disclaimer')
+                return [PSCustomObject]@{ StatusCode = 200; Content = '{"status":200}' }
+            }
+            if ($Uri -like '*/webconsole/webpages/index.jsp') {
+                $script:CallOrder.Add('csrf')
+                return [PSCustomObject]@{ StatusCode = 200; Content = $script:CsrfHtml }
+            }
+            $script:CallOrder.Add('root')
+            return [PSCustomObject]@{ StatusCode = 200; Content = '' }
+        }
+
+        Connect-SfosWebAdmin @conn -AcceptLoginDisclaimer | Out-Null
+        @($script:CallOrder) | Should -Be @('root', 'login', 'disclaimer', 'csrf')
+
+        $script:CallOrder = [System.Collections.Generic.List[string]]::new()
+        { Connect-SfosWebAdmin @conn } | Should -Throw '*disclaimer*'
+        @($script:CallOrder) | Should -Be @('root', 'login')
+        @($script:CallOrder) | Should -Not -Contain 'csrf'
+    }
+
+    It 'Should decode a space-separated decimal character code response before parsing it as JSON' {
+        Mock -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -MockWith {
+            if ($Body -like 'mode=151*') {
+                return [PSCustomObject]@{ StatusCode = 200; Content = '{"status":200,"redirectionURL":"/system/AccessBanner.html","disclaimer_message":"A C C E S S  W A R N I N G","username":"apiuser","languageid":1}' }
+            }
+            if ($Body -like 'mode=716*') {
+                # {"status":"Session Expired"} as space-separated decimal character codes.
+                $text = '{"status":"Session Expired"}'
+                $codes = ($text.ToCharArray() | ForEach-Object { [int][char]$_ }) -join ' '
+                return [PSCustomObject]@{ StatusCode = 200; Content = $codes }
+            }
+            return [PSCustomObject]@{ StatusCode = 200; Content = '' }
+        }
+
+        { Connect-SfosWebAdmin @conn -AcceptLoginDisclaimer } | Should -Throw '*disclaimer confirmation failed*'
+    }
+
+    It 'Should not send a disclaimer confirmation when redirectionURL points at index.jsp' {
+        Mock -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -MockWith {
+            if ($Body -like 'mode=151*') {
+                return [PSCustomObject]@{ StatusCode = 200; Content = '{"status":200,"redirectionURL":"/webpages/index.jsp"}' }
+            }
+            if ($Uri -like '*/webconsole/webpages/index.jsp') {
+                return [PSCustomObject]@{ StatusCode = 200; Content = $script:CsrfHtml }
+            }
+            return [PSCustomObject]@{ StatusCode = 200; Content = '' }
+        }
+
+        $console = Connect-SfosWebAdmin @conn
+
+        $console.Csrf | Should -Be 'tok123'
+        Should -Invoke -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -Times 0 -Exactly -ParameterFilter {
+            $Body -like 'mode=716*'
+        }
+    }
 }
 
 Describe 'Invoke-SfosWebAdminRequest' {
@@ -1300,5 +1465,103 @@ Describe 'Invoke-SfosWebAdminRequest' {
         $result = Invoke-SfosWebAdminRequest -WebAdminSession $webAdminSession -Mode 5001 -Json '{}'
         $result.status | Should -Be 200
         $result.limit | Should -Be 200
+    }
+}
+
+# ------------------------------------------------------------------------------------------
+# Connect-SfosCliConsole / Send-SfosCliInput / Receive-SfosCliOutput / Disconnect-SfosCliConsole
+# reach the appliance's own text console, a third path alongside the XML API and the web admin
+# interface. Covered here: the connection contract, and that closing a session that is already
+# gone does not throw.
+
+Describe 'Connect-SfosCliConsole - Parameter Contract' {
+
+    BeforeAll {
+        $modulePath = if (Test-Path "$PSScriptRoot\..\Modules\SophosFirewall.Core\SophosFirewall.Core.psm1") {
+            "$PSScriptRoot\..\Modules\SophosFirewall.Core\SophosFirewall.Core.psm1"
+        } else {
+            "$PSScriptRoot\..\..\Modules\SophosFirewall.Core\SophosFirewall.Core.psm1"
+        }
+
+        $tokens = $null
+        $parseErrors = $null
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile($modulePath, [ref]$tokens, [ref]$parseErrors)
+        $funcAst = $ast.FindAll(
+            { param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Connect-SfosCliConsole' },
+            $true
+        ) | Select-Object -First 1
+
+        $script:CliConsoleParams = @($funcAst.Body.ParamBlock.Parameters | ForEach-Object {
+            [PSCustomObject]@{
+                Name       = $_.Name.VariablePath.UserPath
+                Type       = if ($_.StaticType) { $_.StaticType.Name } else { $null }
+                HasDefault = $null -ne $_.DefaultValue
+            }
+        })
+    }
+
+    It 'Should declare the six connection parameters in the prescribed order and types, with AcceptLoginDisclaimer appended after them' {
+        $expected = @(
+            @{ Name = 'Firewall'; Type = 'String' },
+            @{ Name = 'Port'; Type = 'Int32' },
+            @{ Name = 'Username'; Type = 'String' },
+            @{ Name = 'Password'; Type = 'SecureString' },
+            @{ Name = 'SkipCertificateCheck'; Type = 'SwitchParameter' },
+            @{ Name = 'Session'; Type = 'Object' },
+            @{ Name = 'AcceptLoginDisclaimer'; Type = 'SwitchParameter' }
+        )
+
+        $script:CliConsoleParams.Count | Should -Be $expected.Count
+
+        for ($i = 0; $i -lt $expected.Count; $i++) {
+            $script:CliConsoleParams[$i].Name | Should -Be $expected[$i].Name
+            $script:CliConsoleParams[$i].Type | Should -Be $expected[$i].Type
+        }
+    }
+
+    It 'Should give none of the connection parameters a default value' {
+        foreach ($param in $script:CliConsoleParams) {
+            $param.HasDefault | Should -BeFalse -Because "$($param.Name) must not compete with the session context"
+        }
+    }
+}
+
+Describe 'Disconnect-SfosCliConsole - Closing an already-gone session' {
+
+    BeforeAll {
+        $script:CliSession = [PSCustomObject]@{
+            BaseUri              = 'https://fw.example.test:4444'
+            WebSession           = $null
+            Csrf                 = 'tok123'
+            SkipCertificateCheck = $false
+        }
+    }
+
+    It 'Should not throw when the console session is already gone' {
+        Mock -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -MockWith {
+            [PSCustomObject]@{ StatusCode = 200; Content = '{"status":"Session Expired"}' }
+        }
+
+        { Disconnect-SfosCliConsole -CliSession $script:CliSession } | Should -Not -Throw
+    }
+
+    It 'Should not throw when the request itself fails' {
+        Mock -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -MockWith {
+            throw 'Connection refused'
+        }
+
+        { Disconnect-SfosCliConsole -CliSession $script:CliSession } | Should -Not -Throw
+    }
+
+    It 'Should still send the CLOSE cmdType to the TelnetServlet' {
+        Mock -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -MockWith {
+            [PSCustomObject]@{ StatusCode = 200; Content = '' }
+        }
+
+        Disconnect-SfosCliConsole -CliSession $script:CliSession
+
+        Should -Invoke -CommandName Invoke-WebRequest -ModuleName SophosFirewall.Core -Times 1 -Exactly -ParameterFilter {
+            $Uri -like '*/webconsole/servlet/TelnetServlet' -and $Body -like '*cmdType=CLOSE*'
+        }
     }
 }

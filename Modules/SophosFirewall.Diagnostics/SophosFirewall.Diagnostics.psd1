@@ -3,7 +3,7 @@
     ModuleVersion        = '1.4.0'
     GUID                 = '799d548b-6bac-4c7a-931d-bfd62e10bee3'
     Author               = 'Jan Weis'
-    Description          = 'PowerShell module for the MONITOR & ANALYZE > Diagnostics area of Sophos XGS / SFOS 22.0 firewalls: remote support access, and read-only access to the web admin console log viewer.'
+    Description          = 'PowerShell module for the MONITOR & ANALYZE > Diagnostics area of Sophos XGS / SFOS 22.0 firewalls: remote support access, read-only access to the web admin console log viewer, and running commands on the appliance device console. Intended for administrators who need to open a temporary support channel, review recent log activity, or reach the device console without a physical or serial connection.'
 
     PowerShellVersion    = '5.1'
     CompatiblePSEditions = @('Desktop', 'Core')
@@ -21,7 +21,9 @@
         'Get-SfosSupportAccess',
         'Set-SfosSupportAccess',
         'Get-SfosLog',
-        'Get-SfosLogCategory'
+        'Get-SfosLogCategory',
+        'Invoke-SfosCliCommand',
+        'Enter-SfosCliConsole'
     )
 
     CmdletsToExport      = @()

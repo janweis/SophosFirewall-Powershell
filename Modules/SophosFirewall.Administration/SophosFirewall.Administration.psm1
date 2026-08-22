@@ -5752,6 +5752,11 @@ function Set-SfosAdminPassword {
     you work with more than one at a time. Any connection parameter you pass explicitly
     still takes precedence. If omitted, the stored default connection is used.
 
+.PARAMETER AcceptLoginDisclaimer
+    Optional. Confirms a login disclaimer configured on the appliance, on behalf of the
+    account logging in. Without this switch, this cmdlet fails on an appliance that shows a
+    login disclaimer, with an error describing the disclaimer.
+
 .INPUTS
     None. This cmdlet does not accept pipeline input.
 
@@ -5792,7 +5797,8 @@ function Restart-SfosFirewall {
         [SecureString]$Password,
         [switch]$SkipCertificateCheck,
 
-        [object]$Session
+        [object]$Session,
+        [switch]$AcceptLoginDisclaimer
     )
 
     $params = Resolve-SfosParameters -BoundParameters $PSBoundParameters
@@ -5805,7 +5811,7 @@ function Restart-SfosFirewall {
         -Port $params.Port `
         -Username $params.Username `
         -Password $params.Password `
-        -SkipCertificateCheck:$params.SkipCertificateCheck -ErrorAction Stop
+        -SkipCertificateCheck:$params.SkipCertificateCheck -AcceptLoginDisclaimer:$AcceptLoginDisclaimer -ErrorAction Stop
 
     # The web console drives both its own menu entries through mode 193 and tells restart from
     # shutdown with the reboot flag - 1 restarts, 0 shuts down - while its dialog marks the
@@ -5887,6 +5893,11 @@ function Restart-SfosFirewall {
     you work with more than one at a time. Any connection parameter you pass explicitly
     still takes precedence. If omitted, the stored default connection is used.
 
+.PARAMETER AcceptLoginDisclaimer
+    Optional. Confirms a login disclaimer configured on the appliance, on behalf of the
+    account logging in. Without this switch, this cmdlet fails on an appliance that shows a
+    login disclaimer, with an error describing the disclaimer.
+
 .INPUTS
     None. This cmdlet does not accept pipeline input.
 
@@ -5928,7 +5939,8 @@ function Stop-SfosFirewall {
         [SecureString]$Password,
         [switch]$SkipCertificateCheck,
 
-        [object]$Session
+        [object]$Session,
+        [switch]$AcceptLoginDisclaimer
     )
 
     $params = Resolve-SfosParameters -BoundParameters $PSBoundParameters
@@ -5941,7 +5953,7 @@ function Stop-SfosFirewall {
         -Port $params.Port `
         -Username $params.Username `
         -Password $params.Password `
-        -SkipCertificateCheck:$params.SkipCertificateCheck -ErrorAction Stop
+        -SkipCertificateCheck:$params.SkipCertificateCheck -AcceptLoginDisclaimer:$AcceptLoginDisclaimer -ErrorAction Stop
 
     # Mode 193 serves both the reboot and the shutdown entry of the web console's own menu; the
     # console tells them apart with a reboot flag, 1 for reboot and 0 for shutdown, and its popup

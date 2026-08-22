@@ -9,11 +9,13 @@
     that depend on this one.
 
     Also carries Connect-SfosWebAdmin and Invoke-SfosWebAdminRequest, an undocumented,
-    firmware-bound path into the web admin interface (Web Admin Console - not the appliance's
-    CLI console) for the handful of screens that have no equivalent in the XML API - see their
-    own help before using them.
+    firmware-bound path into the web admin interface (Web Admin Console) for the handful of
+    screens that have no equivalent in the XML API, and Connect-SfosCliConsole,
+    Send-SfosCliInput, Receive-SfosCliOutput and Disconnect-SfosCliConsole, a second
+    undocumented, firmware-bound path into the appliance's own CLI console reached through
+    that same web admin interface - see their own help before using any of them.
 
-    Total Functions: 14 (11 exported, 3 internal helpers) - see README.md for the full
+    Total Functions: 21 (15 exported, 6 internal helpers) - see README.md for the full
     cmdlet table.
 
     API reference:
@@ -1359,6 +1361,11 @@ function Get-SfosSession {
     work with more than one at a time. Any connection parameter you pass explicitly still
     takes precedence. If omitted, the stored default connection is used.
 
+.PARAMETER AcceptLoginDisclaimer
+    Optional. Confirms a login disclaimer configured on the appliance, on behalf of the
+    account logging in. Without this switch, logging in to an appliance that shows a login
+    disclaimer fails with an error describing the disclaimer.
+
 .INPUTS
     None. This cmdlet does not accept pipeline input.
 
@@ -1400,7 +1407,9 @@ function Connect-SfosWebAdmin {
         [string]$Username,
         [SecureString]$Password,
         [switch]$SkipCertificateCheck,
-        [object]$Session
+        [object]$Session,
+
+        [switch]$AcceptLoginDisclaimer
     )
 
     $params = Resolve-SfosParameters -BoundParameters $PSBoundParameters
@@ -1472,6 +1481,103 @@ function Connect-SfosWebAdmin {
             throw "Sophos Firewall web console login failed for '$($params.Username)' on $baseUri (status '$($loginResult.status)')."
         }
 
+        # A successful login (status 200) does not by itself mean the session is usable: an
+        # appliance with a login disclaimer configured answers with redirectionURL pointing at
+        # AccessBanner.html instead of index.jsp, and the session stays at that banner until it
+        # is confirmed with mode=716 (Modes.LOGIN_DISCLAIMER), accessaction 1 for "I accept" or
+        # 2 for "I decline" - only "I accept" is implemented here.
+        #
+        # The confirmation has to be sent immediately after the login answer, with no other
+        # request in between - measured, not a style choice. Fetching index.jsp first discards
+        # the session: the confirmation then answers {"status":"Session Expired"} and the
+        # session is dead, needing a fresh login. This is why the check below runs, and either
+        # throws or confirms, before index.jsp is ever requested - on every path, including the
+        # one that gives up.
+        $redirectionUrl = $null
+        if ($loginResult.PSObject.Properties.Match('redirectionURL').Count -gt 0) {
+            $redirectionUrl = [string]$loginResult.redirectionURL
+        }
+
+        $otherRedirection = $null
+        if ($redirectionUrl -match 'AccessBanner') {
+            $disclaimerText = [string]$loginResult.disclaimer_message
+            $disclaimerText = ($disclaimerText -replace '\s+', ' ').Trim()
+            if ($disclaimerText.Length -gt 200) {
+                $disclaimerText = $disclaimerText.Substring(0, 200) + '...'
+            }
+
+            if (-not $AcceptLoginDisclaimer) {
+                throw "Sophos Firewall web console login for '$($params.Username)' on $baseUri shows a login disclaimer. The session is not usable until the disclaimer is confirmed - pass -AcceptLoginDisclaimer to confirm it on behalf of this account, or disable the disclaimer on the appliance. Disclaimer text: $disclaimerText"
+            }
+
+            $disclaimerJsonObj = [ordered]@{
+                accessaction = 1
+                languageid   = $loginResult.languageid
+                uname        = $loginResult.username
+            }
+            if ($loginResult.PSObject.Properties.Match('iviewfromwebadmin').Count -gt 0) {
+                $disclaimerJsonObj['iviewfromwebadmin'] = $loginResult.iviewfromwebadmin
+            }
+            if ($loginResult.PSObject.Properties.Match('myAccountAdmin').Count -gt 0) {
+                $disclaimerJsonObj['myAccountAdmin'] = $loginResult.myAccountAdmin
+            }
+            $disclaimerJson = $disclaimerJsonObj | ConvertTo-Json -Compress
+            $disclaimerBody = 'mode=716&json=' + [uri]::EscapeDataString($disclaimerJson)
+
+            # The Referer decides whether this request is answered at all: without it the
+            # appliance replies with the login page, and with X-Requested-With but no Referer it
+            # reports the session as expired. Both are sent, as the console itself does.
+            $disclaimerHeaders = @{
+                'X-Requested-With' = 'XMLHttpRequest'
+                'Referer'          = "$baseUri/webconsole/webpages/login.jsp"
+            }
+
+            try {
+                $disclaimerResponse = Invoke-WebRequest -Uri "$baseUri/webconsole/Controller" -Method Post `
+                    -Body $disclaimerBody -ContentType 'application/x-www-form-urlencoded' `
+                    -Headers $disclaimerHeaders `
+                    -WebSession $webSession -ErrorAction Stop @invokeCommon
+            }
+            catch {
+                throw "Sophos Firewall web console login disclaimer confirmation failed for '$($params.Username)' on $baseUri : $($_.Exception.Message)"
+            }
+
+            # A confirmation sent too late (the session was already discarded, see above) answers
+            # with space-separated decimal character codes instead of JSON text - measured on a
+            # session that had been invalidated this way. Decode that shape before parsing so the
+            # failure surfaces as the clear error below, not as a JSON parser error.
+            $disclaimerContent = [string]$disclaimerResponse.Content
+            if ($disclaimerContent -match '^[\d\s]+$') {
+                $disclaimerContent = -join (@($disclaimerContent -split '\s+' | Where-Object { $_ -ne '' }) | ForEach-Object { [char][int]$_ })
+            }
+
+            $disclaimerResult = $null
+            try {
+                $disclaimerResult = $disclaimerContent | ConvertFrom-Json -ErrorAction Stop
+            }
+            catch {
+                throw "Sophos Firewall web console login disclaimer confirmation for '$($params.Username)' on $baseUri did not answer with the expected JSON. The console interface may have changed."
+            }
+
+            # status is not guaranteed numeric here: a confirmation sent too late answers with
+            # the text "Session Expired" instead of a status code (see the decode step above).
+            # [int]::TryParse - not a direct cast - so that text fails the check cleanly instead
+            # of throwing an unrelated type-conversion error.
+            $disclaimerStatusOk = $false
+            if ($disclaimerResult.PSObject.Properties.Match('status').Count -gt 0) {
+                $parsedStatus = 0
+                if ([int]::TryParse([string]$disclaimerResult.status, [ref]$parsedStatus) -and $parsedStatus -eq 200) {
+                    $disclaimerStatusOk = $true
+                }
+            }
+            if (-not $disclaimerStatusOk) {
+                throw "Sophos Firewall web console login disclaimer confirmation failed for '$($params.Username)' on $baseUri (status '$($disclaimerResult.status)')."
+            }
+        }
+        elseif ($redirectionUrl -and $redirectionUrl -notmatch 'index\.jsp') {
+            $otherRedirection = $redirectionUrl
+        }
+
         try {
             $pageResponse = Invoke-WebRequest -Uri "$baseUri/webconsole/webpages/index.jsp" `
                 -WebSession $webSession -ErrorAction Stop @invokeCommon
@@ -1482,6 +1588,9 @@ function Connect-SfosWebAdmin {
 
         $csrfMatch = [regex]::Match($pageResponse.Content, 'Cyberoam\.c\$rFt0k3n\s*=\s*''([^'']+)''')
         if (-not $csrfMatch.Success) {
+            if ($otherRedirection) {
+                throw "Sophos Firewall web console login for '$($params.Username)' on $baseUri redirected to '$otherRedirection' after login, so the session is not usable. The console interface may have changed."
+            }
             throw "Could not read the CSRF token from the Sophos Firewall web console start page on $baseUri. The console interface may have changed."
         }
 
@@ -1874,6 +1983,667 @@ function ConvertFrom-SfosArchive {
 
 #endregion
 
+#region CLI Console
+
+<#
+.SYNOPSIS
+    Sends one raw command to the appliance's CLI console. Internal helper, not exported.
+
+.DESCRIPTION
+    Posts a single cmd/cmdType pair to the TelnetServlet that drives the appliance's own
+    text console (the "Console" entry of the web admin interface), and checks the response
+    for the two ways that servlet refuses a request: the web admin login page in place of an
+    answer, and a JSON body reporting the console session as expired. Both are turned into a
+    clear error instead of being left for the caller to notice on its own.
+
+.PARAMETER CliSession
+    Required. The console session context returned by Connect-SfosCliConsole.
+
+.PARAMETER Cmd
+    Required. The cmd form field: either the literal text to send, or the payload that goes
+    with a named key (a letter for CTRL, a number for F). Empty for keys that need no
+    payload.
+
+.PARAMETER CmdType
+    Required. The cmdType form field identifying what kind of input Cmd carries. Empty means
+    Cmd is printable text.
+#>
+function Send-SfosCliRawCommand {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [PSCustomObject]$CliSession,
+
+        [Parameter(Mandatory)]
+        [AllowEmptyString()]
+        [string]$Cmd,
+
+        [Parameter(Mandatory)]
+        [AllowEmptyString()]
+        [string]$CmdType
+    )
+
+    $epochMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+    $body = 'cmd=' + [uri]::EscapeDataString($Cmd) + '&cmdType=' + [uri]::EscapeDataString($CmdType) + '&__RequestType=ajax&t=' + $epochMs
+
+    $invokeParams = @{
+        Uri         = "$($CliSession.BaseUri)/webconsole/servlet/TelnetServlet"
+        Method      = 'Post'
+        Body        = $body
+        ContentType = 'application/x-www-form-urlencoded; charset=UTF-8'
+        WebSession  = $CliSession.WebSession
+        Headers     = @{
+            'X-Requested-With' = 'XMLHttpRequest'
+            'X-CSRF-Token'     = $CliSession.Csrf
+            'Referer'          = "$($CliSession.BaseUri)/webconsole/webpages/console.jsp"
+            'Origin'           = $CliSession.BaseUri
+        }
+        TimeoutSec  = 30
+        ErrorAction = 'Stop'
+    }
+
+    $response = Invoke-SfosCliWebRequest -InvokeParams $invokeParams -SkipCertificateCheck ([bool]$CliSession.SkipCertificateCheck)
+
+    $content = [string]$response.Content
+    if ($content -match 'loginstylesheet') {
+        throw "The Sophos Firewall CLI console rejected this request. Only the 'admin' and 'support' accounts can open the appliance console; reconnect with one of those accounts."
+    }
+    if ($content.Trim() -eq '{"status":"Session Expired"}') {
+        throw 'The Sophos Firewall CLI console session is no longer active. Open a new one with Connect-SfosCliConsole.'
+    }
+}
+
+<#
+.SYNOPSIS
+    Reads one chunk of pending output from the appliance's CLI console. Internal helper, not
+    exported.
+
+.DESCRIPTION
+    Issues a single long-polling request to the RefreshServlet that feeds the appliance's
+    text console, strips the filler character the servlet pads its response with, and
+    returns the remaining text unchanged. A request that runs past -TimeoutSeconds without
+    the appliance having anything to send is not an error; it returns an empty string so the
+    caller can poll again.
+
+.PARAMETER CliSession
+    Required. The console session context returned by Connect-SfosCliConsole.
+
+.PARAMETER TimeoutSeconds
+    Required. How long this one request is allowed to wait for output before being treated
+    as "nothing yet".
+#>
+function Receive-SfosCliRawChunk {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)]
+        [PSCustomObject]$CliSession,
+
+        [Parameter(Mandatory)]
+        [int]$TimeoutSeconds
+    )
+
+    $epochMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+    $invokeParams = @{
+        Uri         = "$($CliSession.BaseUri)/webconsole/servlet/RefreshServlet?__RequestType=ajax&t=$epochMs"
+        Method      = 'Get'
+        WebSession  = $CliSession.WebSession
+        Headers     = @{
+            'X-Requested-With' = 'XMLHttpRequest'
+            'X-CSRF-Token'     = $CliSession.Csrf
+            'Referer'          = "$($CliSession.BaseUri)/webconsole/webpages/console.jsp"
+            'Origin'           = $CliSession.BaseUri
+        }
+        TimeoutSec  = $TimeoutSeconds
+        ErrorAction = 'Stop'
+    }
+
+    try {
+        $response = Invoke-SfosCliWebRequest -InvokeParams $invokeParams -SkipCertificateCheck ([bool]$CliSession.SkipCertificateCheck)
+    }
+    catch {
+        # RefreshServlet is a long poll: it legitimately holds the connection open until
+        # output is available, and running past -TimeoutSeconds while the console is idle
+        # means "nothing yet", not a failure. PS 5.1 reports that as a WebException with
+        # Status Timeout; PS 7 reports it as a cancellation somewhere in the exception chain.
+        # Anything else - a refused connection, a DNS failure - still has to surface.
+        $webEx = $_.Exception -as [System.Net.WebException]
+        if ($webEx -and $webEx.Status -eq [System.Net.WebExceptionStatus]::Timeout) {
+            return ''
+        }
+        $current = $_.Exception
+        while ($current) {
+            if ($current -is [System.OperationCanceledException] -or $current.Message -match 'time.?out') {
+                return ''
+            }
+            $current = $current.InnerException
+        }
+        throw
+    }
+
+    $content = [string]$response.Content
+    if (-not $content) {
+        return ''
+    }
+    if ($content.Trim() -eq '{"status":"Session Expired"}') {
+        throw 'The Sophos Firewall CLI console session is no longer active. Open a new one with Connect-SfosCliConsole.'
+    }
+
+    # The servlet pads its response with U+0001; everything else - including ANSI cursor
+    # sequences such as Esc[H and Esc[J - is passed through unchanged.
+    return $content.Replace([string][char]1, '')
+}
+
+<#
+.SYNOPSIS
+    Sends one HTTP request for the CLI console servlets, with the shared certificate
+    handling. Internal helper, not exported.
+
+.DESCRIPTION
+    Adds -UseBasicParsing on PowerShell 5.1, and applies -SkipCertificateCheck the same way
+    Invoke-SfosApi and Invoke-SfosWebAdminRequest do: a temporary, lock-protected
+    ServicePointManager callback on PowerShell 5.1, restored before returning, or the native
+    -SkipCertificateCheck parameter on PowerShell 7 and later.
+
+.PARAMETER InvokeParams
+    Required. Parameters to splat into Invoke-WebRequest.
+
+.PARAMETER SkipCertificateCheck
+    Required. Whether to accept the firewall's certificate without validating it.
+#>
+function Invoke-SfosCliWebRequest {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [hashtable]$InvokeParams,
+
+        [Parameter(Mandatory)]
+        [bool]$SkipCertificateCheck
+    )
+
+    if ($PSVersionTable.PSVersion.Major -le 5) {
+        $InvokeParams['UseBasicParsing'] = $true
+    }
+
+    $savedCertCallback = $null
+    $certCallbackChanged = $false
+    $certLockTaken = $false
+
+    if ($SkipCertificateCheck) {
+        if ($PSVersionTable.PSVersion.Major -le 5) {
+            # Shares Invoke-SfosApi's own process-wide lock: both guard the same static
+            # ServicePointManager callback.
+            [System.Threading.Monitor]::Enter($script:CertCallbackLock)
+            $certLockTaken = $true
+            $savedCertCallback = [Net.ServicePointManager]::ServerCertificateValidationCallback
+            $certCallbackChanged = $true
+            [Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
+        }
+        else {
+            $InvokeParams['SkipCertificateCheck'] = $true
+        }
+    }
+
+    try {
+        return Invoke-WebRequest @InvokeParams
+    }
+    finally {
+        if ($certCallbackChanged) {
+            [Net.ServicePointManager]::ServerCertificateValidationCallback = $savedCertCallback
+        }
+        if ($certLockTaken) {
+            [System.Threading.Monitor]::Exit($script:CertCallbackLock)
+        }
+    }
+}
+
+<#
+.SYNOPSIS
+    Opens a session on the Sophos Firewall's appliance CLI console and returns its context.
+
+.DESCRIPTION
+    Reaches the appliance's own text console - the same console an administrator reaches
+    through the "Console" entry of the web admin interface - by driving the two servlets
+    behind that screen. This is a third, separate access path alongside the XML management
+    API and the web admin interface: it carries CLI-only actions that neither of the other
+    two exposes, and it is undocumented, so it can change or break on any firmware update
+    without notice. Use it only for what genuinely has no equivalent in the XML API.
+
+    Only the 'admin' and 'support' accounts can open the console; any other account is
+    turned away. The console asks for the account password again after the session opens,
+    even though the caller already authenticated to reach the web admin interface - this
+    cmdlet answers that prompt itself and returns a session that is already sitting at the
+    console's first screen.
+
+    Close the returned session with Disconnect-SfosCliConsole once done with it. The console
+    session stays open on the appliance until it is closed or the firewall drops it on its
+    own, and every key sent through it reaches the live console exactly as if typed at a
+    physical terminal - including entries that reboot or shut down the appliance without a
+    further confirmation prompt.
+
+.PARAMETER Firewall
+    Optional. Host name or IP address of the firewall. If omitted, the value from the current
+    connection is used.
+
+.PARAMETER Port
+    Optional. TCP port of the management interface, usually 4444. If omitted, the value from
+    the current connection is used.
+
+.PARAMETER Username
+    Optional. Account to authenticate with. Must be 'admin' or 'support' - the console
+    refuses every other account. If omitted, the value from the current connection is used.
+
+.PARAMETER Password
+    Optional. Password for that account, as a SecureString. If omitted, the value from the
+    current connection is used. The console asks for this same password a second time once
+    the session opens; this cmdlet supplies it automatically.
+
+.PARAMETER SkipCertificateCheck
+    Optional. Accepts the firewall certificate without validating it. Use this only for
+    appliances that still present a self-signed certificate. If omitted, the certificate is
+    validated.
+
+.PARAMETER Session
+    Optional. A session object from Connect-SfosFirewall, or the name of a session that was
+    registered with Connect-SfosFirewall -Name. Use it to address a specific firewall when
+    working with more than one at a time. Any connection parameter passed explicitly still
+    takes precedence. If omitted, the stored default connection is used.
+
+.PARAMETER AcceptLoginDisclaimer
+    Optional. Confirms a login disclaimer configured on the appliance, on behalf of the
+    account logging in. Without this switch, opening the console on an appliance that shows a
+    login disclaimer fails with an error describing the disclaimer.
+
+.INPUTS
+    None. This cmdlet does not accept pipeline input.
+
+.OUTPUTS
+    System.Management.Automation.PSCustomObject. The console session, with the properties
+    BaseUri, WebSession, Csrf, SkipCertificateCheck and Banner. Pass it to Send-SfosCliInput,
+    Receive-SfosCliOutput and Disconnect-SfosCliConsole.
+
+.EXAMPLE
+    $cli = Connect-SfosCliConsole -Firewall '192.0.2.10' -Port 4444 -Username 'admin' -Password $securePw -SkipCertificateCheck
+    $cli.Banner
+    Disconnect-SfosCliConsole -CliSession $cli
+
+    Opens the console, shows its first screen, and closes the session again.
+
+.EXAMPLE
+    $cli = Connect-SfosCliConsole -Session 'fw1'
+
+    Opens the console using a connection registered earlier with Connect-SfosFirewall -Name 'fw1'.
+
+.LINK
+    https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+.LINK
+    Send-SfosCliInput
+
+.LINK
+    Receive-SfosCliOutput
+
+.LINK
+    Disconnect-SfosCliConsole
+#>
+function Connect-SfosCliConsole {
+    # PSUseShouldProcessForStateChangingFunctions is suppressed on purpose, matching
+    # Connect-SfosWebAdmin's own reasoning: this performs a login and returns a session
+    # context in this process. Opening the console does place a session on the appliance,
+    # but there is no meaningful choice for ShouldProcess to confirm - the whole point of the
+    # call is to open exactly that session.
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '')]
+    [CmdletBinding()]
+    [OutputType([PSCustomObject])]
+    param(
+        [string]$Firewall,
+        [int]$Port,
+        [string]$Username,
+        [SecureString]$Password,
+        [switch]$SkipCertificateCheck,
+        [object]$Session,
+
+        [switch]$AcceptLoginDisclaimer
+    )
+
+    $params = Resolve-SfosParameters -BoundParameters $PSBoundParameters
+
+    $webAdmin = Connect-SfosWebAdmin -Firewall $params.Firewall -Port $params.Port `
+        -Username $params.Username -Password $params.Password `
+        -SkipCertificateCheck:([bool]$params.SkipCertificateCheck) -AcceptLoginDisclaimer:$AcceptLoginDisclaimer
+
+    $invokeParams = @{
+        Uri         = "$($webAdmin.BaseUri)/webconsole/webpages/console.jsp?csrf=$($webAdmin.Csrf)"
+        Method      = 'Get'
+        WebSession  = $webAdmin.WebSession
+        Headers     = @{
+            'Referer' = "$($webAdmin.BaseUri)/webconsole/webpages/index.jsp"
+        }
+        TimeoutSec  = 30
+        ErrorAction = 'Stop'
+    }
+
+    try {
+        $pageResponse = Invoke-SfosCliWebRequest -InvokeParams $invokeParams -SkipCertificateCheck ([bool]$webAdmin.SkipCertificateCheck)
+    }
+    catch {
+        throw "Could not open the Sophos Firewall CLI console page on $($webAdmin.BaseUri): $($_.Exception.Message)"
+    }
+
+    $csrfMatch = [regex]::Match($pageResponse.Content, 'c\$rFt0k3n\s*=\s*''([^'']+)''')
+    if (-not $csrfMatch.Success) {
+        throw "Could not read the CLI console token from the Sophos Firewall CLI console page on $($webAdmin.BaseUri). The console interface may have changed."
+    }
+
+    $cliSession = [PSCustomObject]@{
+        BaseUri              = $webAdmin.BaseUri
+        WebSession           = $webAdmin.WebSession
+        Csrf                 = $csrfMatch.Groups[1].Value
+        SkipCertificateCheck = [bool]$webAdmin.SkipCertificateCheck
+    }
+    $cliSession.PSObject.TypeNames.Insert(0, 'SophosFirewall.CliSession')
+
+    $plainPassword = $null
+    $passwordBstr = [IntPtr]::Zero
+    $banner = $null
+
+    try {
+        Send-SfosCliRawCommand -CliSession $cliSession -Cmd '' -CmdType 'ONLOAD'
+        Send-SfosCliInput -CliSession $cliSession -Key 'Enter'
+        Receive-SfosCliOutput -CliSession $cliSession -Until 'Password' | Out-Null
+
+        $passwordBstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($params.Password)
+        $plainPassword = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($passwordBstr)
+        Send-SfosCliInput -CliSession $cliSession -Text $plainPassword
+        Send-SfosCliInput -CliSession $cliSession -Key 'Enter'
+
+        $banner = Receive-SfosCliOutput -CliSession $cliSession
+    }
+    finally {
+        if ($passwordBstr -ne [IntPtr]::Zero) {
+            [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($passwordBstr)
+        }
+        $plainPassword = $null
+    }
+
+    $cliSession | Add-Member -MemberType NoteProperty -Name 'Banner' -Value $banner -Force
+    return $cliSession
+}
+
+<#
+.SYNOPSIS
+    Sends one piece of input to an open Sophos Firewall CLI console session.
+
+.DESCRIPTION
+    Delivers exactly one input action to the console opened by Connect-SfosCliConsole:
+    either a string of printable text, delivered as a single action rather than one
+    character at a time, or one of a fixed set of named console keys. The console applies
+    the input immediately, the same as if it had been typed at a physical terminal; nothing
+    is returned, and the effect is only visible through Receive-SfosCliOutput. Because the
+    session sits at a live menu-driven console, sending an entry that has not been verified
+    can trigger a destructive action - such as a reboot or shutdown - with no further
+    confirmation from the console itself.
+
+.PARAMETER CliSession
+    Required. The console session context returned by Connect-SfosCliConsole.
+
+.PARAMETER Text
+    Required in this parameter set. Printable text to send, delivered as one action. Use
+    this for menu choices, command lines and free-text answers such as a password prompt.
+
+.PARAMETER Key
+    Required in this parameter set. One of a fixed set of named console keys: Enter,
+    Backspace, Tab, Delete, Home, End, LeftArrow, RightArrow, UpArrow, DownArrow, Escape or
+    Break.
+
+.PARAMETER Control
+    Required in this parameter set. A single letter to send as a Ctrl combination, for
+    example 'c' for Ctrl+C.
+
+.PARAMETER Function
+    Required in this parameter set. A function key number from 1 to 12.
+
+.INPUTS
+    None. This cmdlet does not accept pipeline input.
+
+.OUTPUTS
+    None.
+
+.EXAMPLE
+    Send-SfosCliInput -CliSession $cli -Text '1'
+
+    Chooses menu entry 1 at the console's current screen.
+
+.EXAMPLE
+    Send-SfosCliInput -CliSession $cli -Key 'Enter'
+
+    Sends Enter to the console.
+
+.EXAMPLE
+    Send-SfosCliInput -CliSession $cli -Control 'c'
+
+    Sends Ctrl+C to interrupt whatever the console is currently doing.
+
+.LINK
+    https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+.LINK
+    Connect-SfosCliConsole
+
+.LINK
+    Receive-SfosCliOutput
+#>
+function Send-SfosCliInput {
+    [CmdletBinding(DefaultParameterSetName = 'Text')]
+    param(
+        [Parameter(Mandatory)]
+        [PSCustomObject]$CliSession,
+
+        [Parameter(Mandatory, ParameterSetName = 'Text')]
+        [string]$Text,
+
+        [Parameter(Mandatory, ParameterSetName = 'Key')]
+        [ValidateSet('Enter', 'Backspace', 'Tab', 'Delete', 'Home', 'End', 'LeftArrow', 'RightArrow', 'UpArrow', 'DownArrow', 'Escape', 'Break')]
+        [string]$Key,
+
+        [Parameter(Mandatory, ParameterSetName = 'Control')]
+        [char]$Control,
+
+        [Parameter(Mandatory, ParameterSetName = 'Function')]
+        [ValidateRange(1, 12)]
+        [int]$Function
+    )
+
+    $cmd = ''
+    $cmdType = ''
+
+    switch ($PSCmdlet.ParameterSetName) {
+        'Text' {
+            $cmd = $Text
+        }
+        'Key' {
+            $keyCmdType = @{
+                Enter      = '13'
+                Backspace  = '8'
+                Tab        = '9'
+                LeftArrow  = '37'
+                UpArrow    = '38'
+                RightArrow = '39'
+                DownArrow  = '40'
+                Delete     = 'DEL'
+                Home       = 'HOME'
+                End        = 'END'
+                Escape     = '27'
+                Break      = 'IP'
+            }
+            $cmdType = $keyCmdType[$Key]
+        }
+        'Control' {
+            $cmd = [string]$Control
+            $cmdType = 'CTRL'
+        }
+        'Function' {
+            $cmd = [string]$Function
+            $cmdType = 'F'
+        }
+    }
+
+    Send-SfosCliRawCommand -CliSession $CliSession -Cmd $cmd -CmdType $cmdType
+}
+
+<#
+.SYNOPSIS
+    Collects pending output from an open Sophos Firewall CLI console session.
+
+.DESCRIPTION
+    Polls the console session opened by Connect-SfosCliConsole for text the appliance has
+    produced since the last read, and returns it as a single string with the servlet's
+    filler characters removed. Without -Until, polling stops once two polls in a row come
+    back with nothing new - a reasonable point to assume the console has finished writing
+    for now. With -Until, polling continues until the text collected so far matches the
+    given pattern, which is the reliable way to wait for a specific prompt (for example the
+    main menu) rather than guessing how many empty polls mean "done". A poll that runs past
+    -TimeoutSeconds because the console is idle is not an error and is retried
+    automatically; supplying -Until together with a pattern that never appears keeps this
+    cmdlet waiting indefinitely, so choose the pattern carefully.
+
+.PARAMETER CliSession
+    Required. The console session context returned by Connect-SfosCliConsole.
+
+.PARAMETER TimeoutSeconds
+    Optional. How long a single poll is allowed to wait for output before being retried.
+    Default 60.
+
+.PARAMETER Until
+    Optional. A regular expression. Polling stops as soon as the text collected so far
+    matches it. If omitted, polling stops after two consecutive polls return nothing new.
+
+.PARAMETER Quiet
+    Optional. Suppresses the verbose message this cmdlet writes for each chunk of output it
+    receives while collecting.
+
+.INPUTS
+    None. This cmdlet does not accept pipeline input.
+
+.OUTPUTS
+    System.String. The output collected during this call.
+
+.EXAMPLE
+    Receive-SfosCliOutput -CliSession $cli -Until 'console\x3E\s*$'
+
+    Waits for the console's main prompt to reappear and returns everything printed until
+    then. The prompt character itself is written as the escape sequence \x3E rather than as
+    a literal angle bracket, which the help renderer would otherwise drop together with the
+    rest of the line.
+
+.EXAMPLE
+    Receive-SfosCliOutput -CliSession $cli -TimeoutSeconds 20
+
+    Collects whatever the console has already produced, using a shorter per-poll wait.
+
+.LINK
+    https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+.LINK
+    Connect-SfosCliConsole
+
+.LINK
+    Send-SfosCliInput
+#>
+function Receive-SfosCliOutput {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)]
+        [PSCustomObject]$CliSession,
+
+        [int]$TimeoutSeconds = 60,
+
+        [string]$Until,
+
+        [switch]$Quiet
+    )
+
+    $collected = ''
+    $emptyStreak = 0
+
+    while ($true) {
+        $chunk = Receive-SfosCliRawChunk -CliSession $CliSession -TimeoutSeconds $TimeoutSeconds
+
+        if ($chunk) {
+            $collected += $chunk
+            $emptyStreak = 0
+            if (-not $Quiet) {
+                Write-Verbose "Sophos Firewall CLI console output: $chunk"
+            }
+            if ($Until -and $collected -match $Until) {
+                break
+            }
+        }
+        elseif (-not $Until) {
+            $emptyStreak++
+            if ($emptyStreak -ge 2) {
+                break
+            }
+        }
+    }
+
+    return $collected
+}
+
+<#
+.SYNOPSIS
+    Closes a Sophos Firewall CLI console session.
+
+.DESCRIPTION
+    Sends the console's own close action so the session opened by Connect-SfosCliConsole is
+    released on the appliance, rather than left open until the appliance drops it on its
+    own. Call this once done with a console session; leaving it open ties up one of the
+    appliance's console sessions for no reason. Closing a session that is already gone - for
+    example because the appliance already dropped it - does not throw.
+
+.PARAMETER CliSession
+    Required. The console session context returned by Connect-SfosCliConsole.
+
+.INPUTS
+    None. This cmdlet does not accept pipeline input.
+
+.OUTPUTS
+    None.
+
+.EXAMPLE
+    Disconnect-SfosCliConsole -CliSession $cli
+
+    Closes the console session.
+
+.LINK
+    https://docs.sophos.com/nsg/sophos-firewall/22.0/api/
+
+.LINK
+    Connect-SfosCliConsole
+#>
+function Disconnect-SfosCliConsole {
+    # PSUseShouldProcessForStateChangingFunctions is suppressed on purpose, matching
+    # Disconnect-SfosFirewall's own reasoning: closing a console session has exactly one
+    # outcome and no meaningful choice for ShouldProcess to confirm, and this cmdlet must
+    # succeed silently even when there is nothing left on the appliance to close.
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '')]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [PSCustomObject]$CliSession
+    )
+
+    try {
+        Send-SfosCliRawCommand -CliSession $CliSession -Cmd '' -CmdType 'CLOSE'
+    }
+    catch {
+        Write-Verbose "Sophos Firewall CLI console session could not be closed cleanly, it may already be gone: $($_.Exception.Message)"
+    }
+}
+
+#endregion
+
 #region Module Exports
 
 Export-ModuleMember -Function @(
@@ -1887,7 +2657,11 @@ Export-ModuleMember -Function @(
     'ConvertTo-SfosXmlEscaped',
     'ConvertFrom-SfosArchive',
     'Connect-SfosWebAdmin',
-    'Invoke-SfosWebAdminRequest'
+    'Invoke-SfosWebAdminRequest',
+    'Connect-SfosCliConsole',
+    'Send-SfosCliInput',
+    'Receive-SfosCliOutput',
+    'Disconnect-SfosCliConsole'
 )
 
 #endregion
